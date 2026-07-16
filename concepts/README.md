@@ -7,6 +7,15 @@ Ten fully developed concepts for a touch-first iPhone PWA game with high return 
 - A concrete day-14+ answer (dailies, seasons, leaderboards, mastery, UGC — named per concept).
 - PWA-honest: 2D rendering, offline-capable cores, light backends, iOS 16.4+ web push for installed PWAs, no real-money mechanics anywhere.
 
+## Deep Dives (founder shortlist)
+
+Concepts 01–04 have full design treatments — mechanics specs, example play sessions, content maps with real numbers, technical architecture, MVP staging with kill criteria, and open founder questions:
+
+- [Deep Dive 01 — Bring It Down](deep-dives/01-bring-it-down-deep-dive.md)
+- [Deep Dive 02 — Trickshot Open](deep-dives/02-trickshot-open-deep-dive.md)
+- [Deep Dive 03 — From Nothing](deep-dives/03-from-nothing-deep-dive.md)
+- [Deep Dive 04 — The Bracelet](deep-dives/04-the-bracelet-deep-dive.md)
+
 ## The Ten
 
 | # | Concept | One-liner | Seed |
