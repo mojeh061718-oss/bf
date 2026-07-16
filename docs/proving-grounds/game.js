@@ -1,7 +1,7 @@
 /* ============================================================
-   PROVING GROUNDS — game.js
-   UI, bench stations, QA bay, Station 7 range camera, adjudication.
-   All science is invented. All paperwork is sincere.
+   PROVING GROUNDS v2 — game.js
+   KSP-style 3D assembly bay + hands-on close-out + Station 7
+   range day. three.js r149 (global THREE). All science invented.
    ============================================================ */
 'use strict';
 
@@ -13,6 +13,8 @@
   function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
   function lerp(a, b, t) { return a + (b - a) * t; }
   function easeOut(t) { return 1 - Math.pow(1 - t, 3); }
+  function easeInOut(t) { return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2; }
+  function V3(x, y, z) { return new THREE.Vector3(x, y, z); }
 
   var toastTimer = null;
   function toast(msg, ms) {
@@ -24,1919 +26,2339 @@
   }
 
   /* ================= state ================= */
+  var urlSeed = null;
+  try { urlSeed = new URLSearchParams(location.search).get('seed'); } catch (e) {}
   var S = {
-    seed: PG.makeSeed(),
-    design: {
-      mix: { am4: 0.34, crx: 0.33, vx7: 0.33 },
-      mass: 30, alloy: 'sr2', wall: 10,
-      fuse: ['surplus', 'surplus', 'surplus', 'surplus'],
-      qa: { batch: [null, null, null, null], env: false, mic: 'skip' }
-    },
-    qaSpend: 0,
-    envResult: null,
-    micUsed: false,
-    result: null
+    seed: (urlSeed || PG2.makeSeed()).toUpperCase(),
+    phase: 'title',            // title rfp build wiring det arm truck station counting aftermath crater score
+    assembly: PG2.makeAssembly(),
+    result: null,
+    closeoutStep: -1
   };
 
-  function resetQA() {
-    S.design.qa = { batch: [null, null, null, null], env: false, mic: 'skip' };
-    S.qaSpend = 0; S.envResult = null; S.micUsed = false;
+  var timers = [];
+  function later(ms, fn) { var t = setTimeout(fn, ms); timers.push(t); return t; }
+  function clearLater() { timers.forEach(clearTimeout); timers = []; }
+
+  /* tween engine (driven by the raf loop) */
+  var tweens = [];
+  function tween(dur, fn, done, ease) {
+    tweens.push({ t0: performance.now(), dur: dur, fn: fn, done: done, ease: ease || easeInOut });
+  }
+  function stepTweens(now) {
+    for (var i = tweens.length - 1; i >= 0; i--) {
+      var tw = tweens[i];
+      var t = clamp((now - tw.t0) / tw.dur, 0, 1);
+      tw.fn(tw.ease(t), t);
+      if (t >= 1) { tweens.splice(i, 1); if (tw.done) tw.done(); }
+    }
   }
 
-  /* ================= screens ================= */
-  var screens = ['scr-title', 'scr-rfp', 'scr-bench', 'scr-qa', 'scr-range', 'scr-adjud'];
-  function show(id) {
+  /* ================= three.js core ================= */
+  var renderer, bay, range, W = 390, H = 700;
+  var canvas = $('gl');
+
+  function initGL() {
+    renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true, powerPreference: 'high-performance' });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.outputEncoding = THREE.sRGBEncoding;
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    size();
+    window.addEventListener('resize', size);
+  }
+  function size() {
+    var r = $('app').getBoundingClientRect();
+    W = Math.max(300, r.width); H = Math.max(400, r.height);
+    renderer.setSize(W, H, false);
+    if (bay) { bay.camera.aspect = W / H; bay.camera.updateProjectionMatrix(); }
+    if (range) { range.camera.aspect = W / H; range.camera.updateProjectionMatrix(); }
+  }
+
+  function gradientTexture(stops, vertical) {
+    var c = document.createElement('canvas');
+    c.width = vertical ? 2 : 256; c.height = vertical ? 256 : 2;
+    var x = c.getContext('2d');
+    var g = vertical ? x.createLinearGradient(0, 0, 0, 256) : x.createLinearGradient(0, 0, 256, 0);
+    stops.forEach(function (s) { g.addColorStop(s[0], s[1]); });
+    x.fillStyle = g;
+    x.fillRect(0, 0, c.width, c.height);
+    var tx = new THREE.CanvasTexture(c);
+    tx.encoding = THREE.sRGBEncoding;
+    return tx;
+  }
+  function mat(color, opts) {
+    opts = opts || {};
+    var m = new THREE.MeshPhongMaterial({
+      color: color, flatShading: opts.flat !== false,
+      shininess: opts.shin != null ? opts.shin : 18,
+      specular: 0x333333
+    });
+    if (opts.emissive) { m.emissive = new THREE.Color(opts.emissive); m.emissiveIntensity = opts.ei || 1; }
+    if (opts.transparent) { m.transparent = true; m.opacity = opts.opacity != null ? opts.opacity : 0.5; }
+    return m;
+  }
+  function textPlane(txt, w, h, opts) {
+    opts = opts || {};
+    var c = document.createElement('canvas');
+    c.width = 256; c.height = Math.round(256 * h / w);
+    var x = c.getContext('2d');
+    if (opts.bg) { x.fillStyle = opts.bg; x.fillRect(0, 0, c.width, c.height); }
+    x.fillStyle = opts.color || '#e8ddc0';
+    x.font = '700 ' + (opts.px || 64) + 'px Menlo, monospace';
+    x.textAlign = 'center'; x.textBaseline = 'middle';
+    x.fillText(txt, c.width / 2, c.height / 2 + 2);
+    var tx = new THREE.CanvasTexture(c);
+    tx.encoding = THREE.sRGBEncoding;
+    var m = new THREE.MeshBasicMaterial({ map: tx, transparent: true });
+    var p = new THREE.Mesh(new THREE.PlaneGeometry(w, h), m);
+    return p;
+  }
+  function worldToScreen(v, camera) {
+    var p = v.clone().project(camera);
+    return { x: (p.x * 0.5 + 0.5) * W, y: (-p.y * 0.5 + 0.5) * H, z: p.z };
+  }
+
+  /* ================= PART GEOMETRY (low-poly, flat-shaded) ================= */
+  var COL = {
+    steel: 0x8fa2b3, steelDark: 0x5c6b7a, nose: 0xb0392b, brass: 0xc9a24b,
+    amber: 0xe5a13d, blue: 0x4d8fd1, batt: 0x3d5c46, det: 0xd6d9dd,
+    fin: 0x74838f, panel: 0x424d57, wireR: 0xd9402e, wireY: 0xe0b52e, wireG: 0x3d9e57
+  };
+  function casingDims(id) {
+    return { compact: { L: 1.5, r: 0.34 }, standard: { L: 2.1, r: 0.42 }, heavy: { L: 2.7, r: 0.5 } }[id];
+  }
+  function slotXs(id) {
+    var d = casingDims(id), n = PG2.CASINGS[id].slots;
+    var span = d.L * 0.52, xs = [];
+    for (var i = 0; i < n; i++) xs.push(n === 1 ? 0 : -span / 2 + span * i / (n - 1));
+    return xs;
+  }
+  function wellX(id) { return casingDims(id).L * 0.395; }
+
+  function buildCasing(id) {
+    var d = casingDims(id);
+    var g = new THREE.Group();
+    var body = new THREE.Mesh(new THREE.CylinderGeometry(d.r, d.r, d.L, 20, 1, false), mat(COL.steel));
+    body.rotation.z = Math.PI / 2;
+    body.castShadow = true;
+    g.add(body);
+    [-1, 1].forEach(function (s) {
+      var dome = new THREE.Mesh(new THREE.SphereGeometry(d.r, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2), mat(COL.steel));
+      dome.rotation.z = s * -Math.PI / 2;
+      dome.position.x = s * d.L / 2;
+      dome.castShadow = true;
+      g.add(dome);
+    });
+    // painted nose band
+    var band = new THREE.Mesh(new THREE.CylinderGeometry(d.r + 0.006, d.r + 0.006, 0.1, 20), mat(COL.nose));
+    band.rotation.z = Math.PI / 2;
+    band.position.x = d.L / 2 - 0.10;
+    g.add(band);
+    // stencil
+    var st = textPlane('RD-047', 0.6, 0.18, { color: '#2e2b26', px: 72 });
+    st.position.set(-d.L * 0.12, -0.02, d.r + 0.005);
+    g.add(st);
+    // slot rims + dark bores
+    slotXs(id).forEach(function (x, i) {
+      var rim = new THREE.Mesh(new THREE.TorusGeometry(0.135, 0.022, 8, 18), mat(COL.steelDark));
+      rim.rotation.x = Math.PI / 2;
+      rim.position.set(x, d.r - 0.01, 0);
+      rim.userData.slotRim = i;
+      g.add(rim);
+      var bore = new THREE.Mesh(new THREE.CylinderGeometry(0.125, 0.125, 0.16, 14), mat(0x1a222b, { shin: 4 }));
+      bore.position.set(x, d.r - 0.09, 0);
+      g.add(bore);
+    });
+    // detonator well boss (top, near nose)
+    var wx = wellX(id);
+    var boss = new THREE.Mesh(new THREE.CylinderGeometry(0.085, 0.1, 0.12, 12), mat(COL.steelDark));
+    boss.position.set(wx, d.r + 0.02, 0);
+    g.add(boss);
+    var bore2 = new THREE.Mesh(new THREE.CylinderGeometry(0.052, 0.052, 0.1, 10), mat(0x14181d, { shin: 2 }));
+    bore2.position.set(wx, d.r + 0.04, 0);
+    g.add(bore2);
+    // access panel recess (front +Z, center)
+    var frame = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.4, 0.05), mat(COL.steelDark));
+    frame.position.set(0, 0.02, d.r - 0.05);
+    g.add(frame);
+    var recess = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.34, 0.06), mat(0x232b33, { shin: 4 }));
+    recess.position.set(0, 0.02, d.r - 0.04);
+    g.add(recess);
+    // door (hinged at top) — pivot group
+    var doorPivot = new THREE.Group();
+    doorPivot.position.set(0, 0.19, d.r + 0.015);
+    var door = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.34, 0.022), mat(COL.steel));
+    door.position.y = -0.17;
+    doorPivot.add(door);
+    [-0.21, 0.21].forEach(function (dx) {
+      [-0.31, -0.03].forEach(function (dy) {
+        var screw = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.02, 8), mat(COL.brass, { shin: 60 }));
+        screw.rotation.x = Math.PI / 2;
+        screw.position.set(dx, dy, 0.012);
+        doorPivot.add(screw);
+      });
+    });
+    g.add(doorPivot);
+    g.userData.doorPivot = doorPivot;
+    g.userData.dims = d;
+    return g;
+  }
+  function buildCanister(comp) {
+    var g = new THREE.Group();
+    var hue = comp === 'am4' ? COL.amber : COL.blue;
+    var body = new THREE.Mesh(new THREE.CylinderGeometry(0.115, 0.115, 0.26, 14), mat(0xb9c2c9));
+    body.castShadow = true;
+    g.add(body);
+    var band = new THREE.Mesh(new THREE.CylinderGeometry(0.118, 0.118, 0.09, 14), mat(hue, { emissive: hue, ei: 0.22 }));
+    band.position.y = 0.02;
+    g.add(band);
+    var top = new THREE.Mesh(new THREE.SphereGeometry(0.115, 14, 7, 0, Math.PI * 2, 0, Math.PI / 2), mat(hue));
+    top.position.y = 0.13;
+    g.add(top);
+    var valve = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.05, 8), mat(COL.brass, { shin: 60 }));
+    valve.position.y = 0.24;
+    g.add(valve);
+    return g;
+  }
+  function buildTimer() {
+    var g = new THREE.Group();
+    var cone = new THREE.Mesh(new THREE.ConeGeometry(0.24, 0.4, 14), mat(COL.steelDark));
+    cone.rotation.z = -Math.PI / 2;
+    cone.position.x = 0.2;
+    cone.castShadow = true;
+    g.add(cone);
+    var ring = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 0.07, 14), mat(COL.amber, { emissive: COL.amber, ei: 0.25 }));
+    ring.rotation.z = Math.PI / 2;
+    ring.position.x = 0.02;
+    g.add(ring);
+    var dial = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.02, 12), mat(0xf1e9d3, { shin: 50 }));
+    dial.rotation.x = Math.PI / 2;
+    dial.position.set(0.16, 0.13, 0.12);
+    dial.rotation.z = 0.5;
+    g.add(dial);
+    return g;
+  }
+  function buildBattery() {
+    var g = new THREE.Group();
+    var box = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.26, 0.26), mat(COL.batt));
+    box.castShadow = true;
+    g.add(box);
+    [-0.06, 0.06].forEach(function (dz, i) {
+      var post = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.06, 8), mat(i ? COL.brass : 0xb0b6bb, { shin: 70 }));
+      post.position.set(-0.08, 0.15, dz);
+      g.add(post);
+    });
+    var lbl = textPlane('DC-9', 0.2, 0.09, { color: '#e8ddc0', px: 80 });
+    lbl.position.set(0, 0, 0.135);
+    g.add(lbl);
+    return g;
+  }
+  function buildCap() {
+    var g = new THREE.Group();
+    var dome = new THREE.Mesh(new THREE.SphereGeometry(0.13, 14, 7, 0, Math.PI * 2, 0, Math.PI / 2), mat(COL.nose));
+    dome.castShadow = true;
+    g.add(dome);
+    var lip = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 0.03, 14), mat(COL.steelDark));
+    lip.position.y = -0.005;
+    g.add(lip);
+    return g;
+  }
+  function buildFins() {
+    var g = new THREE.Group();
+    var shape = new THREE.Shape();
+    shape.moveTo(0, 0); shape.lineTo(0.34, -0.04); shape.lineTo(0.34, -0.26); shape.lineTo(0.06, -0.18); shape.lineTo(0, -0.16); shape.closePath();
+    var geo = new THREE.ExtrudeGeometry(shape, { depth: 0.02, bevelEnabled: false });
+    for (var i = 0; i < 4; i++) {
+      var f = new THREE.Mesh(geo, mat(COL.fin));
+      f.castShadow = true;
+      var hold = new THREE.Group();
+      f.rotation.y = Math.PI / 2;
+      f.position.z = -0.01;
+      hold.add(f);
+      hold.rotation.x = i * Math.PI / 2 + Math.PI / 4;
+      g.add(hold);
+    }
+    return g;
+  }
+  function buildArmPanel() {
+    var g = new THREE.Group();
+    var base = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.2, 0.07), mat(COL.panel));
+    base.castShadow = true;
+    g.add(base);
+    // guard cover (hinged at top)
+    var coverPivot = new THREE.Group();
+    coverPivot.position.set(-0.045, 0.1, 0.045);
+    var cover = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.17, 0.016), mat(COL.amber, { transparent: true, opacity: 0.82, shin: 70 }));
+    cover.position.y = -0.085;
+    coverPivot.add(cover);
+    g.add(coverPivot);
+    g.userData.coverPivot = coverPivot;
+    // switch lever
+    var leverPivot = new THREE.Group();
+    leverPivot.position.set(-0.045, -0.02, 0.038);
+    var lever = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.1, 0.03), mat(0xd8dde2, { shin: 60 }));
+    lever.position.y = -0.04;
+    leverPivot.add(lever);
+    leverPivot.rotation.x = -0.5;
+    g.add(leverPivot);
+    g.userData.leverPivot = leverPivot;
+    // LED
+    var led = new THREE.Mesh(new THREE.SphereGeometry(0.02, 8, 6), mat(0x431410, { emissive: 0x000000 }));
+    led.position.set(0.075, 0.05, 0.04);
+    g.add(led);
+    g.userData.led = led;
+    var lbl = textPlane('ARM', 0.09, 0.045, { color: '#f0d9a8', px: 90 });
+    lbl.position.set(0.075, -0.03, 0.037);
+    g.add(lbl);
+    return g;
+  }
+  function buildDetonator() {
+    var g = new THREE.Group();
+    var body = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.26, 12), mat(COL.det, { shin: 70 }));
+    body.castShadow = true;
+    g.add(body);
+    var tip = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.045, 0.05, 12), mat(COL.nose));
+    tip.position.y = -0.15;
+    g.add(tip);
+    var ring = new THREE.Mesh(new THREE.TorusGeometry(0.05, 0.012, 6, 12), mat(COL.brass, { shin: 70 }));
+    ring.rotation.x = Math.PI / 2;
+    ring.position.y = 0.12;
+    g.add(ring);
+    return g;
+  }
+  function partBuilder(id) {
+    if (id === 'compact' || id === 'standard' || id === 'heavy') return buildCasing(id);
+    if (id === 'am4' || id === 'crx') return buildCanister(id);
+    if (id === 'timer') return buildTimer();
+    if (id === 'battery') return buildBattery();
+    if (id === 'cap') return buildCap();
+    if (id === 'fins') return buildFins();
+    if (id === 'panel') return buildArmPanel();
+    return buildDetonator();
+  }
+
+  /* ================= BAY SCENE ================= */
+  function initBay() {
+    var scene = new THREE.Scene();
+    scene.background = gradientTexture([[0, '#152c44'], [0.55, '#0d1f33'], [1, '#091421']], true);
+    scene.fog = new THREE.Fog(0x0b1c2e, 12, 30);
+
+    var camera = new THREE.PerspectiveCamera(42, W / H, 0.05, 60);
+
+    var hemi = new THREE.HemisphereLight(0xbcd6ee, 0x2a2118, 0.75);
+    scene.add(hemi);
+    var key = new THREE.DirectionalLight(0xfff1dc, 0.95);
+    key.position.set(4, 7, 5);
+    key.castShadow = true;
+    key.shadow.mapSize.set(1024, 1024);
+    key.shadow.camera.left = -4; key.shadow.camera.right = 4;
+    key.shadow.camera.top = 5; key.shadow.camera.bottom = -2;
+    key.shadow.camera.far = 22;
+    key.shadow.radius = 4;
+    scene.add(key);
+    var rim = new THREE.DirectionalLight(0x9cc8ea, 0.3);
+    rim.position.set(-5, 3, -4);
+    scene.add(rim);
+
+    // floor: radial glow + grid, canvas texture
+    var fc = document.createElement('canvas');
+    fc.width = fc.height = 512;
+    var fx = fc.getContext('2d');
+    fx.fillStyle = '#0a1826';
+    fx.fillRect(0, 0, 512, 512);
+    var fg2 = fx.createRadialGradient(256, 256, 30, 256, 256, 250);
+    fg2.addColorStop(0, '#22405e');
+    fg2.addColorStop(1, '#0a1826');
+    fx.fillStyle = fg2;
+    fx.fillRect(0, 0, 512, 512);
+    fx.strokeStyle = 'rgba(140,190,235,.16)';
+    fx.lineWidth = 1;
+    for (var i = 0; i <= 16; i++) {
+      fx.beginPath(); fx.moveTo(i * 32, 0); fx.lineTo(i * 32, 512); fx.stroke();
+      fx.beginPath(); fx.moveTo(0, i * 32); fx.lineTo(512, i * 32); fx.stroke();
+    }
+    var ftx = new THREE.CanvasTexture(fc);
+    ftx.encoding = THREE.sRGBEncoding;
+    var floor = new THREE.Mesh(new THREE.CircleGeometry(11, 40),
+      new THREE.MeshPhongMaterial({ map: ftx, shininess: 8 }));
+    floor.rotation.x = -Math.PI / 2;
+    floor.receiveShadow = true;
+    scene.add(floor);
+
+    // work stand
+    var stand = new THREE.Group();
+    var base = new THREE.Mesh(new THREE.CylinderGeometry(0.95, 1.1, 0.16, 24), mat(0x2c3b49));
+    base.position.y = 0.08; base.castShadow = true; base.receiveShadow = true;
+    stand.add(base);
+    var ring = new THREE.Mesh(new THREE.TorusGeometry(1.0, 0.02, 8, 40), mat(COL.amber, { emissive: COL.amber, ei: 0.35 }));
+    ring.rotation.x = Math.PI / 2;
+    ring.position.y = 0.17;
+    stand.add(ring);
+    var col = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.22, 0.72, 12), mat(0x3a4c5d));
+    col.position.y = 0.52; col.castShadow = true;
+    stand.add(col);
+    [-0.5, 0.5].forEach(function (x) {
+      var arm = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.34, 0.5), mat(0x3a4c5d));
+      arm.position.set(x, 1.0, 0);
+      arm.castShadow = true;
+      stand.add(arm);
+      [-1, 1].forEach(function (sz) {
+        var pad = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.16, 0.08), mat(0x22303c));
+        pad.position.set(x, 1.12, sz * 0.2);
+        pad.rotation.x = sz * -0.5;
+        stand.add(pad);
+      });
+    });
+    scene.add(stand);
+
+    var device = new THREE.Group();
+    device.position.set(0, 1.32, 0);
+    scene.add(device);
+
+    var nodeGroup = new THREE.Group();  // snap node markers
+    device.add(nodeGroup);
+
+    var orbit = { theta: 0.7, phi: 1.18, radius: 4.4, target: V3(0, 1.25, 0) };
+
+    return {
+      scene: scene, camera: camera, device: device, stand: stand, nodeGroup: nodeGroup,
+      orbit: orbit, spin: 0, lastTouch: 0, bounce: 0,
+      wiring: null, detStage: null, armStage: null
+    };
+  }
+  function bayCam() {
+    var o = bay.orbit;
+    var c = bay.camera;
+    c.position.set(
+      o.target.x + o.radius * Math.sin(o.phi) * Math.sin(o.theta),
+      o.target.y + o.radius * Math.cos(o.phi),
+      o.target.z + o.radius * Math.sin(o.phi) * Math.cos(o.theta)
+    );
+    c.lookAt(o.target);
+  }
+
+  /* ---------- snap nodes ---------- */
+  function nodeList() {
+    var a = S.assembly, nodes = [];
+    if (!a.casing) {
+      nodes.push({ id: 'stand', pos: V3(0, 0, 0), accepts: ['compact', 'standard', 'heavy'] });
+      return nodes;
+    }
+    var d = casingDims(a.casing);
+    slotXs(a.casing).forEach(function (x, i) {
+      if (!a.canisters[i]) nodes.push({ id: 'slot' + i, pos: V3(x, d.r + 0.1, 0), accepts: ['am4', 'crx'], slot: i });
+    });
+    if (!a.timer) nodes.push({ id: 'nose', pos: V3(d.L / 2 + 0.05, 0, 0), accepts: ['timer'] });
+    if (!a.battery) nodes.push({ id: 'tail', pos: V3(-d.L / 2 - 0.18, 0, 0), accepts: ['battery'] });
+    if (!a.cap) nodes.push({ id: 'well', pos: V3(wellX(a.casing), d.r + 0.12, 0), accepts: ['cap'] });
+    if (!a.fins) nodes.push({ id: 'finring', pos: V3(-d.L / 2 + 0.3, 0, 0), accepts: ['fins'] });
+    if (!a.panel) nodes.push({ id: 'side', pos: V3(-d.L * 0.31, 0.05, d.r + 0.02), accepts: ['panel'] });
+    return nodes;
+  }
+  function nodePose(nodeId, partId) {
+    // local position+rotation a part takes when snapped at a node
+    var a = S.assembly;
+    var d = a.casing ? casingDims(a.casing) : null;
+    if (nodeId === 'stand') return { pos: V3(0, 0, 0), rot: V3(0, 0, 0) };
+    if (/^slot/.test(nodeId)) {
+      var i = parseInt(nodeId.slice(4), 10);
+      return { pos: V3(slotXs(a.casing)[i], d.r + 0.04, 0), rot: V3(0, 0, 0) };
+    }
+    if (nodeId === 'nose') return { pos: V3(d.L / 2 + 0.02, 0, 0), rot: V3(0, 0, 0) };
+    if (nodeId === 'tail') return { pos: V3(-d.L / 2 - 0.16, 0, 0), rot: V3(0, 0, 0) };
+    if (nodeId === 'well') return { pos: V3(wellX(a.casing), d.r + 0.055, 0), rot: V3(0, 0, 0) };
+    if (nodeId === 'finring') return { pos: V3(-d.L / 2 + 0.28, 0, 0), rot: V3(0, 0, 0) };
+    if (nodeId === 'side') return { pos: V3(-d.L * 0.31, 0.05, d.r + 0.02), rot: V3(0, 0, 0) };
+    return { pos: V3(0, 0, 0), rot: V3(0, 0, 0) };
+  }
+
+  /* ---------- device (re)build from assembly ---------- */
+  var placedMeshes = [];
+  function rebuildDevice() {
+    var dev = bay.device;
+    // clear everything except nodeGroup
+    for (var i = dev.children.length - 1; i >= 0; i--) {
+      if (dev.children[i] !== bay.nodeGroup) dev.remove(dev.children[i]);
+    }
+    placedMeshes = [];
+    bay.casingMesh = null;
+    bay.capPivot = null;
+    bay.armPanelMesh = null;
+    var a = S.assembly;
+    if (!a.casing) { refreshNodes(null); return; }
+    var cas = buildCasing(a.casing);
+    cas.userData.remove = { kind: 'casing' };
+    tagMeshes(cas);
+    dev.add(cas);
+    bay.casingMesh = cas;
+    var d = casingDims(a.casing);
+    a.canisters.forEach(function (c, i) {
+      if (!c) return;
+      var m = buildCanister(c);
+      var p = nodePose('slot' + i, c);
+      m.position.copy(p.pos);
+      m.userData.remove = { kind: 'canister', slot: i };
+      tagMeshes(m);
+      dev.add(m);
+    });
+    if (a.timer) addPart(buildTimer(), 'nose', { kind: 'timer' });
+    if (a.battery) addPart(buildBattery(), 'tail', { kind: 'battery' });
+    if (a.cap) {
+      var capPivot = new THREE.Group();
+      var pp = nodePose('well');
+      capPivot.position.copy(pp.pos);
+      var capM = buildCap();
+      capM.position.set(0, 0, 0);
+      capPivot.add(capM);
+      capPivot.userData.remove = { kind: 'cap' };
+      tagMeshes(capPivot);
+      dev.add(capPivot);
+      bay.capPivot = capPivot;
+    }
+    if (a.fins) addPart(buildFins(), 'finring', { kind: 'fins' });
+    if (a.panel) {
+      var pm = buildArmPanel();
+      var pq = nodePose('side');
+      pm.position.copy(pq.pos);
+      pm.userData.remove = { kind: 'panel' };
+      tagMeshes(pm);
+      dev.add(pm);
+      bay.armPanelMesh = pm;
+    }
+    refreshNodes(null);
+  }
+  function addPart(mesh, nodeId, removeInfo) {
+    var p = nodePose(nodeId);
+    mesh.position.copy(p.pos);
+    mesh.userData.remove = removeInfo;
+    tagMeshes(mesh);
+    bay.device.add(mesh);
+  }
+  function tagMeshes(root) {
+    root.traverse(function (m) { if (m.isMesh) { m.userData.rootPart = root; placedMeshes.push(m); } });
+  }
+
+  /* ---------- snap node markers ---------- */
+  var nodeMarkers = [];
+  function refreshNodes(draggingPart) {
+    var ng = bay.nodeGroup;
+    for (var i = ng.children.length - 1; i >= 0; i--) ng.remove(ng.children[i]);
+    nodeMarkers = [];
+    if (!draggingPart) return;
+    nodeList().forEach(function (n) {
+      if (n.accepts.indexOf(draggingPart) < 0) return;
+      var mk = new THREE.Group();
+      var s = new THREE.Mesh(new THREE.SphereGeometry(0.055, 10, 8),
+        mat(0x53e07f, { emissive: 0x2fd465, ei: 0.9, transparent: true, opacity: 0.9 }));
+      mk.add(s);
+      var r = new THREE.Mesh(new THREE.TorusGeometry(0.11, 0.012, 6, 20),
+        mat(0x53e07f, { emissive: 0x2fd465, ei: 0.7, transparent: true, opacity: 0.75 }));
+      r.rotation.x = Math.PI / 2;
+      mk.add(r);
+      mk.position.copy(n.pos);
+      mk.userData.node = n;
+      ng.add(mk);
+      nodeMarkers.push(mk);
+    });
+  }
+
+  /* ================= SHELF ================= */
+  var SHELF = [
+    { id: 'compact', name: 'COMPACT CASING', group: 'casing' },
+    { id: 'standard', name: 'STANDARD CASING', group: 'casing' },
+    { id: 'heavy', name: 'HEAVY CASING', group: 'casing' },
+    { id: 'am4', name: 'AMMONITE-4 CANISTER', group: 'fill' },
+    { id: 'crx', name: 'CERULEX CANISTER', group: 'fill' },
+    { id: 'timer', name: 'CHRONEX TIMER', group: 'unique' },
+    { id: 'battery', name: 'BATTERY PACK', group: 'unique' },
+    { id: 'cap', name: 'WELL CAP', group: 'unique' },
+    { id: 'panel', name: 'ARM SWITCH PANEL', group: 'unique' },
+    { id: 'fins', name: 'STABILIZER FINS', group: 'unique' }
+  ];
+  function partCost(id) {
+    if (PG2.CASINGS[id]) return PG2.CASINGS[id].cost;
+    if (PG2.COMPOUNDS[id]) return PG2.COMPOUNDS[id].cost;
+    return PG2.PARTS[id].cost;
+  }
+  var iconCache = {};
+  function makeIcons() {
+    try {
+      var r2 = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+      r2.setSize(108, 108);
+      r2.setPixelRatio(1);
+      r2.outputEncoding = THREE.sRGBEncoding;
+      var sc = new THREE.Scene();
+      var cam = new THREE.PerspectiveCamera(34, 1, 0.05, 20);
+      sc.add(new THREE.HemisphereLight(0xcfe3f4, 0x33291d, 0.9));
+      var dl = new THREE.DirectionalLight(0xfff1dc, 1.0);
+      dl.position.set(3, 4, 5);
+      sc.add(dl);
+      SHELF.forEach(function (p) {
+        var m = partBuilder(p.id);
+        var bb = new THREE.Box3().setFromObject(m);
+        var size = bb.getSize(new THREE.Vector3()).length() || 1;
+        var ctr = bb.getCenter(new THREE.Vector3());
+        m.position.sub(ctr);
+        sc.add(m);
+        cam.position.set(size * 0.9, size * 0.62, size * 1.15);
+        cam.lookAt(0, 0, 0);
+        r2.render(sc, cam);
+        iconCache[p.id] = r2.domElement.toDataURL();
+        sc.remove(m);
+      });
+      r2.dispose();
+      r2.forceContextLoss && r2.forceContextLoss();
+    } catch (e) { /* icons stay blank; tiles still labeled */ }
+  }
+  function buildShelf() {
+    var sc = $('shelf-scroll');
+    sc.innerHTML = '';
+    SHELF.forEach(function (p) {
+      var t = document.createElement('div');
+      t.className = 'tile';
+      t.id = 'tile-' + p.id;
+      t.innerHTML = (p.group === 'casing' ? '<span class="t-badge">PICK 1</span>' : '') +
+        '<img alt="" draggable="false"' + (iconCache[p.id] ? ' src="' + iconCache[p.id] + '"' : '') + '>' +
+        '<div class="t-name">' + p.name + '</div>' +
+        '<div class="t-cost">' + fmt$(partCost(p.id)) + (p.group === 'fill' ? ' ea' : '') + '</div>';
+      t.addEventListener('pointerdown', function (e) {
+        if (S.phase !== 'build') return;
+        e.preventDefault();
+        beginPartDrag(p.id, e);
+      });
+      sc.appendChild(t);
+    });
+    refreshShelf();
+  }
+  function refreshShelf() {
+    var a = S.assembly;
+    var d = PG2.derive(a);
+    SHELF.forEach(function (p) {
+      var t = $('tile-' + p.id);
+      if (!t) return;
+      var dis = false;
+      if (p.group === 'casing') dis = !!a.casing;
+      else if (p.group === 'fill') dis = !a.casing || d.filled >= d.slots;
+      else dis = !a.casing || !!a[p.id];
+      t.classList.toggle('disabled', dis);
+    });
+  }
+
+  /* ================= HUD ================= */
+  function refreshHUD() {
+    var d = PG2.derive(S.assembly);
+    var R = PG2.RFP;
+    var maxM = 30;
+    var spec = $('m-crater-spec');
+    spec.style.left = (R.craterMin / maxM * 100) + '%';
+    spec.style.width = ((R.craterMax - R.craterMin) / maxM * 100) + '%';
+    var band = $('m-crater-band');
+    if (d.craterMean > 0) {
+      var lo = clamp(d.bandLo / maxM, 0, 1) * 100, hi = clamp(d.bandHi / maxM, 0, 1) * 100;
+      band.style.left = lo + '%';
+      band.style.width = Math.max(hi - lo, 1) + '%';
+      $('m-crater-val').textContent = d.bandLo.toFixed(0) + '–' + d.bandHi.toFixed(0) + ' m' + (d.severity > 0.15 ? ' ⚠' : '');
+      $('m-crater-val').className = (d.craterMean >= R.craterMin && d.craterMean <= R.craterMax && d.severity <= 0.15) ? 'good' : '';
+    } else {
+      band.style.width = '0%';
+      $('m-crater-val').textContent = '—';
+      $('m-crater-val').className = '';
+    }
+    $('m-weight-val').textContent = Math.round(d.weight) + ' kg';
+    $('m-weight-fill').style.width = clamp(d.weight / 90, 0, 1) * 100 + '%';
+    var cost = $('m-cost-val');
+    cost.textContent = fmt$(d.cost);
+    cost.className = d.overBudget ? 'bad' : '';
+    var cf = $('m-cost-fill');
+    cf.style.width = clamp(d.cost / (R.budget / 0.88), 0, 1) * 100 + '%';
+    cf.classList.toggle('over', d.overBudget);
+    var btn = $('btn-closeout');
+    btn.disabled = !(d.complete && !d.overBudget);
+    refreshHint(d);
+    refreshShelf();
+  }
+  function refreshHint(d) {
+    var h = $('bay-hint');
+    if (S.phase !== 'build') { h.style.opacity = 0; return; }
+    h.style.opacity = 1;
+    var msg;
+    if (!S.assembly.casing) msg = 'Drag a <b>casing</b> from the shelf onto the glowing stand.<br>One finger orbits · pinch zooms.';
+    else if (d.filled === 0) msg = 'Load <b>fill canisters</b> into the open bays.<br>Amber = more bang. Blue = more manners.';
+    else if (d.missing.length) msg = 'Still missing: <b>' + d.missing.join(' · ') + '</b>.<br>Tap a placed part to take it back off.';
+    else if (d.overBudget) msg = '<b style="color:#ff8d7e">Over budget.</b> The Authority is aware this hurts. The Authority does not care.';
+    else msg = 'Device complete. Hit <b>CLOSE-OUT</b> to wire it up by hand.';
+    h.innerHTML = '<span class="hint-small">ASSEMBLY BAY</span>' + msg;
+  }
+
+  /* ================= INPUT — bay orbit + part drag + tap remove ================= */
+  var pointers = {};
+  var dragPart = null;   // {id, ghost, node}
+  var raycaster = new THREE.Raycaster();
+
+  function canvasPos(e) {
+    var r = canvas.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  }
+  function beginPartDrag(id, e) {
+    PGAudio.init(); PGAudio.pickup();
+    var ghost = partBuilder(id);
+    ghost.traverse(function (m) {
+      if (m.isMesh) {
+        m.material = m.material.clone();
+        m.material.transparent = true;
+        m.material.opacity = 0.55;
+        m.castShadow = false;
+      }
+    });
+    bay.scene.add(ghost);
+    dragPart = { id: id, ghost: ghost, node: null, pid: e.pointerId };
+    refreshNodes(id);
+    movePartDrag(e);
+    window.addEventListener('pointermove', movePartDrag);
+    window.addEventListener('pointerup', endPartDrag);
+    window.addEventListener('pointercancel', endPartDrag);
+  }
+  function movePartDrag(e) {
+    if (!dragPart || e.pointerId !== dragPart.pid) return;
+    var p = canvasPos(e);
+    // nearest valid node in screen space
+    var best = null, bestD = 76;
+    nodeMarkers.forEach(function (mk) {
+      var wp = mk.getWorldPosition(new THREE.Vector3());
+      var sp = worldToScreen(wp, bay.camera);
+      var dd = Math.hypot(sp.x - p.x, sp.y - p.y);
+      if (dd < bestD) { bestD = dd; best = mk.userData.node; }
+    });
+    if (best && (!dragPart.node || dragPart.node.id !== best.id)) PGAudio.ghostHum();
+    dragPart.node = best;
+    if (best) {
+      var pose = nodePose(best.id, dragPart.id);
+      var wp2 = bay.device.localToWorld(pose.pos.clone());
+      dragPart.ghost.position.copy(wp2);
+      dragPart.ghost.rotation.copy(bay.device.rotation);
+      dragPart.ghost.traverse(function (m) { if (m.isMesh) m.material.opacity = 0.85; });
+    } else {
+      // float on a camera-facing plane through the device
+      var ndc = new THREE.Vector2((p.x / W) * 2 - 1, -(p.y / H) * 2 + 1);
+      raycaster.setFromCamera(ndc, bay.camera);
+      var plane = new THREE.Plane();
+      var n = new THREE.Vector3();
+      bay.camera.getWorldDirection(n);
+      plane.setFromNormalAndCoplanarPoint(n, bay.orbit.target);
+      var hit = new THREE.Vector3();
+      raycaster.ray.intersectPlane(plane, hit);
+      if (hit) dragPart.ghost.position.copy(hit);
+      dragPart.ghost.rotation.set(0, 0, 0);
+      dragPart.ghost.traverse(function (m) { if (m.isMesh) m.material.opacity = 0.45; });
+    }
+  }
+  function endPartDrag(e) {
+    if (!dragPart || (e && e.pointerId !== dragPart.pid)) return;
+    window.removeEventListener('pointermove', movePartDrag);
+    window.removeEventListener('pointerup', endPartDrag);
+    window.removeEventListener('pointercancel', endPartDrag);
+    var dp = dragPart;
+    dragPart = null;
+    bay.scene.remove(dp.ghost);
+    if (dp.node) placePart(dp.id, dp.node);
+    else refreshNodes(null);
+  }
+  function placePart(id, node) {
+    var a = S.assembly;
+    if (node.id === 'stand') {
+      a.casing = id;
+      a.canisters = new Array(PG2.CASINGS[id].slots).fill(null);
+      PGAudio.thunk(true);
+    } else if (/^slot/.test(node.id)) {
+      a.canisters[node.slot] = id;
+      PGAudio.thunk(false);
+    } else {
+      a[id] = true;
+      PGAudio.thunk(id === 'battery');
+    }
+    bay.bounce = 1;
+    rebuildDevice();
+    refreshHUD();
+  }
+  function removePart(info) {
+    var a = S.assembly;
+    if (info.kind === 'casing') {
+      S.assembly = PG2.makeAssembly();
+      toast('Casing removed — everything comes off with it.');
+    } else if (info.kind === 'canister') {
+      a.canisters[info.slot] = null;
+    } else {
+      a[info.kind] = false;
+    }
+    PGAudio.unsnap();
+    rebuildDevice();
+    refreshHUD();
+  }
+
+  canvas.addEventListener('pointerdown', onCanvasDown);
+  canvas.addEventListener('pointermove', onCanvasMove);
+  canvas.addEventListener('pointerup', onCanvasUp);
+  canvas.addEventListener('pointercancel', onCanvasUp);
+  canvas.addEventListener('wheel', function (e) {
+    if (S.phase !== 'build') return;
+    e.preventDefault();
+    bay.orbit.radius = clamp(bay.orbit.radius + e.deltaY * 0.004, 2.2, 8.5);
+  }, { passive: false });
+
+  function onCanvasDown(e) {
+    PGAudio.init();
+    canvas.setPointerCapture && canvas.setPointerCapture(e.pointerId);
+    var p = canvasPos(e);
+    pointers[e.pointerId] = { x: p.x, y: p.y, sx: p.x, sy: p.y, t: performance.now(), moved: false };
+    bay.lastTouch = performance.now();
+    if (S.phase === 'wiring') { wiringDown(e, p); return; }
+    if (S.phase === 'det') { detDown(e, p); return; }
+    if (S.phase === 'arm') { armDown(e, p); return; }
+  }
+  function onCanvasMove(e) {
+    var pt = pointers[e.pointerId];
+    var p = canvasPos(e);
+    if (S.phase === 'wiring') { wiringMove(e, p); }
+    if (S.phase === 'det') { detMove(e, p); }
+    if (S.phase === 'arm') { armMove(e, p); }
+    if (!pt) return;
+    var dx = p.x - pt.x, dy = p.y - pt.y;
+    if (Math.hypot(p.x - pt.sx, p.y - pt.sy) > 8) pt.moved = true;
+    var ids = Object.keys(pointers);
+    if (S.phase === 'build' && !dragPart) {
+      if (ids.length === 1) {
+        bay.orbit.theta -= dx * 0.0065;
+        bay.orbit.phi = clamp(bay.orbit.phi - dy * 0.005, 0.25, 1.5);
+      } else if (ids.length === 2) {
+        var a = pointers[ids[0]], b = pointers[ids[1]];
+        var prev = Math.hypot(a.x - b.x, a.y - b.y);
+        // update this pointer, compute new dist
+        var ax = ids[0] === String(e.pointerId) ? p.x : a.x;
+        var ay = ids[0] === String(e.pointerId) ? p.y : a.y;
+        var bx = ids[1] === String(e.pointerId) ? p.x : b.x;
+        var by = ids[1] === String(e.pointerId) ? p.y : b.y;
+        var cur = Math.hypot(ax - bx, ay - by);
+        if (prev > 0) bay.orbit.radius = clamp(bay.orbit.radius * (prev / Math.max(cur, 1)), 2.2, 8.5);
+      }
+    }
+    pt.x = p.x; pt.y = p.y;
+    bay.lastTouch = performance.now();
+  }
+  function onCanvasUp(e) {
+    var pt = pointers[e.pointerId];
+    var p = canvasPos(e);
+    if (S.phase === 'wiring') wiringUp(e, p);
+    if (S.phase === 'det') detUp(e, p);
+    if (S.phase === 'arm') armUp(e, p);
+    if (pt && !pt.moved && S.phase === 'build' && !dragPart && Object.keys(pointers).length === 1) {
+      // tap: try remove part
+      var ndc = new THREE.Vector2((p.x / W) * 2 - 1, -(p.y / H) * 2 + 1);
+      raycaster.setFromCamera(ndc, bay.camera);
+      var hits = raycaster.intersectObjects(placedMeshes, false);
+      if (hits.length) {
+        var root = hits[0].object.userData.rootPart;
+        if (root && root.userData.remove) removePart(root.userData.remove);
+      }
+    }
+    delete pointers[e.pointerId];
+  }
+
+  /* ================= SCREENS / FLOW ================= */
+  var screens = ['scr-title', 'scr-rfp', 'scr-score'];
+  function showScreen(id) {
     screens.forEach(function (s) { $(s).classList.toggle('active', s === id); });
-    if (id === 'scr-range') Range.onShow(); else Range.onHide();
+  }
+  function showUI(id) {
+    ['ui-bay', 'ui-range'].forEach(function (u) { $(u).classList.toggle('hidden', u !== id); });
+    if (!id) { $('ui-bay').classList.add('hidden'); $('ui-range').classList.add('hidden'); }
   }
 
-  /* ================= RFP ================= */
-  var rfpTimer = [];
-  function buildRFP(fast) {
+  /* ---------- RFP ---------- */
+  var rfpTimers = [];
+  function buildRFP() {
+    var R = PG2.RFP;
     var doc = $('rfp-doc');
-    var R = PG.RFP;
     doc.innerHTML =
       '<div class="doc-sec">' +
         '<div class="doc-headrow"><span>' + R.form + '</span><span>SHEET 1 OF 1</span></div>' +
         '<div class="doc-stamp">CONFIDENTIAL</div>' +
         '<div class="rfp-no">REQUEST FOR PROPOSAL · ' + R.id + '</div>' +
-        '<div class="rfp-title">QUARRY BREACH CHARGE</div>' +
+        '<div class="rfp-title">' + R.title + '</div>' +
         '<div class="rfp-agency">REPUBLIC PROVING AUTHORITY · BUREAU OF CONTROLLED ENTHUSIASM</div>' +
         '<hr class="doc-rule">' +
       '</div>' +
       '<div class="doc-sec">' +
-        '<table class="spec-table">' +
-        '<tr><td>EFFECT</td><td><b>Crater diameter ' + R.craterMin + '–' + R.craterMax + ' m</b><br>as measured by Station 7 telemetry (Halloran scaling)</td></tr>' +
-        '<tr><td>PRECISION</td><td><b>Detonation at T+' + R.timerSpec.toFixed(1) + ' s, ±' + R.timerTol + ' s</b> of commanded fire</td></tr>' +
-        '<tr><td>CONSTRAINTS</td><td><b>Unit cost ≤ ' + fmt$(R.costCap) + '</b> · <b>weight ≤ ' + R.weightCap + ' kg</b> · safety interlock per spec 7.4.1(c)</td></tr>' +
-        '<tr><td>TEST CONDITIONS</td><td>Sector 9 quarry face. Forecast: <b>' + R.forecastC + '°C, clear</b>, light washboard on approach road</td></tr>' +
-        '</table>' +
+        '<div class="bignums">' +
+          '<div class="bignum"><div class="bn-lbl">TARGET CRATER</div><div class="bn-val">' + R.craterMin + '–' + R.craterMax + '</div><div class="bn-unit">METRES ⌀</div></div>' +
+          '<div class="bignum"><div class="bn-lbl">PARTS BUDGET</div><div class="bn-val">$' + (R.budget / 1000).toFixed(1).replace('.0', '') + 'k</div><div class="bn-unit">$' + R.budget.toLocaleString() + ' HARD CAP</div></div>' +
+          '<div class="bignum"><div class="bn-lbl">DETONATE AT</div><div class="bn-val">T+' + R.tSpec.toFixed(1) + 's</div><div class="bn-unit">±' + R.tTol + ' s</div></div>' +
+        '</div>' +
       '</div>' +
       '<div class="doc-sec">' +
         '<hr class="doc-rule thin">' +
-        '<p class="spec-clause"><span class="cl">7.4.1(c)</span> — The device SHALL incorporate a mechanical arming interlock. The Authority is aware this costs money. The Authority does not care.</p>' +
-        '<p class="spec-clause"><span class="cl">9.2</span> — The device shall be paintable. Colour: "Government Grey No. 2" or nearest available regret.</p>' +
-        '<p class="spec-clause"><span class="cl">11.3</span> — The test article shall not exceed 40 decibels while being transported. Detonation on the approach road is considered exceeding 40 decibels.</p>' +
+        '<p class="spec-clause"><span class="cl">7.4.1(c)</span> — The device shall be assembled BY HAND, by the contractor, who shall afterwards sign something.</p>' +
       '</div>' +
       '<div class="doc-sec">' +
         '<hr class="doc-rule thin">' +
         '<div class="payline"><span>DEVELOPMENT AWARD</span><b>' + fmt$(R.payout) + '</b></div>' +
-        '<div class="payline"><span>PRECISION BONUS (±' + R.timerTol + ' s)</span><b>+' + fmt$(R.bonus) + '</b></div>' +
-        '<div class="payline"><span>ADJUDICATION</span><b>FORMULA 9(b), VALUE BASIS</b></div>' +
+        '<div class="payline"><span>CLEAN-DETONATION BONUS</span><b>+' + fmt$(R.bonusClean) + '</b></div>' +
       '</div>' +
       '<div class="doc-sec">' +
         '<div class="rival-box">' +
           '<div class="rival-logo">V</div>' +
           '<div class="rival-txt"><b>COMPETING BID FILED: VANTAGE DYNAMICS</b><br>' +
-          '<span class="rival-quote">“We consider this procurement a formality.” — R.&nbsp;Cavendish&nbsp;Vane, VP of Client Triumph, to <i>Ordnance Weekly</i></span></div>' +
+          '<span class="rival-quote">“We consider this procurement a formality.” — R.&nbsp;Cavendish&nbsp;Vane, VP of Client Triumph</span></div>' +
         '</div>' +
         '<div class="rfp-no" style="margin-top:12px">TEST SERIES ' + S.seed + ' · REPLY BY TELETYPE ONLY</div>' +
       '</div>';
-
-    rfpTimer.forEach(clearTimeout); rfpTimer = [];
+    rfpTimers.forEach(clearTimeout); rfpTimers = [];
     var secs = doc.querySelectorAll('.doc-sec');
     $('btn-accept').disabled = true;
-    var step = fast ? 90 : 420;
     secs.forEach(function (sec, i) {
-      rfpTimer.push(setTimeout(function () {
-        sec.classList.add('shown');
-        PGAudio.tick();
-      }, 150 + i * step));
+      rfpTimers.push(setTimeout(function () { sec.classList.add('shown'); PGAudio.tick(); }, 150 + i * 380));
     });
-    rfpTimer.push(setTimeout(function () {
-      $('btn-accept').disabled = false;
-      PGAudio.typeDing();
-    }, 150 + secs.length * step));
-    doc.onpointerdown = function () { // impatient bureaucrats may skip
-      rfpTimer.forEach(clearTimeout);
+    rfpTimers.push(setTimeout(function () { $('btn-accept').disabled = false; PGAudio.typeDing(); }, 150 + secs.length * 380));
+    doc.onpointerdown = function () {
+      rfpTimers.forEach(clearTimeout);
       secs.forEach(function (s) { s.classList.add('shown'); });
       $('btn-accept').disabled = false;
     };
   }
 
-  /* ================= BENCH ================= */
-  var triCanvas, triCtx, triGeom = null;
-
-  function buildBench() {
-    $('chip-series').textContent = 'SERIES ' + S.seed;
-    $('chip-forecast').textContent = 'FORECAST ' + PG.RFP.forecastC + '°C ☀';
-    buildFillPane();
-    buildCasingPane();
-    buildFusePane();
-    refreshBench();
+  /* ---------- enter build ---------- */
+  function enterBuild(keepAssembly) {
+    clearLater();
+    S.phase = 'build';
+    S.closeoutStep = -1;
+    S.result = null;
+    bay.wiring = null;
+    bay.detStage = null;
+    bay.armStage = null;
+    if (!keepAssembly) S.assembly = PG2.makeAssembly();
+    // reset close-out state (retry keeps the physical build only)
+    S.assembly.wires = { red: null, yellow: null, green: null };
+    S.assembly.torques = { red: false, yellow: false, green: false };
+    S.assembly.det = { seated: false, slam: 0 };
+    S.assembly.armed = false;
+    showScreen(null); showUI('ui-bay');
+    $('stage-build').classList.remove('hidden');
+    $('stage-bar').classList.add('hidden');
+    $('wiring-ui').classList.add('hidden');
+    $('det-ui').classList.add('hidden');
+    $('arm-ui').classList.add('hidden');
+    bay.orbit.theta = 0.7; bay.orbit.phi = 1.18; bay.orbit.radius = 4.4;
+    bay.device.rotation.y = 0;
+    rebuildDevice();
+    refreshHUD();
   }
 
-  /* ---- FILL ---- */
-  function buildFillPane() {
-    var p = $('pane-fill');
-    p.innerHTML =
-      '<div class="station-title">STATION 1 · <b>FILL CHEMISTRY</b> — drag the mix point</div>' +
-      '<canvas id="tri-canvas"></canvas>' +
-      '<div class="prop-bars">' +
-        propBar('ENERGY', 'energy', 'en') +
-        propBar('STABILITY', 'stability', 'st') +
-        propBar('SENSITIVITY', 'sens', 'se') +
-      '</div>' +
-      '<div class="blend-warns" id="blend-warns"></div>' +
-      '<div class="ctl-row"><div class="ctl-lbl"><span>FILL MASS</span><b id="mass-val">30 kg</b></div>' +
-      '<input type="range" id="mass-slider" min="10" max="60" step="1" value="' + S.design.mass + '"></div>' +
-      '<div class="pred-box"><div class="pred-title">PREDICTED CRATER — 80% CONFIDENCE (UNCERTAINTY IS A PURCHASE)</div>' +
-        '<div class="pred-axis" id="pred-axis">' +
-          '<div class="pred-rail"></div><div class="pred-band" id="pred-band"></div><div class="pred-ci" id="pred-ci"></div>' +
-          '<div class="pred-tick" id="ptick-lo"></div><div class="pred-tick" id="ptick-hi"></div>' +
-        '</div>' +
-        '<div class="pred-note" id="pred-note"></div>' +
-      '</div>';
-
-    triCanvas = $('tri-canvas');
-    triCtx = triCanvas.getContext('2d');
-    sizeTriangle();
-
-    var dragging = false;
-    triCanvas.addEventListener('pointerdown', function (e) {
-      dragging = true; triCanvas.setPointerCapture(e.pointerId);
-      triDrag(e); PGAudio.click();
-    });
-    triCanvas.addEventListener('pointermove', function (e) { if (dragging) { triDrag(e); PGAudio.scratch(); } });
-    triCanvas.addEventListener('pointerup', function () { dragging = false; });
-    triCanvas.addEventListener('pointercancel', function () { dragging = false; });
-
-    $('mass-slider').addEventListener('input', function (e) {
-      S.design.mass = +e.target.value;
-      PGAudio.scratch();
-      refreshBench();
-    });
+  /* ================= CLOSE-OUT STAGE 1 — WIRING ================= */
+  var WIRE_COLORS = { red: COL.wireR, yellow: COL.wireY, green: COL.wireG };
+  function panelLocal(x, y, z) {
+    // wiring panel local coords → device local (panel centered at (0, .02, r))
+    var d = casingDims(S.assembly.casing);
+    return V3(x, 0.02 + y, d.r + (z || 0));
   }
-  function propBar(name, key, id) {
-    return '<div class="prop-bar"><span class="pb-name">' + name + '</span>' +
-      '<span class="pb-track"><span class="pb-fill ' + key + '" id="pb-' + id + '" style="width:0%"></span>' +
-      (key === 'stability' ? '<span class="pb-mark" id="pb-req"></span>' : '') +
-      '</span><span class="pb-val" id="pbv-' + id + '">—</span></div>';
-  }
-
-  function sizeTriangle() {
-    if (!triCanvas) return;
-    var w = triCanvas.parentElement ? triCanvas.parentElement.clientWidth - 30 : 330;
-    w = Math.max(260, Math.min(w, 460));
-    var h = Math.round(w * 0.74);
-    var dpr = Math.min(window.devicePixelRatio || 1, 2);
-    triCanvas.width = w * dpr; triCanvas.height = h * dpr;
-    triCanvas.style.width = w + 'px'; triCanvas.style.height = h + 'px';
-    triCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    var pad = 34;
-    triGeom = {
-      w: w, h: h,
-      V: { x: w / 2, y: pad - 6 },            // VEX-7 top
-      A: { x: pad + 6, y: h - pad },           // AMMONITE-4 bottom-left
-      C: { x: w - pad - 6, y: h - pad }        // CERULEX bottom-right
+  function initWiring() {
+    var w = {
+      posts: {}, terms: {}, wires: {}, drag: null,
+      twist: null, group: new THREE.Group()
     };
-    drawTriangle();
+    var lay = PG2.panelLayout(S.seed);
+    var d = casingDims(S.assembly.casing);
+    // posts (left column): red top, yellow mid, green bottom
+    PG2.WIRES.forEach(function (c, i) {
+      var y = 0.10 - i * 0.10;
+      var post = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.022, 0.07, 8),
+        mat(WIRE_COLORS[c], { emissive: WIRE_COLORS[c], ei: 0.25, shin: 60 }));
+      post.rotation.x = Math.PI / 2;
+      post.position.copy(panelLocal(-0.17, y, -0.005));
+      w.group.add(post);
+      w.posts[c] = { local: panelLocal(-0.17, y, 0.03), mesh: post };
+    });
+    // terminals (right column): T1,T2,T3 top→bottom, labeled with shuffled roles
+    ['T1', 'T2', 'T3'].forEach(function (t, i) {
+      var y = 0.10 - i * 0.10;
+      var screw = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.028, 0.05, 6),
+        mat(COL.brass, { shin: 80 }));
+      screw.rotation.x = Math.PI / 2;
+      screw.position.copy(panelLocal(0.13, y, 0));
+      w.group.add(screw);
+      var lbl = textPlane(t + '·' + PG2.ROLE_LABEL[lay[t]], 0.16, 0.038, { color: '#f0e6c8', px: 46 });
+      lbl.position.copy(panelLocal(0.13, y - 0.045, 0.012));
+      w.group.add(lbl);
+      w.terms[t] = { local: panelLocal(0.13, y, 0.03), mesh: screw, wire: null };
+    });
+    // wire tube meshes
+    PG2.WIRES.forEach(function (c) {
+      var m = new THREE.Mesh(new THREE.BufferGeometry(),
+        mat(WIRE_COLORS[c], { shin: 40, flat: false }));
+      m.frustumCulled = false;
+      w.group.add(m);
+      w.wires[c] = { mesh: m, end: null };  // end = terminal id or null (dangling)
+    });
+    bay.device.add(w.group);
+    bay.wiring = w;
+    PG2.WIRES.forEach(function (c) { updateWireCurve(c, null); });
   }
-
-  function mixToPoint(mix) {
-    var g = triGeom;
-    return {
-      x: g.V.x * mix.vx7 + g.A.x * mix.am4 + g.C.x * mix.crx,
-      y: g.V.y * mix.vx7 + g.A.y * mix.am4 + g.C.y * mix.crx
-    };
+  function wireEndLocal(c) {
+    var w = bay.wiring;
+    var wr = w.wires[c];
+    if (w.drag && w.drag.color === c) return w.drag.point;
+    if (wr.end) return w.terms[wr.end].local;
+    var p = w.posts[c].local.clone();
+    p.y -= 0.16; p.z += 0.02;
+    return p;
   }
-  function pointToMix(x, y) {
-    var g = triGeom, A = g.A, C = g.C, V = g.V;
-    var d = (C.y - V.y) * (A.x - V.x) + (V.x - C.x) * (A.y - V.y);
-    var a = ((C.y - V.y) * (x - V.x) + (V.x - C.x) * (y - V.y)) / d;
-    var c = ((V.y - A.y) * (x - V.x) + (A.x - V.x) * (y - V.y)) / d;
-    var v = 1 - a - c;
-    a = Math.max(0, a); c = Math.max(0, c); v = Math.max(0, v);
-    var s = a + c + v;
-    return { am4: a / s, crx: c / s, vx7: v / s };
-  }
-  function triDrag(e) {
-    var r = triCanvas.getBoundingClientRect();
-    S.design.mix = pointToMix(e.clientX - r.left, e.clientY - r.top);
-    refreshBench();
-  }
-
-  function drawTriangle() {
-    if (!triGeom) return;
-    var ctx = triCtx, g = triGeom;
-    ctx.clearRect(0, 0, g.w, g.h);
-
-    // subdivision grid
-    ctx.strokeStyle = 'rgba(88,140,187,.22)';
-    ctx.lineWidth = 1;
-    for (var i = 1; i < 5; i++) {
-      var t = i / 5;
-      line(ctx, lerpP(g.A, g.V, t), lerpP(g.C, g.V, t));
-      line(ctx, lerpP(g.V, g.A, t), lerpP(g.C, g.A, t));
-      line(ctx, lerpP(g.V, g.C, t), lerpP(g.A, g.C, t));
+  function updateWireCurve(c, dragPoint) {
+    var w = bay.wiring;
+    var a = w.posts[c].local.clone();
+    var b = dragPoint || wireEndLocal(c);
+    var pts = [];
+    var sag = w.wires[c].end ? 0.05 : 0.025;
+    for (var i = 0; i <= 10; i++) {
+      var t = i / 10;
+      var p = a.clone().lerp(b, t);
+      p.y -= sag * Math.sin(Math.PI * t);       // catenary droop
+      p.z += 0.02 * Math.sin(Math.PI * t);
+      pts.push(p);
     }
-    // main triangle
-    ctx.strokeStyle = 'rgba(156,200,234,.75)';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(g.V.x, g.V.y); ctx.lineTo(g.A.x, g.A.y); ctx.lineTo(g.C.x, g.C.y); ctx.closePath();
-    ctx.stroke();
-
-    // corner labels
-    ctx.font = '700 11px ' + '-apple-system, Segoe UI, Roboto, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillStyle = '#e06a5a';
-    ctx.fillText('VEX-7', g.V.x, g.V.y - 12);
-    ctx.font = '9px Menlo, monospace';
-    ctx.fillStyle = 'rgba(224,106,90,.8)';
-    ctx.fillText('$30/kg · touchy', g.V.x, g.V.y - 2);
-    ctx.font = '700 11px -apple-system, Segoe UI, Roboto, sans-serif';
-    ctx.fillStyle = '#f0b95c';
-    ctx.textAlign = 'left';
-    ctx.fillText('AMMONITE-4', g.A.x - 24, g.A.y + 16);
-    ctx.font = '9px Menlo, monospace';
-    ctx.fillStyle = 'rgba(240,185,92,.8)';
-    ctx.fillText('$16/kg · hates heat', g.A.x - 24, g.A.y + 26);
-    ctx.font = '700 11px -apple-system, Segoe UI, Roboto, sans-serif';
-    ctx.fillStyle = '#59c48f';
-    ctx.textAlign = 'right';
-    ctx.fillText('CERULEX', g.C.x + 22, g.C.y + 16);
-    ctx.font = '9px Menlo, monospace';
-    ctx.fillStyle = 'rgba(89,196,143,.8)';
-    ctx.fillText('$9/kg · dull, loyal', g.C.x + 22, g.C.y + 26);
-
-    // mix point
-    var p = mixToPoint(S.design.mix);
-    ctx.strokeStyle = 'rgba(229,161,61,.35)';
-    ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.arc(p.x, p.y, 14, 0, 7); ctx.stroke();
-    ctx.strokeStyle = '#e5a13d';
-    ctx.lineWidth = 1.6;
-    ctx.beginPath();
-    ctx.moveTo(p.x - 20, p.y); ctx.lineTo(p.x - 7, p.y);
-    ctx.moveTo(p.x + 7, p.y); ctx.lineTo(p.x + 20, p.y);
-    ctx.moveTo(p.x, p.y - 20); ctx.lineTo(p.x, p.y - 7);
-    ctx.moveTo(p.x, p.y + 7); ctx.lineTo(p.x, p.y + 20);
-    ctx.stroke();
-    ctx.fillStyle = '#f0b95c';
-    ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, 7); ctx.fill();
+    var curve = new THREE.CatmullRomCurve3(pts);
+    var old = w.wires[c].mesh.geometry;
+    w.wires[c].mesh.geometry = new THREE.TubeGeometry(curve, 16, 0.011, 6, false);
+    if (old && old.dispose) old.dispose();
   }
-  function lerpP(a, b, t) { return { x: lerp(a.x, b.x, t), y: lerp(a.y, b.y, t) }; }
-  function line(ctx, a, b) { ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); }
-
-  /* ---- CASING ---- */
-  function buildCasingPane() {
-    var p = $('pane-casing');
-    var cards = Object.keys(PG.ALLOYS).map(function (id) {
-      var a = PG.ALLOYS[id];
-      return '<button class="alloy-card" data-alloy="' + id + '" type="button">' +
-        '<span class="ac-name">' + a.name + '</span>' +
-        '<span class="ac-grade">GRADE ' + a.grade + '</span>' +
-        '<span class="ac-blurb">' + a.blurb + '</span>' +
-        '<span class="ac-stats">' +
-          '<span>BASE <b>' + fmt$(a.baseC) + '</b> +' + fmt$(a.cCoef) + '/mm</span>' +
-          '<span>WT <b>' + a.baseW + 'kg</b> +' + a.wCoef + '/mm</span>' +
-          '<span>BRITTLE <b>' + Math.round(a.brittle * 100) + '%</b></span>' +
-          '<span>EFF <b>×' + a.eff.toFixed(2) + '</b></span>' +
-        '</span></button>';
-    }).join('');
-    p.innerHTML =
-      '<div class="station-title">STATION 2 · <b>CASING &amp; STRUCTURE</b> — trade sheets on file</div>' +
-      '<div class="alloy-cards">' + cards + '</div>' +
-      '<div class="ctl-row"><div class="ctl-lbl"><span>WALL THICKNESS</span><b id="wall-val">10 mm</b></div>' +
-      '<input type="range" id="wall-slider" min="4" max="24" step="1" value="' + S.design.wall + '"></div>' +
-      '<div class="wall-diagram">' +
-        '<svg id="wall-svg" viewBox="0 0 84 84">' +
-          '<circle cx="42" cy="42" r="34" fill="none" stroke="#9cc8ea" stroke-width="1.2"/>' +
-          '<circle id="wall-inner" cx="42" cy="42" r="26" fill="rgba(229,161,61,.12)" stroke="#e5a13d" stroke-width="1"/>' +
-          '<path d="M42 4v10M42 70v10M4 42h10M70 42h10" stroke="rgba(156,200,234,.5)" stroke-width="1"/>' +
-        '</svg>' +
-        '<div class="wall-info" id="wall-info"></div>' +
-      '</div>';
-    p.querySelectorAll('.alloy-card').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        S.design.alloy = btn.dataset.alloy;
-        PGAudio.tap();
-        refreshBench();
+  function screenOfLocal(v) {
+    return worldToScreen(bay.device.localToWorld(v.clone()), bay.camera);
+  }
+  function enterWiring() {
+    S.phase = 'wiring';
+    S.closeoutStep = 0;
+    $('stage-build').classList.add('hidden');
+    $('stage-bar').classList.remove('hidden');
+    setStageBar(0);
+    $('wiring-ui').classList.remove('hidden');
+    $('bay-hint').style.opacity = 0;
+    refreshNodes(null);
+    // straighten the device & swing camera to the panel
+    var d = casingDims(S.assembly.casing);
+    tweenOrbitTo(V3(0.12, 1.36, d.r + 1.05), V3(0, 1.30, d.r - 0.1), 1100, function () {
+      if (!bay.wiring) initWiring();
+      tween(600, function (t) { bay.casingMesh.userData.doorPivot.rotation.x = -2.0 * t; });
+      PGAudio.coverFlick();
+    });
+    var startRotY = bay.device.rotation.y % (Math.PI * 2);
+    if (startRotY > Math.PI) startRotY -= Math.PI * 2;
+    tween(700, function (t) { bay.device.rotation.y = lerp(startRotY, 0, t); });
+    updateWiringNote();
+  }
+  function updateWiringNote() {
+    var a = S.assembly;
+    var attached = PG2.WIRES.filter(function (c) { return a.wires[c]; }).length;
+    var torqued = PG2.WIRES.filter(function (c) { return a.torques[c]; }).length;
+    var note = $('wiring-note');
+    if (attached < 3) note.innerHTML = 'Drag each <b>wire</b> from its post to a terminal. Read the labels — the panel doesn’t.';
+    else note.innerHTML = 'Wires landed. <b>Twist</b> each terminal in circles to torque it down. Or don’t. It’s your name on the form.' + (torqued ? ' (' + torqued + '/3 torqued)' : '');
+    $('btn-panel-done').classList.toggle('hidden', attached < 3);
+  }
+  function wiringDown(e, p) {
+    var w = bay.wiring;
+    if (!w) return;
+    // 1) a terminal that already holds an untorqued wire → circular twist to torque
+    var bt = null, btD = 58;
+    Object.keys(w.terms).forEach(function (t) {
+      if (!w.terms[t].wire) return;
+      if (S.assembly.torques[w.terms[t].wire]) return;
+      var sp = screenOfLocal(w.terms[t].local);
+      var dd = Math.hypot(sp.x - p.x, sp.y - p.y);
+      if (dd < btD) { btD = dd; bt = t; }
+    });
+    if (bt) {
+      var color = w.terms[bt].wire;
+      var sp2 = screenOfLocal(w.terms[bt].local);
+      w.twist = { term: bt, color: color, pid: e.pointerId, cx: sp2.x, cy: sp2.y, angle: null, acc: 0 };
+      var ring = $('torque-ring');
+      ring.classList.remove('hidden');
+      ring.style.left = sp2.x + 'px';
+      ring.style.top = sp2.y + 'px';
+      return;
+    }
+    // 2) a post (or a dangling wire end) → drag that wire; grabbing the post of
+    //    an attached wire pulls it back off its terminal
+    var best = null, bestD = 55;
+    PG2.WIRES.forEach(function (c) {
+      var pts = [w.posts[c].local];
+      if (!w.wires[c].end) pts.push(wireEndLocal(c));
+      pts.forEach(function (lp) {
+        var sp = screenOfLocal(lp);
+        var dd = Math.hypot(sp.x - p.x, sp.y - p.y);
+        if (dd < bestD) { bestD = dd; best = c; }
       });
     });
-    $('wall-slider').addEventListener('input', function (e) {
-      S.design.wall = +e.target.value;
-      PGAudio.scratch();
-      refreshBench();
-    });
+    if (best) {
+      if (w.wires[best].end) {
+        w.terms[w.wires[best].end].wire = null;
+        w.wires[best].end = null;
+        S.assembly.wires[best] = null;
+        S.assembly.torques[best] = false;
+        updateWiringNote();
+      }
+      w.drag = { color: best, pid: e.pointerId, point: w.posts[best].local.clone() };
+      PGAudio.pickup();
+    }
   }
-
-  /* ---- FUSE ---- */
-  function buildFusePane() {
-    var p = $('pane-fuse');
-    var html = '<div class="station-title">STATION 3 · <b>FUSE CHAIN</b> — reliability multiplies. Downward.</div>';
-    PG.STAGES.forEach(function (st, i) {
-      var tiers = ['surplus', 'standard', 'precision'];
-      if (i === 0) tiers = ['none'].concat(tiers);
-      var btns = tiers.map(function (tid) {
-        var t = PG.TIERS[tid];
-        var rel = tid === 'none' ? '—' : (t.rel * 100).toFixed(1) + '%';
-        var drift = (i === 1 && tid !== 'none') ? ' ±' + t.drift.toFixed(2) + 's' : '';
-        return '<button class="fs-tier' + (tid === 'none' ? ' danger' : '') + '" data-stage="' + i + '" data-tier="' + tid + '" type="button">' +
-          '<span class="ft-name">' + t.name + '</span>' +
-          '<span class="ft-cost">' + (tid === 'none' ? '$0' : fmt$(t.cost)) + '</span>' +
-          '<span class="ft-rel">' + rel + drift + '</span></button>';
-      }).join('');
-      html += '<div class="fuse-stage" id="fstage-' + i + '">' +
-        '<span class="fs-measured hidden" id="fmeasured-' + i + '">MEASURED</span>' +
-        '<div class="fs-head"><span class="fs-name">' + st.name + '</span><span class="fs-idx">STAGE ' + (i + 1) + '/4</span></div>' +
-        '<div class="fs-note">' + st.note + '</div>' +
-        '<div class="fs-tiers">' + btns + '</div></div>';
-    });
-    html += '<div class="chain-strip"><div class="chain-math" id="chain-math"></div>' +
-      '<div class="chain-drift" id="chain-drift"></div>' +
-      '<div class="spec-alert hidden" id="interlock-alert">⚠ SPEC 7.4.1(c) UNSATISFIED — the bench does not stop you. The board will.</div></div>';
-    p.innerHTML = html;
-    p.querySelectorAll('.fs-tier').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        var i = +btn.dataset.stage;
-        S.design.fuse[i] = btn.dataset.tier;
-        if (btn.dataset.tier === 'none') PGAudio.buzz(); else PGAudio.tap();
-        refreshBench();
+  function wiringMove(e, p) {
+    var w = bay.wiring;
+    if (!w) return;
+    if (w.drag && e.pointerId === w.drag.pid) {
+      // project pointer onto the panel plane (device-local z = r+0.03)
+      var d = casingDims(S.assembly.casing);
+      var ndc = new THREE.Vector2((p.x / W) * 2 - 1, -(p.y / H) * 2 + 1);
+      raycaster.setFromCamera(ndc, bay.camera);
+      var planePt = bay.device.localToWorld(V3(0, 0, d.r + 0.03));
+      var planeN = V3(0, 0, 1).applyQuaternion(bay.device.quaternion);
+      var plane = new THREE.Plane().setFromNormalAndCoplanarPoint(planeN, planePt);
+      var hit = new THREE.Vector3();
+      if (raycaster.ray.intersectPlane(plane, hit)) {
+        w.drag.point = bay.device.worldToLocal(hit.clone());
+        updateWireCurve(w.drag.color, w.drag.point);
+      }
+    }
+    if (w.twist && e.pointerId === w.twist.pid) {
+      var ang = Math.atan2(p.y - w.twist.cy, p.x - w.twist.cx);
+      if (w.twist.angle != null) {
+        var delta = ang - w.twist.angle;
+        while (delta > Math.PI) delta -= Math.PI * 2;
+        while (delta < -Math.PI) delta += Math.PI * 2;
+        var prev = w.twist.acc;
+        w.twist.acc += Math.abs(delta);
+        if (Math.floor(w.twist.acc / 0.7) > Math.floor(prev / 0.7)) PGAudio.ratchet();
+        var frac = clamp(w.twist.acc / (Math.PI * 2), 0, 1);
+        $('torque-ring-fill').style.setProperty('--p', frac * 100);
+        w.terms[w.twist.term].mesh.rotation.y += delta;
+        if (frac >= 1) finishTorque();
+      }
+      w.twist.angle = ang;
+    }
+  }
+  function finishTorque() {
+    var w = bay.wiring;
+    var tw = w.twist;
+    if (!tw) return;
+    S.assembly.torques[tw.color] = true;
+    w.terms[tw.term].mesh.material.color.setHex(0x8f7331);
+    w.terms[tw.term].mesh.scale.set(1, 0.8, 1);
+    PGAudio.torqueDone();
+    toast('Terminal ' + tw.term.slice(1) + ' torqued.');
+    w.twist = null;
+    $('torque-ring').classList.add('hidden');
+    updateWiringNote();
+  }
+  function wiringUp(e, p) {
+    var w = bay.wiring;
+    if (!w) return;
+    if (w.drag && e.pointerId === w.drag.pid) {
+      var c = w.drag.color;
+      // nearest free terminal within 60px
+      var best = null, bestD = 60;
+      Object.keys(w.terms).forEach(function (t) {
+        if (w.terms[t].wire) return;
+        var sp = screenOfLocal(w.terms[t].local);
+        var dd = Math.hypot(sp.x - p.x, sp.y - p.y);
+        if (dd < bestD) { bestD = dd; best = t; }
       });
-    });
-  }
-
-  /* ---- LEDGER ---- */
-  function buildLedgerPane(d) {
-    var p = $('pane-ledger');
-    var R = PG.RFP;
-    var qa = S.design.qa;
-    var fuseNames = S.design.fuse.map(function (t, i) { return PG.TIERS[t].name; });
-    var qaRecord = [];
-    for (var i = 0; i < 4; i++) if (qa.batch[i] && qa.batch[i].tier === S.design.fuse[i]) qaRecord.push('STAGE-' + (i + 1) + ' BATCH ' + (qa.batch[i].rate * 100).toFixed(1) + '%');
-    if (qa.env) qaRecord.push('ENV CHAMBER ' + (S.envResult && S.envResult.pass ? 'PASS' : 'UNSTABLE+CRATES'));
-    if (qa.mic === 'pass') qaRecord.push('MICROMETER TRIM −15% DRIFT');
-    if (qa.mic === 'fail') qaRecord.push('INSPECTION INCONCLUSIVE');
-    if (!qaRecord.length) qaRecord.push('NONE. NOTED.');
-
-    p.innerHTML =
-      '<div class="station-title">STATION 4 · <b>BUDGET LEDGER &amp; COMPLIANCE</b></div>' +
-      '<table class="ledger-table">' +
-        '<tr><td>FILL — ' + S.design.mass + ' kg blend</td><td>' + fmt$(d.fillCost) + '</td></tr>' +
-        '<tr><td>CASING — ' + d.alloy.name + ', ' + S.design.wall + ' mm</td><td>' + fmt$(d.casingCost) + '</td></tr>' +
-        '<tr><td>FUSE CHAIN — ' + fuseNames.join(' / ').toLowerCase() + '</td><td>' + fmt$(d.fuseCost) + '</td></tr>' +
-        '<tr class="total' + (d.costOk ? '' : ' over') + '"><td>UNIT COST (CAP ' + fmt$(R.costCap) + ')</td><td>' + fmt$(d.unitCost) + '</td></tr>' +
-      '</table>' +
-      '<div class="compliance">' +
-        compRow('EFFECT ⌀ ' + R.craterMin + '–' + R.craterMax + ' m', predVerdict(d), predClass(d)) +
-        compRow('PRECISION ±' + R.timerTol + ' s', 'drift ±' + d.chainDrift.toFixed(2) + ' s', d.chainDrift <= R.timerTol * 0.7 ? 'ok' : (d.chainDrift <= R.timerTol * 1.4 ? 'warn' : 'bad')) +
-        compRow('CHAIN RELIABILITY', (d.chainRel * 100).toFixed(1) + '%', d.chainRel > 0.95 ? 'ok' : (d.chainRel > 0.85 ? 'warn' : 'bad')) +
-        compRow('WEIGHT ≤ ' + R.weightCap + ' kg', d.weight + ' kg', d.weightOk ? 'ok' : 'bad') +
-        compRow('INTERLOCK 7.4.1(c)', d.interlock ? 'FITTED' : 'ABSENT', d.interlock ? 'ok' : 'bad') +
-        compRow('THERMAL @ ' + R.forecastC + '°C', 'stab ' + d.blend.stability.toFixed(2) + ' / req ' + d.stabilityReq.toFixed(2) + (S.design.qa.env ? ' · QUALIFIED' : ' · UNTESTED'), (d.blend.stability >= d.stabilityReq || S.design.qa.env) ? 'ok' : 'warn') +
-      '</div>' +
-      '<div class="pred-note" style="margin-top:12px">QA RECORD: ' + qaRecord.join(' · ') + '<br>PROGRAM SPEND ' + fmt$(S.qaSpend) + ' (deducted from payout, not unit cost)</div>';
-  }
-  function compRow(lbl, val, cls) {
-    return '<div class="comp-row ' + cls + '"><span class="cr-lbl">' + lbl + '</span><span class="cr-val">' + val + '</span></div>';
-  }
-  function predVerdict(d) {
-    var R = PG.RFP;
-    if (d.craterHi < R.craterMin) return d.craterLo.toFixed(1) + '–' + d.craterHi.toFixed(1) + ' m · UNDER';
-    if (d.craterLo > R.craterMax) return d.craterLo.toFixed(1) + '–' + d.craterHi.toFixed(1) + ' m · OVER';
-    return d.craterLo.toFixed(1) + '–' + d.craterHi.toFixed(1) + ' m';
-  }
-  function predClass(d) {
-    var R = PG.RFP;
-    if (d.craterHi < R.craterMin || d.craterLo > R.craterMax) return 'bad';
-    if (d.craterMean < R.craterMin + 1 || d.craterMean > R.craterMax - 1) return 'warn';
-    return 'ok';
-  }
-
-  /* ---- refresh everything ---- */
-  function refreshBench() {
-    var d = PG.derive(S.design);
-    var R = PG.RFP;
-
-    if (triGeom) drawTriangle();
-
-    // property bars
-    var b = d.blend;
-    setBar('pb-en', 'pbv-en', b.energy / 10.5, b.energy.toFixed(1));
-    setBar('pb-st', 'pbv-st', b.stability, b.stability.toFixed(2));
-    setBar('pb-se', 'pbv-se', b.sens, b.sens.toFixed(2));
-    var req = $('pb-req');
-    if (req) req.style.left = (d.stabilityReq * 100) + '%';
-
-    // warnings
-    var warns = $('blend-warns');
-    if (warns) {
-      var tags = [];
-      if (b.stability < d.stabilityReq && !S.design.qa.env)
-        tags.push('<span class="warn-tag hot">⚠ THERMAL MARGIN NEGATIVE @ ' + R.forecastC + '°C — UNTESTED</span>');
-      if (b.stability < d.stabilityReq && S.design.qa.env)
-        tags.push('<span class="warn-tag good">THERMAL CRATES FITTED — CONTAINED</span>');
-      if (d.pTransport > 0)
-        tags.push('<span class="warn-tag bad">⚠ SHOCK-SENSITIVE — THE ROAD IS WASHBOARD</span>');
-      if (b.stability >= d.stabilityReq && d.pTransport === 0 && b.energy > 5)
-        tags.push('<span class="warn-tag good">BLEND WITHIN HANDLING ENVELOPE</span>');
-      warns.innerHTML = tags.join('');
-    }
-    var mv = $('mass-val'); if (mv) mv.textContent = S.design.mass + ' kg · ' + fmt$(d.fillCost);
-
-    // prediction band (axis 8..32 m)
-    var lo = 8, hi = 32;
-    var band = $('pred-band');
-    if (band) {
-      band.style.left = ((R.craterMin - lo) / (hi - lo) * 100) + '%';
-      band.style.width = ((R.craterMax - R.craterMin) / (hi - lo) * 100) + '%';
-      var ci = $('pred-ci');
-      var cl = clamp((d.craterLo - lo) / (hi - lo), 0, 1), ch = clamp((d.craterHi - lo) / (hi - lo), 0, 1);
-      ci.style.left = (cl * 100) + '%';
-      ci.style.width = Math.max((ch - cl) * 100, 1.5) + '%';
-      $('ptick-lo').style.left = ((R.craterMin - lo) / (hi - lo) * 100) + '%';
-      $('ptick-lo').textContent = R.craterMin + 'm';
-      $('ptick-hi').style.left = ((R.craterMax - lo) / (hi - lo) * 100) + '%';
-      $('ptick-hi').textContent = R.craterMax + 'm';
-      $('pred-note').innerHTML = 'PREDICTED ⌀ <b>' + d.craterLo.toFixed(1) + '–' + d.craterHi.toFixed(1) + ' m</b> · yield ' + d.yieldBd + ' Bd · ' + (S.design.qa.env ? 'band tightened by env. qualification' : 'a range, not a number — testing narrows it');
-    }
-
-    // casing pane
-    document.querySelectorAll('.alloy-card').forEach(function (c) {
-      c.classList.toggle('sel', c.dataset.alloy === S.design.alloy);
-    });
-    var wv = $('wall-val'); if (wv) wv.textContent = S.design.wall + ' mm · ' + fmt$(d.casingCost);
-    var wi = $('wall-inner');
-    if (wi) wi.setAttribute('r', String(34 - 3 - S.design.wall * 0.9));
-    var winfo = $('wall-info');
-    if (winfo) winfo.innerHTML =
-      'CASING WT <b>' + d.casingW.toFixed(1) + ' kg</b><br>SHAPE EFF <b>×' + d.eff.toFixed(2) + '</b><br>FRAG CHARACTER <b>' + (d.alloy.brittle > 0.7 ? 'WIDE SPRAY' : d.alloy.brittle > 0.35 ? 'MODERATE' : 'TIGHT') + '</b>';
-
-    // fuse pane
-    document.querySelectorAll('.fs-tier').forEach(function (btn) {
-      btn.classList.toggle('sel', S.design.fuse[+btn.dataset.stage] === btn.dataset.tier);
-    });
-    for (var i = 0; i < 4; i++) {
-      var stEl = $('fstage-' + i);
-      if (!stEl) continue;
-      stEl.classList.toggle('missing', S.design.fuse[i] === 'none');
-      var m = $('fmeasured-' + i);
-      var tested = S.design.qa.batch[i] && S.design.qa.batch[i].tier === S.design.fuse[i];
-      m.classList.toggle('hidden', !tested);
-    }
-    var math = $('chain-math');
-    if (math) {
-      var parts = [], prod = 1;
-      for (i = 0; i < 4; i++) {
-        var tid = S.design.fuse[i];
-        if (tid === 'none') { parts.push('<span style="color:#ff8d7e">1.00*</span>'); continue; }
-        var tested2 = S.design.qa.batch[i] && S.design.qa.batch[i].tier === tid;
-        var r = tested2 ? S.design.qa.batch[i].rate : PG.TIERS[tid].rel;
-        parts.push('<span class="' + (tested2 ? 'measured' : '') + '">' + (r * 100).toFixed(1) + '%</span>');
-      }
-      math.innerHTML = parts.join(' × ') + ' = <b>' + (d.chainRel * 100).toFixed(1) + '% CHAIN</b>';
-      var micNote = S.design.qa.mic === 'pass' ? ' <span class="mic-ok">(−15% micrometer trim)</span>' : '';
-      $('chain-drift').innerHTML = 'TIMER DRIFT <b>±' + d.chainDrift.toFixed(2) + ' s</b> vs spec ±' + R.timerTol + ' s' + micNote;
-      $('interlock-alert').classList.toggle('hidden', d.interlock);
-    }
-    var fuseTab = document.querySelector('.bench-tabs [data-tab="fuse"]');
-    if (fuseTab) fuseTab.classList.toggle('warn', !d.interlock);
-    var ledgerTab = document.querySelector('.bench-tabs [data-tab="ledger"]');
-    if (ledgerTab) ledgerTab.classList.toggle('warn', !d.costOk || !d.weightOk);
-
-    // ledger
-    buildLedgerPane(d);
-
-    // status bar
-    $('bs-cost').textContent = fmt$(d.unitCost);
-    $('bs-cost').classList.toggle('over', !d.costOk);
-    var cf = $('bs-cost-fill');
-    cf.style.width = clamp(d.unitCost / R.costCap * 100, 0, 100) + '%';
-    cf.className = 'bs-fill' + (d.unitCost > R.costCap ? ' over' : d.unitCost > R.costCap * 0.85 ? ' warn' : '');
-    $('bs-weight').textContent = d.weight + ' kg';
-    $('bs-weight').classList.toggle('over', !d.weightOk);
-    var wf = $('bs-weight-fill');
-    wf.style.width = clamp(d.weight / R.weightCap * 100, 0, 100) + '%';
-    wf.className = 'bs-fill' + (d.weight > R.weightCap ? ' over' : d.weight > R.weightCap * 0.85 ? ' warn' : '');
-    $('bs-crater').textContent = '⌀ ' + d.craterLo.toFixed(1) + '–' + d.craterHi.toFixed(1) + ' m';
-    $('bs-chain').textContent = 'CHAIN ' + (d.chainRel * 100).toFixed(1) + '% · ±' + d.chainDrift.toFixed(2) + 's';
-  }
-  function setBar(fillId, valId, frac, txt) {
-    var f = $(fillId), v = $(valId);
-    if (!f) return;
-    f.style.width = clamp(frac * 100, 2, 100) + '%';
-    v.textContent = txt;
-  }
-
-  /* ================= QA BAY ================= */
-  function buildQA() {
-    var body = $('qa-body');
-    var qa = S.design.qa;
-    var stageBtns = PG.STAGES.map(function (st, i) {
-      var tier = S.design.fuse[i];
-      var done = qa.batch[i] && qa.batch[i].tier === tier;
-      var dis = tier === 'none' ? ' disabled' : '';
-      return '<button class="qa-stage-btn' + (done ? ' done' : '') + '" data-stage="' + i + '"' + dis + ' type="button">' +
-        st.short + (done ? ' ✓' : '') + '</button>';
-    }).join('');
-
-    body.innerHTML =
-      '<div class="qa-card" id="qa-batch">' +
-        '<h3>FUSE BATCH TEST <span class="qa-price">$150 / stage</span></h3>' +
-        '<p>Fire ten units from a stage’s delivered batch. Replaces the catalog’s poetry with this batch’s <b>measured true rate</b>. Sometimes the war-surplus crate is secretly great. Sometimes.</p>' +
-        '<div class="qa-stage-picker">' + stageBtns + '</div>' +
-        '<button class="qa-run-btn" id="qa-batch-run" type="button" disabled>SELECT A STAGE</button>' +
-        '<div class="qa-result" id="qa-batch-result"></div>' +
-      '</div>' +
-      '<div class="qa-card" id="qa-env">' +
-        '<h3>ENVIRONMENTAL CHAMBER <span class="qa-price">$200</span></h3>' +
-        '<p>Bake the blend to the range forecast (' + PG.RFP.forecastC + '°C) and see what it thinks. If it sulks, thermal crates are fitted for the truck ride — no cook-off on the pad.</p>' +
-        '<div class="env-meter"><div class="env-needle" id="env-needle"></div></div>' +
-        '<button class="qa-run-btn" id="qa-env-run" type="button"' + (qa.env ? ' disabled' : '') + '>' + (qa.env ? 'QUALIFIED' : 'RUN CHAMBER CYCLE') + '</button>' +
-        '<div class="qa-result" id="qa-env-result">' + (S.envResult ? envResultText() : '') + '</div>' +
-      '</div>' +
-      '<div class="qa-card" id="qa-mic">' +
-        '<h3>MICROMETER INSPECTION <span class="qa-price">$0 · skill</span></h3>' +
-        '<p>You are the QA department. Verify the timer sleeve dimension by hand. Success trims timer drift by 15%. Failure reports, truthfully, nothing.</p>' +
-        '<button class="qa-run-btn" id="qa-mic-run" type="button"' + (S.micUsed ? ' disabled' : '') + '>' +
-          (S.micUsed ? (qa.mic === 'pass' ? 'TRIMMED −15% DRIFT ✓' : 'INSPECTION INCONCLUSIVE') : 'PICK UP THE MICROMETER') + '</button>' +
-        '<div class="qa-result" id="qa-mic-result"></div>' +
-      '</div>' +
-      '<p class="pred-note" style="padding:0 4px">Skipping QA is always allowed, occasionally correct, and permanently on the record.</p>';
-
-    $('qa-spend').textContent = 'PROGRAM SPEND ' + fmt$(S.qaSpend);
-
-    var selStage = -1;
-    body.querySelectorAll('.qa-stage-btn').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        selStage = +btn.dataset.stage;
-        body.querySelectorAll('.qa-stage-btn').forEach(function (b) { b.style.background = ''; });
-        btn.style.background = 'rgba(229,161,61,.18)';
-        var tier = S.design.fuse[selStage];
-        var done = qa.batch[selStage] && qa.batch[selStage].tier === tier;
-        var run = $('qa-batch-run');
-        run.disabled = done;
-        run.textContent = done ? 'ALREADY MEASURED' : 'FIRE 10 UNITS — ' + PG.STAGES[selStage].short + ' ($150)';
-        PGAudio.click();
-      });
-    });
-    $('qa-batch-run').addEventListener('click', function () {
-      if (selStage < 0) return;
-      runBatchTest(selStage);
-    });
-    $('qa-env-run').addEventListener('click', runEnvTest);
-    $('qa-mic-run').addEventListener('click', openMicrometer);
-  }
-  function envResultText() {
-    if (!S.envResult) return '';
-    return S.envResult.pass
-      ? '<span class="good">PASS</span> — blend held composure at ' + PG.RFP.forecastC + '°C. Certificate suitable for framing.'
-      : '<span class="bad">UNSTABLE</span> — blend expressed opinions at ' + PG.RFP.forecastC + '°C. Thermal crates fitted; pad risk contained. The blend remains on the naughty list.';
-  }
-
-  function runBatchTest(stageIdx) {
-    var tier = S.design.fuse[stageIdx];
-    if (tier === 'none') return;
-    S.qaSpend += PG.QA_COST.batch;
-    var mont = PG.batchMontage(S.seed, stageIdx, tier);
-    var res = $('qa-batch-result');
-    res.innerHTML = 'BENCH MONTAGE — ' + PG.STAGES[stageIdx].name + ', ' + PG.TIERS[tier].name + ' batch:' +
-      '<div class="pip-row" id="pip-row"></div><div id="pip-verdict"></div>';
-    var row = $('pip-row');
-    for (var i = 0; i < 10; i++) {
-      var pip = document.createElement('span');
-      pip.className = 'pip';
-      row.appendChild(pip);
-    }
-    var pips = row.children;
-    var k = 0;
-    $('qa-batch-run').disabled = true;
-    var iv = setInterval(function () {
-      var ok = mont.shots[k];
-      pips[k].classList.add('fired', ok ? 'hit' : 'miss');
-      pips[k].textContent = ok ? '✓' : '✕';
-      PGAudio.benchPop(ok);
-      k++;
-      if (k >= 10) {
-        clearInterval(iv);
-        S.design.qa.batch[stageIdx] = { tier: tier, rate: mont.rate };
-        var cat = PG.TIERS[tier].rel;
-        var better = mont.rate >= cat;
-        $('pip-verdict').innerHTML = mont.hits + '/10 fired. MEASURED TRUE RATE <b>' + (mont.rate * 100).toFixed(1) + '%</b> ' +
-          (better ? '<span class="good">(catalog said ' + (cat * 100).toFixed(1) + '% — this batch is a good one)</span>'
-                  : '<span class="bad">(catalog said ' + (cat * 100).toFixed(1) + '% — the catalog was optimistic)</span>');
-        $('qa-spend').textContent = 'PROGRAM SPEND ' + fmt$(S.qaSpend);
-        setTimeout(function () { buildQA(); $('qa-batch-result').innerHTML = res.innerHTML; }, 1400);
-      }
-    }, 170);
-  }
-
-  function runEnvTest() {
-    S.qaSpend += PG.QA_COST.env;
-    S.design.qa.env = true;
-    var d = PG.derive(S.design);
-    var pass = d.blend.stability >= d.stabilityReq;
-    S.envResult = { pass: pass };
-    $('qa-env-run').disabled = true;
-    $('qa-env-run').textContent = 'CYCLING…';
-    PGAudio.chamberHum(true);
-    var needle = $('env-needle');
-    // needle sweeps to where the blend sits vs requirement
-    var pos = clamp(0.5 + (d.stabilityReq - d.blend.stability) * 1.6, 0.06, 0.96);
-    requestAnimationFrame(function () { needle.style.left = (pos * 100) + '%'; });
-    setTimeout(function () {
-      $('qa-env-result').innerHTML = envResultText();
-      $('qa-env-run').textContent = 'QUALIFIED';
-      $('qa-spend').textContent = 'PROGRAM SPEND ' + fmt$(S.qaSpend);
-      PGAudio.benchPop(pass);
-      if (!pass) PGAudio.buzz();
-    }, 1700);
-  }
-
-  /* ---- micrometer minigame ---- */
-  var mic = { active: false, offset: 0, target: 0, timer: null, t0: 0 };
-  function openMicrometer() {
-    if (S.micUsed) return;
-    $('mic-overlay').classList.remove('hidden');
-    mic.active = true;
-    mic.target = (Math.random() < 0.5 ? -1 : 1) * (40 + Math.random() * 70); // px the sleeve starts off by
-    mic.offset = mic.target;
-    mic.t0 = performance.now();
-    buildMicScale();
-    updateMicSleeve();
-    var TIME = 10000;
-    clearInterval(mic.timer);
-    mic.timer = setInterval(function () {
-      var left = 1 - (performance.now() - mic.t0) / TIME;
-      $('mic-timer-fill').style.width = Math.max(left * 100, 0) + '%';
-      if (left <= 0) finishMicrometer(false, true);
-    }, 100);
-
-    var zone = $('mic-zone');
-    var dragX = null;
-    zone.onpointerdown = function (e) { dragX = e.clientX; zone.setPointerCapture(e.pointerId); };
-    zone.onpointermove = function (e) {
-      if (dragX == null) return;
-      var dx = e.clientX - dragX;
-      dragX = e.clientX;
-      var prev = Math.round(mic.offset / 8);
-      mic.offset += dx * 0.55;   // vernier gearing
-      if (Math.round(mic.offset / 8) !== prev) PGAudio.click();
-      updateMicSleeve();
-    };
-    zone.onpointerup = zone.onpointercancel = function () { dragX = null; };
-    $('btn-mic-lock').onclick = function () { finishMicrometer(Math.abs(mic.offset) <= 4.5, false); };
-  }
-  function buildMicScale() {
-    var sleeve = $('mic-sleeve');
-    var w = $('mic-zone').clientWidth;
-    var html = '';
-    // ticks across the sleeve; center datum brighter
-    for (var i = -12; i <= 12; i++) {
-      var x = 50 + i * 4.2;
-      var main = i === 0;
-      html += '<div style="position:absolute;left:' + x + '%;top:0;width:' + (main ? 2.5 : 1) + 'px;height:' +
-        (main ? 100 : (i % 5 === 0 ? 62 : 38)) + '%;background:' + (main ? '#e5a13d' : 'rgba(156,200,234,.65)') +
-        (main ? ';box-shadow:0 0 8px rgba(229,161,61,.8)' : '') + '"></div>';
-    }
-    sleeve.innerHTML = html;
-    void w;
-  }
-  function updateMicSleeve() {
-    $('mic-sleeve').style.transform = 'translateX(' + mic.offset + 'px)';
-    $('mic-readout').textContent = 'Δ ' + (Math.abs(mic.offset) * 0.0007).toFixed(4) + ' vn';
-  }
-  function finishMicrometer(success, timedOut) {
-    if (!mic.active) return;
-    mic.active = false;
-    clearInterval(mic.timer);
-    $('mic-overlay').classList.add('hidden');
-    S.micUsed = true;
-    S.design.qa.mic = success ? 'pass' : 'fail';
-    if (success) {
-      PGAudio.benchPop(true);
-      toast('Sleeve within tolerance. Timer drift trimmed −15%.');
-    } else {
-      PGAudio.buzz();
-      toast(timedOut ? 'Time expired. Inspection inconclusive — truthfully reported.' : 'Off tolerance. Inspection inconclusive — truthfully reported.');
-    }
-    buildQA();
-  }
-
-  /* ================= RANGE DAY — STATION 7 ================= */
-  var Range = (function () {
-    var cv, ctx, W = 390, H = 700, dpr = 1;
-    var raf = null, active = false;
-    var mode = 'pad';           // pad | camera
-    var phase = 'transition';   // transition | idle | armed | counting | outcome | replay
-    var t0 = 0;                 // phase start (performance.now)
-    var sweep = 0;              // blueprint transition 0..1
-    var outcome = null, visual = null;
-    var camT = 0;               // seconds since FIRE
-    var detAt = null, soundAt = null, detHappened = false, soundHappened = false;
-    var lastBeep = null;
-    var shake = 0;
-    var frags = [], seismo = [];
-    var grainTiles = [], vignette = null;
-    var caption = $('range-caption');
-    var capTimers = [];
-    var zoom = 1, zoomTarget = 1;
-    var volunteerT = -1;
-    var replaySpeed = 1, frameNo = 0;
-    var noiseSeedFn = null;
-    var inspectorT = -1;
-    var lastFrameT = 0;
-
-    function onShow() {
-      active = true;
-      size();
-      if (!raf) { lastFrameT = performance.now(); raf = requestAnimationFrame(loop); }
-    }
-    function onHide() {
-      active = false;
-      if (raf) { cancelAnimationFrame(raf); raf = null; }
-      capTimers.forEach(clearTimeout); capTimers = [];
-    }
-    function size() {
-      cv = $('range-canvas');
-      ctx = cv.getContext('2d');
-      var r = $('scr-range').getBoundingClientRect();
-      dpr = Math.min(window.devicePixelRatio || 1, 2);
-      W = Math.max(300, r.width); H = Math.max(400, r.height);
-      cv.width = W * dpr; cv.height = H * dpr;
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      makeGrain();
-      makeVignette();
-    }
-    function makeGrain() {
-      grainTiles = [];
-      for (var g = 0; g < 3; g++) {
-        var c = document.createElement('canvas');
-        c.width = 96; c.height = 96;
-        var x = c.getContext('2d');
-        var img = x.createImageData(96, 96);
-        for (var i = 0; i < img.data.length; i += 4) {
-          var v = 110 + Math.random() * 120;
-          img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
-          img.data[i + 3] = 26;
-        }
-        x.putImageData(img, 0, 0);
-        grainTiles.push(c);
-      }
-    }
-    function makeVignette() {
-      vignette = document.createElement('canvas');
-      vignette.width = Math.ceil(W / 2); vignette.height = Math.ceil(H / 2);
-      var x = vignette.getContext('2d');
-      var g = x.createRadialGradient(W / 4, H / 4, Math.min(W, H) * 0.24, W / 4, H / 4, Math.max(W, H) * 0.42);
-      g.addColorStop(0, 'rgba(0,0,0,0)');
-      g.addColorStop(1, 'rgba(0,0,0,.5)');
-      x.fillStyle = g;
-      x.fillRect(0, 0, vignette.width, vignette.height);
-    }
-
-    /* ---- entry ---- */
-    function enter(result) {
-      outcome = result.outcome;
-      visual = outcome.visual;
-      mode = 'pad'; phase = 'transition'; t0 = performance.now();
-      sweep = 0; camT = 0; detHappened = false; soundHappened = false;
-      detAt = null; soundAt = null; lastBeep = null; shake = 0;
-      frags = []; seismo = []; zoom = 1; zoomTarget = 1;
-      volunteerT = -1; inspectorT = -1; frameNo = 0; replaySpeed = 1;
-      noiseSeedFn = PG.stream(S.seed, 'visual-noise');
-      $('cam-overlay').classList.add('hidden');
-      $('cam-tick').classList.add('hidden');
-      $('cam-frame').classList.add('hidden');
-      $('btn-arm').classList.add('hidden');
-      $('btn-fire').classList.add('hidden');
-      $('range-after').classList.add('hidden');
-      setCaption('', '');
-      schedule(600, function () { PGAudio.wind(); });
-    }
-
-    function setCaption(small, main) {
-      caption.innerHTML = (small ? '<span class="cap-small">' + small + '</span>' : '') + (main || '');
-    }
-    function schedule(ms, fn) { capTimers.push(setTimeout(fn, ms)); }
-
-    /* ---- phase transitions ---- */
-    function toIdle() {
-      phase = 'idle'; t0 = performance.now();
-      if (outcome.type === 'transport') {
-        setCaption('SECTOR 9 · APPROACH ROAD', 'The board checks its watches. The truck is late.');
-        schedule(2200, function () {
-          detHappened = true; t0 = performance.now();
-          PGAudio.detonation(0.5, false);
-          shake = 6;
-          setCaption('T−(EARLY)', 'The truck arrived. The device did not.');
-          schedule(3200, function () { afterOutcome(); });
-        });
-        return;
-      }
-      if (outcome.type === 'interlock') {
-        setCaption('PRE-FIRE CHECKLIST', 'A board inspector approaches the pad, clipboard first.');
-        inspectorT = 0;
-        schedule(4200, function () {
-          PGAudio.stampThud();
-          setCaption('SPEC 7.4.1(c)', '<b style="color:#ff8d7e">“Where,” the inspector asks, “is the interlock?”</b>');
-          schedule(2600, function () {
-            PGAudio.buzz();
-            setCaption('', '<b style="color:#ff8d7e">TEST HALTED — ARTICLE IMPOUNDED</b>');
-            schedule(1800, afterOutcome);
-          });
-        });
-        return;
-      }
-      setCaption('SECTOR 9 · PAD A · ' + PG.RFP.forecastC + '°C', 'The review board raises its binoculars.');
-      $('btn-arm').classList.remove('hidden');
-    }
-
-    function armed() {
-      phase = 'armed'; t0 = performance.now();
-      $('btn-arm').classList.add('hidden');
-      PGAudio.klaxon();
-      setCaption('RANGE HOT · RANGE HOT', 'All personnel to the bunker. The lunch tent stays where it is.');
-      schedule(1700, function () {
-        $('btn-fire').classList.remove('hidden');
-      });
-    }
-
-    function fire() {
-      $('btn-fire').classList.add('hidden');
-      mode = 'camera'; phase = 'counting'; t0 = performance.now();
-      camT = 0;
-      $('cam-overlay').classList.remove('hidden');
-      $('cam-station').textContent = PG.RFP.camera.id + ' — ' + PG.RFP.camera.km.toFixed(1) + ' KM';
-      setCaption('', '');
-      // event times (seconds on the camera clock; T-0 = camT 5.0)
-      if (outcome.type === 'cookoff') {
-        detAt = 2.3;  // T−2.7, off-cue
-      } else if (outcome.fired) {
-        detAt = 5 + outcome.timerDelta;
+      w.drag = null;
+      if (best) {
+        w.wires[c].end = best;
+        w.terms[best].wire = c;
+        S.assembly.wires[c] = best;
+        PGAudio.wireSnap();
       } else {
-        detAt = null; // dud
+        w.wires[c].end = null;
+        S.assembly.wires[c] = null;
+        PGAudio.wireDrop();
       }
-      soundAt = detAt != null ? detAt + visual.soundDelay : null;
-      lastBeep = 6;
+      updateWireCurve(c, null);
+      updateWiringNote();
     }
-
-    function afterOutcome() {
-      phase = 'outcome';
-      var after = $('range-after');
-      after.classList.remove('hidden');
-      $('btn-replay').classList.toggle('hidden', !detHappened || mode !== 'camera');
+    if (w.twist && e.pointerId === w.twist.pid) {
+      w.twist = null;
+      $('torque-ring').classList.add('hidden');
     }
-
-    function startReplay() {
-      if (detAt == null) return;
-      phase = 'replay'; t0 = performance.now();
-      replaySpeed = 0.3;
-      camT = detAt - 0.4;
-      detHappened = false;
-      frags = [];
-      frameNo = 0;
-      shake = 0;
-      $('range-after').classList.add('hidden');
-      $('cam-frame').classList.remove('hidden');
-      $('cam-tick').classList.add('hidden');
-      setCaption('OPTICAL REPLAY — HIGH-SPEED FILM', '');
-      // slow-mo covers the silent flash + bloom only; the wavefront was live-only
-      schedule(((detAt + 2.0 - camT) / replaySpeed) * 1000, function () {
-        replaySpeed = 1;
-        $('cam-frame').classList.add('hidden');
-        outcomeCaptions();
-        afterOutcome();
-      });
-    }
-
-    /* ---- captions for camera outcomes ---- */
-    function outcomeCaptions() {
-      var R = PG.RFP;
-      if (outcome.type === 'success') {
-        setCaption('STATION 7 TELEMETRY', 'Crater ⌀ <b>' + outcome.craterActual.toFixed(1) + ' m</b> · det at T+' + outcome.timerActual.toFixed(2) + ' s.<br>The board pretends not to smile.');
-      } else if (outcome.type === 'partial') {
-        var small = outcome.craterActual < R.craterMin;
-        setCaption('STATION 7 TELEMETRY', 'Crater ⌀ <b>' + outcome.craterActual.toFixed(1) + ' m</b> — ' + (small ? 'under' : 'over') + ' the spec band.<br>' + (small ? 'The quarry face shrugs it off.' : 'The quarry wanted a door, not a lake.'));
-      } else if (outcome.type === 'fizzle') {
-        setCaption('STATION 7 TELEMETRY', 'Low-order event. Smoke, disappointment, a crater of ⌀ ' + outcome.craterActual.toFixed(1) + ' m.<br>A board member writes one word. It is not a good word.');
-      } else if (outcome.type === 'cookoff') {
-        setCaption('OFF-CUE EVENT — T−2.7 s', 'The desert heat had opinions about your blend.<br>The lunch tent has been redistributed. Nobody is hurt. Lunch is.');
-      }
-    }
-
-    function dudSequence() {
-      setCaption('T+00:04 · NO EVENT', 'The device sits there. The desert sits there. Everyone sits there.');
-      schedule(3500, function () {
-        setCaption('T+02:00 · RANGE SAFETY PROTOCOL', 'A volunteer is selected. His helmet is two sizes too large.');
-        zoomTarget = 2.8;
-        $('cam-tick').textContent = 'ZOOM 2.8×';
-        $('cam-tick').classList.remove('hidden');
-        volunteerT = 0;
-      });
-      schedule(9500, function () {
-        setCaption('T+09:12', 'He taps it with a very long stick. Nothing. He gives Station 7 a thumbs-up.');
-      });
-      schedule(12200, function () {
-        PGAudio.stampThud();
-        setCaption('', '<b>MADE SAFE — STAGE-' + (outcome.failStage + 1) + ' ' + PG.STAGES[outcome.failStage].short + ' NO-FIRE</b>');
-        $('cam-tick').classList.add('hidden');
-        schedule(1600, afterOutcome);
-      });
-    }
-
-    /* ---- main loop ---- */
-    function loop(now) {
-      raf = active ? requestAnimationFrame(loop) : null;
-      if (!active) return;
-      var dtms = Math.min(now - lastFrameT, 50);
-      lastFrameT = now;
-      var dt = dtms / 1000;
-      var t = (now - t0) / 1000;
-
-      if (phase === 'transition') {
-        sweep = clamp(t / 1.9, 0, 1);
-        if (sweep >= 1) toIdle();
-      }
-      if (mode === 'camera' && (phase === 'counting' || phase === 'replay')) {
-        camT += dt * replaySpeed;
-        if (phase === 'replay') {
-          frameNo += Math.round(24 * dt * 4); // slow-mo footage: high-speed frames
-          $('cam-frame').textContent = 'FRM ' + String(frameNo).padStart(4, '0') + ' · ' + replaySpeed.toFixed(2) + '×';
-        }
-        updateCameraClock();
-        // countdown beeps (live only)
-        if (phase === 'counting' && !detHappened) {
-          var tMinus = 5 - camT;
-          var whole = Math.ceil(tMinus);
-          if (whole >= 0 && whole <= 4 && whole !== lastBeep && tMinus > -0.05) {
-            lastBeep = whole;
-            PGAudio.beep(whole === 0);
-          }
-        }
-        // detonation
-        if (detAt != null && !detHappened && camT >= detAt) {
-          detHappened = true;
-          frags = [];
-          if (phase === 'counting' && outcome.type === 'cookoff') {
-            $('cam-tick').textContent = 'OFF-CUE EVENT — T−' + Math.abs(5 - camT).toFixed(1) + ' s';
-            $('cam-tick').classList.remove('hidden');
-          }
-        }
-        // dud: T-0 passes with nothing
-        if (detAt == null && phase === 'counting' && camT > 5.6 && volunteerT < 0 && phase !== 'outcome') {
-          phase = 'outcomePending';
-          PGAudio.wind();
-          dudSequence();
-        }
-        // wavefront arrival
-        if (soundAt != null && !soundHappened && camT >= soundAt) {
-          soundHappened = true;
-          shake = visual.fizzle ? 3 : 8 + visual.dust * 8;
-          if (phase === 'replay') {
-            PGAudio.detonation(0.25, visual.fizzle);
-          } else {
-            PGAudio.detonation(clamp(visual.dust, 0.2, 1.2), visual.fizzle);
-            PGAudio.seismo();
-            $('cam-tick').textContent = 'WAVEFRONT — T+' + visual.soundDelay.toFixed(1) + ' s · ' + PG.RFP.camera.km.toFixed(1) + ' KM';
-            $('cam-tick').classList.remove('hidden');
-            schedule(2400, function () { $('cam-tick').classList.add('hidden'); });
-            schedule(2600, function () {
-              outcomeCaptions();
-              afterOutcome();
-            });
-          }
-        }
-      }
-      if (phase === 'outcomePending') { camT += dt; updateCameraClock(); }
-      if (volunteerT >= 0) volunteerT += dt;
-      if (inspectorT >= 0) inspectorT += dt;
-      zoom += (zoomTarget - zoom) * Math.min(dt * 2, 1);
-      shake = Math.max(0, shake - dt * (shake > 4 ? 9 : 4));
-
-      render(now / 1000, dt);
-    }
-
-    function updateCameraClock() {
-      var tm = camT - 5;
-      var sign = tm < 0 ? 'T−' : 'T+';
-      var a = Math.abs(tm);
-      var mm = String(Math.floor(a / 60)).padStart(2, '0');
-      var ss = (a % 60).toFixed(1).padStart(4, '0');
-      $('cam-clock').textContent = sign + mm + ':' + ss;
-    }
-
-    /* ---- render dispatch ---- */
-    function render(tAbs, dt) {
-      ctx.save();
-      if (shake > 0.05) ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
-      if (mode === 'pad') renderPadScene(tAbs);
-      else renderCameraScene(tAbs, dt);
-      ctx.restore();
-    }
-
-    /* =========== PAD SCENE (arming) =========== */
-    function renderPadScene(tAbs) {
-      drawDesert(ctx, W, H, tAbs, false);
-      drawPadProps(ctx, tAbs);
-      if (outcome && outcome.type === 'transport' && detHappened) {
-        // plume on the horizon, stage left
-        var tt = (performance.now() - t0) / 1000;
-        drawPlume(W * 0.13, H * 0.52, Math.min(tt * 40 + 20, 90), 0.8, tt);
-      }
-      // blueprint layer wipes away left→right
-      if (sweep < 1) {
-        var x = sweep * (W + 60);
-        ctx.save();
-        ctx.beginPath();
-        ctx.rect(x, 0, W - x + 60, H);
-        ctx.clip();
-        drawBlueprintScene(ctx, tAbs);
-        ctx.restore();
-        // develop line
-        ctx.fillStyle = 'rgba(240,230,200,.9)';
-        ctx.fillRect(x - 1.5, 0, 3, H);
-        ctx.fillStyle = 'rgba(156,200,234,.28)';
-        ctx.fillRect(x - 10, 0, 9, H);
-      }
-      drawGrain(0.045);
-    }
-
-    function drawBlueprintScene(ctx, tAbs) {
-      // blueprint backdrop
-      ctx.fillStyle = '#0d2137';
-      ctx.fillRect(0, 0, W, H);
-      ctx.strokeStyle = 'rgba(156,200,234,.14)';
-      ctx.lineWidth = 1;
-      for (var gx = 0; gx < W; gx += 28) { ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, H); ctx.stroke(); }
-      for (var gy = 0; gy < H; gy += 28) { ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(W, gy); ctx.stroke(); }
-      ctx.strokeStyle = 'rgba(156,200,234,.9)';
-      ctx.lineWidth = 1.4;
-      drawSceneLinework(ctx);
-      ctx.font = '10px Menlo, monospace';
-      ctx.fillStyle = 'rgba(156,200,234,.75)';
-      ctx.textAlign = 'left';
-      ctx.fillText('FIG. 1 — TEST ARTICLE, PAD A', 16, H * 0.86);
-      ctx.fillText('SCALE: OPTIMISTIC', 16, H * 0.86 + 14);
-    }
-    function drawSceneLinework(ctx) {
-      var hy = H * 0.55;
-      // horizon + mesas outline
-      ctx.beginPath(); ctx.moveTo(0, hy); ctx.lineTo(W, hy); ctx.stroke();
-      mesaPath(ctx, hy); ctx.stroke();
-      // pad
-      ctx.strokeRect(W * 0.38, H * 0.66, W * 0.24, 8);
-      deviceOutline(ctx, W * 0.5, H * 0.66, true);
-      // bunker
-      ctx.strokeRect(W * 0.72, H * 0.72, W * 0.2, H * 0.1);
-      // stand + tent
-      ctx.strokeRect(W * 0.08, H * 0.70, W * 0.16, H * 0.05);
-      ctx.beginPath();
-      ctx.moveTo(W * 0.08, H * 0.70); ctx.lineTo(W * 0.16, H * 0.655); ctx.lineTo(W * 0.24, H * 0.70);
-      ctx.stroke();
-    }
-    function mesaPath(ctx, hy) {
-      ctx.beginPath();
-      ctx.moveTo(0, hy);
-      ctx.lineTo(W * 0.08, hy - 26); ctx.lineTo(W * 0.2, hy - 26); ctx.lineTo(W * 0.26, hy - 6);
-      ctx.lineTo(W * 0.55, hy - 2); ctx.lineTo(W * 0.62, hy - 38); ctx.lineTo(W * 0.78, hy - 38);
-      ctx.lineTo(W * 0.85, hy - 8); ctx.lineTo(W, hy - 12);
-    }
-
-    function drawDesert(ctx, W, H, tAbs, far) {
-      var hy = H * 0.55;
-      // sky
-      var sky = ctx.createLinearGradient(0, 0, 0, hy);
-      sky.addColorStop(0, '#7fb0d6');
-      sky.addColorStop(0.55, '#cfd9d3');
-      sky.addColorStop(1, '#f0d9a8');
-      ctx.fillStyle = sky;
-      ctx.fillRect(0, 0, W, hy + 2);
-      // sun
-      ctx.fillStyle = 'rgba(255,244,214,.9)';
-      ctx.beginPath(); ctx.arc(W * 0.78, hy * 0.32, 26, 0, 7); ctx.fill();
-      ctx.fillStyle = 'rgba(255,244,214,.25)';
-      ctx.beginPath(); ctx.arc(W * 0.78, hy * 0.32, 44, 0, 7); ctx.fill();
-      // mesas
-      ctx.fillStyle = '#b98a63';
-      mesaPath(ctx, hy);
-      ctx.lineTo(W, hy); ctx.closePath(); ctx.fill();
-      ctx.fillStyle = 'rgba(133,94,66,.45)';
-      ctx.fillRect(0, hy - 2, W, 3);
-      // ground
-      var gnd = ctx.createLinearGradient(0, hy, 0, H);
-      gnd.addColorStop(0, '#d9a05b');
-      gnd.addColorStop(1, '#a9713d');
-      ctx.fillStyle = gnd;
-      ctx.fillRect(0, hy, W, H - hy);
-      // scrub dots
-      ctx.fillStyle = 'rgba(110,90,50,.35)';
-      for (var i = 0; i < 40; i++) {
-        var sx = (i * 97.3) % W;
-        var sy = hy + 8 + ((i * 53.7) % (H - hy - 20));
-        var sc = far ? 0.6 : 1;
-        ctx.fillRect(sx, sy, 3 * sc, 1.6 * sc);
-      }
-    }
-
-    function deviceOutline(ctx, cx, padY, strokeOnly) {
-      var mass = S.design.mass;
-      var dw = 26 + mass * 0.55, dh = 20 + mass * 0.32;
-      var y = padY - dh - 8;
-      if (strokeOnly) {
-        ctx.strokeRect(cx - dw / 2, y, dw, dh);
-        ctx.beginPath(); ctx.arc(cx, y, dw * 0.18, Math.PI, 0); ctx.stroke();
-        return;
-      }
-      var colors = { sr2: ['#6e6a63', '#4c4842'], d9: ['#7c8b99', '#57646f'], n3: ['#c2c8cf', '#8f979f'] };
-      var c = colors[S.design.alloy];
-      var g = ctx.createLinearGradient(cx - dw / 2, 0, cx + dw / 2, 0);
-      g.addColorStop(0, c[1]); g.addColorStop(0.45, c[0]); g.addColorStop(1, c[1]);
-      // trestle
-      ctx.strokeStyle = '#6b4a2a'; ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.moveTo(cx - dw * 0.3, padY - 6); ctx.lineTo(cx - dw * 0.45, padY + 6);
-      ctx.moveTo(cx + dw * 0.3, padY - 6); ctx.lineTo(cx + dw * 0.45, padY + 6);
-      ctx.stroke();
-      ctx.fillStyle = g;
-      roundRect(ctx, cx - dw / 2, y, dw, dh, 6); ctx.fill();
-      // wall band graphic
-      ctx.strokeStyle = 'rgba(20,18,15,.5)';
-      ctx.lineWidth = Math.max(1.5, S.design.wall * 0.22);
-      roundRect(ctx, cx - dw / 2, y, dw, dh, 6); ctx.stroke();
-      // nose cap + stencil
-      ctx.fillStyle = '#b02c1e';
-      ctx.beginPath(); ctx.arc(cx, y + 2, dw * 0.16, Math.PI, 0); ctx.fill();
-      ctx.fillStyle = 'rgba(255,255,255,.75)';
-      ctx.font = '700 ' + Math.max(8, dw * 0.16) + 'px Menlo, monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText('041', cx, y + dh * 0.6);
-    }
-    function roundRect(ctx, x, y, w, h, r) {
-      ctx.beginPath();
-      ctx.moveTo(x + r, y);
-      ctx.arcTo(x + w, y, x + w, y + h, r);
-      ctx.arcTo(x + w, y + h, x, y + h, r);
-      ctx.arcTo(x, y + h, x, y, r);
-      ctx.arcTo(x, y, x + w, y, r);
-      ctx.closePath();
-    }
-
-    function drawPadProps(ctx, tAbs) {
-      var padY = H * 0.685;
-      // concrete pad
-      ctx.fillStyle = '#b9b3a4';
-      ctx.fillRect(W * 0.38, padY - 4, W * 0.24, 10);
-      ctx.fillStyle = 'rgba(0,0,0,.15)';
-      ctx.fillRect(W * 0.38, padY + 4, W * 0.24, 3);
-      deviceOutline(ctx, W * 0.5, padY, false);
-      // firing cable to bunker
-      ctx.strokeStyle = 'rgba(40,32,22,.6)'; ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.moveTo(W * 0.52, padY + 4);
-      ctx.quadraticCurveTo(W * 0.66, padY + 26, W * 0.78, H * 0.78);
-      ctx.stroke();
-      // bunker
-      ctx.fillStyle = '#8f8878';
-      roundRect(ctx, W * 0.72, H * 0.73, W * 0.2, H * 0.09, 6); ctx.fill();
-      ctx.fillStyle = '#565045';
-      ctx.fillRect(W * 0.75, H * 0.755, W * 0.08, H * 0.02); // slit
-      // periscope
-      ctx.strokeStyle = '#565045'; ctx.lineWidth = 3;
-      ctx.beginPath(); ctx.moveTo(W * 0.9, H * 0.73); ctx.lineTo(W * 0.9, H * 0.71); ctx.lineTo(W * 0.92, H * 0.71); ctx.stroke();
-      // viewing stand + figures
-      ctx.fillStyle = '#a4906c';
-      ctx.fillRect(W * 0.08, H * 0.715, W * 0.17, H * 0.045);
-      // lunch tent
-      drawTent(ctx, W * 0.13, H * 0.66, 1);
-      for (var i = 0; i < 4; i++) {
-        drawFigure(ctx, W * 0.105 + i * W * 0.038, H * 0.715, 1, i % 2 === 0, tAbs + i);
-      }
-      // range flags
-      drawFlag(ctx, W * 0.35, padY - 2, tAbs);
-      drawFlag(ctx, W * 0.65, padY - 2, tAbs + 2);
-      // inspector vignette
-      if (inspectorT >= 0) {
-        var prog = clamp(inspectorT / 4, 0, 1);
-        var ix = lerp(W * 0.78, W * 0.545, easeOut(prog));
-        drawFigure(ctx, ix, padY + 6, 1.05, false, 0, true);
-      }
-    }
-    function drawTent(ctx, x, y, s) {
-      ctx.fillStyle = '#ddd3b8';
-      ctx.beginPath();
-      ctx.moveTo(x - 26 * s, y + 22 * s);
-      ctx.lineTo(x, y);
-      ctx.lineTo(x + 26 * s, y + 22 * s);
-      ctx.closePath(); ctx.fill();
-      ctx.fillStyle = 'rgba(176,44,30,.85)';
-      ctx.fillRect(x - 3 * s, y - 8 * s, 6 * s, 8 * s);
-    }
-    function drawFigure(ctx, x, y, s, binocs, wob, clipboard) {
-      var bob = Math.sin(wob * 1.7) * 0.6;
-      ctx.fillStyle = '#3d3a33';
-      ctx.fillRect(x - 3 * s, y - 16 * s + bob, 6 * s, 12 * s);        // body
-      ctx.beginPath(); ctx.arc(x, y - 19 * s + bob, 3.4 * s, 0, 7); ctx.fill(); // head
-      ctx.fillRect(x - 4.4 * s, y - 22 * s + bob, 8.8 * s, 1.6 * s);   // hat brim
-      ctx.fillRect(x - 2.6 * s, y - 25 * s + bob, 5.2 * s, 3.2 * s);   // hat top
-      if (binocs) {
-        ctx.fillRect(x + 2 * s, y - 20 * s + bob, 5 * s, 2.4 * s);     // binoculars up
-      }
-      if (clipboard) {
-        ctx.fillStyle = '#e8dfc8';
-        ctx.fillRect(x - 8 * s, y - 14 * s + bob, 4.6 * s, 6 * s);
-      }
-    }
-    function drawFlag(ctx, x, y, tAbs) {
-      ctx.strokeStyle = '#7a6a4d'; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y - 26); ctx.stroke();
-      ctx.fillStyle = '#c23b2e';
-      var w = Math.sin(tAbs * 3) * 2;
-      ctx.beginPath();
-      ctx.moveTo(x, y - 26);
-      ctx.lineTo(x + 14, y - 23 + w);
-      ctx.lineTo(x, y - 19);
-      ctx.closePath(); ctx.fill();
-    }
-    function drawPlume(x, groundY, size, dark, tt) {
-      var g = ctx.createRadialGradient(x, groundY - size * 0.7, size * 0.1, x, groundY - size * 0.7, size);
-      g.addColorStop(0, 'rgba(70,58,44,' + (0.75 * dark) + ')');
-      g.addColorStop(1, 'rgba(70,58,44,0)');
-      ctx.fillStyle = g;
-      ctx.beginPath(); ctx.arc(x, groundY - size * 0.7, size, 0, 7); ctx.fill();
-      ctx.fillStyle = 'rgba(90,74,54,' + (0.5 * dark) + ')';
-      ctx.beginPath(); ctx.arc(x, groundY - size * 0.25, size * 0.4, 0, 7); ctx.fill();
-    }
-
-    /* =========== STATION 7 CAMERA SCENE =========== */
-    var sceneCv = null, sceneCtx = null;
-    function ensureScene() {
-      if (!sceneCv || sceneCv.width !== Math.ceil(W) || sceneCv.height !== Math.ceil(H)) {
-        sceneCv = document.createElement('canvas');
-        sceneCv.width = Math.ceil(W); sceneCv.height = Math.ceil(H);
-        sceneCtx = sceneCv.getContext('2d');
-      }
-    }
-
-    function renderCameraScene(tAbs, dt) {
-      ensureScene();
-      var x = sceneCtx;
-      x.setTransform(1, 0, 0, 1, 0, 0);
-      x.clearRect(0, 0, W, H);
-
-      var hy = H * 0.46;             // horizon (long lens compression)
-      var padX = W * 0.5, padY = H * 0.60;
-      var pxPerM = 3.2 * zoom;       // fictional long-lens scale
-
-      x.save();
-      if (zoom !== 1) {
-        x.translate(padX, padY);
-        x.scale(zoom, zoom);
-        x.translate(-padX, -padY);
-      }
-
-      // washed-out long-lens sky
-      var sky = x.createLinearGradient(0, 0, 0, hy);
-      sky.addColorStop(0, '#9dbdd6');
-      sky.addColorStop(0.7, '#dcd9c4');
-      sky.addColorStop(1, '#eed9a6');
-      x.fillStyle = sky;
-      x.fillRect(-W, -H, W * 3, hy + H);
-      // distant mesas, hazy
-      x.fillStyle = 'rgba(160,118,84,.55)';
-      x.beginPath();
-      x.moveTo(-W, hy);
-      x.lineTo(W * 0.05, hy - 18); x.lineTo(W * 0.22, hy - 18); x.lineTo(W * 0.3, hy - 4);
-      x.lineTo(W * 0.6, hy - 2); x.lineTo(W * 0.68, hy - 26); x.lineTo(W * 0.86, hy - 26);
-      x.lineTo(W * 0.94, hy - 6); x.lineTo(W * 2, hy - 8);
-      x.lineTo(W * 2, hy + 4); x.lineTo(-W, hy + 4);
-      x.closePath(); x.fill();
-      // ground
-      var gnd = x.createLinearGradient(0, hy, 0, H);
-      gnd.addColorStop(0, '#e0b479');
-      gnd.addColorStop(1, '#b3854e');
-      x.fillStyle = gnd;
-      x.fillRect(-W, hy, W * 3, H * 2);
-      // access road
-      x.strokeStyle = 'rgba(120,92,58,.5)'; x.lineWidth = 2;
-      x.beginPath(); x.moveTo(W * 1.2, H); x.quadraticCurveTo(W * 0.72, padY + 30, padX + 12, padY + 2); x.stroke();
-      // scrub
-      x.fillStyle = 'rgba(105,86,48,.4)';
-      for (var i = 0; i < 60; i++) {
-        var sx = ((i * 89.7) % (W * 1.4)) - W * 0.2;
-        var sy = hy + 4 + ((i * 41.3) % (H - hy));
-        var sc = 0.5 + (sy - hy) / (H - hy);
-        x.fillRect(sx, sy, 2.6 * sc, 1.4 * sc);
-      }
-
-      // the pad, tiny and far
-      x.fillStyle = 'rgba(190,182,164,.9)';
-      x.fillRect(padX - 9, padY - 1.5, 18, 4);
-      // marker boards
-      x.fillStyle = 'rgba(200,60,40,.85)';
-      x.fillRect(padX - 26, padY - 5, 2.5, 6);
-      x.fillRect(padX + 24, padY - 5, 2.5, 6);
-      // device speck (pre-detonation)
-      if (!detHappened || (camT - (detAt || 0)) < 0) {
-        x.fillStyle = '#3c372e';
-        x.fillRect(padX - 1.6, padY - 5, 3.2, 5);
-        // sun glint
-        if (Math.sin(tAbs * 2.2) > 0.6) {
-          x.fillStyle = 'rgba(255,255,240,.9)';
-          x.fillRect(padX - 0.6, padY - 4.6, 1.4, 1.4);
-        }
-      }
-
-      // dud volunteer approach (tiny figure, oversized helmet)
-      if (volunteerT >= 0) {
-        var vp = clamp(volunteerT / 7, 0, 1);
-        var vx = lerp(W * 0.94, padX + 8, easeOut(vp));
-        x.fillStyle = '#3a382f';
-        x.fillRect(vx - 1.2, padY - 6.2, 2.4, 6);
-        x.fillStyle = '#d8d2c0';
-        x.beginPath(); x.arc(vx, padY - 7.4, 2.6, 0, 7); x.fill(); // the helmet
-        if (vp >= 1) { // very long stick
-          x.strokeStyle = '#8a7a5a'; x.lineWidth = 1;
-          x.beginPath(); x.moveTo(vx - 1, padY - 5); x.lineTo(padX + 1, padY - 3); x.stroke();
-        }
-      }
-
-      // detonation visuals
-      if (detHappened && detAt != null) {
-        var dtd = Math.max(camT - detAt, 0);
-        drawDetonation(x, padX, padY, pxPerM / zoom, dtd, hy);
-      }
-
-      x.restore();
-
-      // ---- composite to main with shimmer ----
-      ctx.clearRect(0, 0, W, H);
-      ctx.drawImage(sceneCv, 0, 0, W, H);
-      // heat shimmer band above horizon
-      var band = 46;
-      for (var yy = 0; yy < band; yy += 2) {
-        var sy2 = hy - 8 + yy - band * 0.4;
-        if (sy2 < 0 || sy2 + 2 > H) continue;
-        var off = Math.sin(tAbs * 5 + yy * 0.55) * (1.9 * (1 - yy / band)) * (1 + (detHappened ? visual.dust * 0.5 : 0));
-        ctx.drawImage(sceneCv, 0, sy2, W, 2, off, sy2, W, 2);
-      }
-      // flash overlay (light arrives instantly, silently — the lens blooms)
-      if (detHappened && detAt != null) {
-        var ft = camT - detAt;
-        if (ft < 0.75 && !visual.fizzle) {
-          var fa = clamp(visual.bright * (ft < 0.07 ? ft / 0.07 : 1 - (ft - 0.07) / 0.68), 0, 1);
-          ctx.fillStyle = 'rgba(255,252,240,' + fa * 0.95 + ')';
-          ctx.fillRect(0, 0, W, H);
-          // horizontal lens streak through the fireball
-          ctx.save();
-          ctx.globalCompositeOperation = 'lighter';
-          var streakY = H * 0.6 - 30;
-          var sg = ctx.createLinearGradient(0, streakY - 10, 0, streakY + 10);
-          sg.addColorStop(0, 'rgba(255,248,220,0)');
-          sg.addColorStop(0.5, 'rgba(255,248,220,' + fa * 0.7 + ')');
-          sg.addColorStop(1, 'rgba(255,248,220,0)');
-          ctx.fillStyle = sg;
-          ctx.fillRect(0, streakY - 10, W, 20);
-          ctx.restore();
-        }
-      }
-      // dust surge when the wavefront reaches Station 7
-      if (soundHappened && soundAt != null) {
-        var st = camT - soundAt;
-        if (st >= 0 && st < 1.6 && !visual.fizzle) {
-          var sa = (st < 0.15 ? st / 0.15 : 1 - (st - 0.15) / 1.45) * clamp(visual.dust, 0.2, 1) * 0.6;
-          var dg = ctx.createLinearGradient(0, H * 0.55, 0, H);
-          dg.addColorStop(0, 'rgba(216,180,124,0)');
-          dg.addColorStop(1, 'rgba(216,180,124,' + clamp(sa, 0, 1) + ')');
-          ctx.fillStyle = dg;
-          ctx.fillRect(0, H * 0.55, W, H * 0.45);
-        }
-      }
-      drawSeismoStrip(tAbs);
-      drawGrain(soundHappened && (camT - soundAt) < 0.7 ? 0.16 : 0.07);
-      ctx.drawImage(vignette, 0, 0, W, H);
-    }
-
-    /* the blast itself — parameterized by the player's actual build */
-    function drawDetonation(x, padX, padY, pxPerM, t, hy) {
-      var fbR = visual.fireball * 0.5 * pxPerM * 1.7;  // cinematic long-lens scale
-      var rag = visual.ragged;
-
-      // --- fireball / smoke ---
-      if (fbR > 0) {
-        var grow = 1 - Math.pow(1 - clamp(t / (visual.fizzle ? 1.6 : 0.9), 0, 1), 2.6);
-        var r = fbR * (0.3 + 0.7 * grow);
-        var rise = Math.min(t * fbR * (visual.fizzle ? 0.14 : 0.5), fbR * 2.4);
-        var cy = padY - r * 0.45 - rise;
-        var cool = clamp(t / (visual.fizzle ? 2.2 : 3.6), 0, 1);
-        var hot = 1 - cool;
-
-        // rising smoke column: stacked puffs from pad to fireball
-        if (t > 0.3 && !visual.fizzle) {
-          var puffs = 7;
-          for (var P = 0; P < puffs; P++) {
-            var pt2 = P / (puffs - 1);
-            var py = lerp(padY - 4, cy + r * 0.5, pt2);
-            var pr = r * (0.22 + 0.42 * pt2) * (0.8 + 0.2 * Math.sin(P * 2.7));
-            var wob = Math.sin(P * 4.1 + t * 0.8) * pr * 0.35 * (rag + 0.3);
-            var pg = x.createRadialGradient(padX + wob, py, pr * 0.1, padX + wob, py, pr);
-            pg.addColorStop(0, 'rgba(112,92,68,' + (0.7 * (1 - cool * 0.4)) + ')');
-            pg.addColorStop(1, 'rgba(96,80,60,0)');
-            x.fillStyle = pg;
-            x.beginPath(); x.arc(padX + wob, py, pr, 0, 7); x.fill();
-          }
-        }
-
-        // fireball blob (ragged blends detonate dirty and asymmetric)
-        var lobes = 1 + Math.round(rag * 4);
-        for (var L = 0; L < lobes; L++) {
-          var la = (L / lobes) * Math.PI * 2 + L * 1.7;
-          var lox = L === 0 ? 0 : Math.cos(la) * r * 0.5 * rag;
-          var loy = L === 0 ? 0 : Math.sin(la) * r * 0.35 * rag;
-          var lr = L === 0 ? r : r * (0.4 + 0.35 * ((L * 37) % 10) / 10);
-          if (visual.fizzle) {
-            var g = x.createRadialGradient(padX + lox, cy + loy, lr * 0.05, padX + lox, cy + loy, lr);
-            g.addColorStop(0, 'rgba(126,108,82,' + (0.8 - cool * 0.6) + ')');
-            g.addColorStop(0.6, 'rgba(96,84,66,' + (0.6 - cool * 0.4) + ')');
-            g.addColorStop(1, 'rgba(96,84,66,0)');
-            x.fillStyle = g;
-            x.beginPath(); x.arc(padX + lox, cy + loy, lr, 0, 7); x.fill();
-          } else {
-            // smoke body underneath (takes over as the fireball cools)
-            var sm = x.createRadialGradient(padX + lox, cy + loy, lr * 0.05, padX + lox, cy + loy, lr);
-            var smA = 0.25 + 0.5 * cool;
-            sm.addColorStop(0, 'rgba(116,96,72,' + smA + ')');
-            sm.addColorStop(0.6, 'rgba(104,86,66,' + smA * 0.85 + ')');
-            sm.addColorStop(1, 'rgba(96,80,60,0)');
-            x.fillStyle = sm;
-            x.beginPath(); x.arc(padX + lox, cy + loy, lr, 0, 7); x.fill();
-            // hot fire on top, fading with cool
-            if (hot > 0.02) {
-              var g2 = x.createRadialGradient(padX + lox, cy + loy, lr * 0.05, padX + lox, cy + loy, lr);
-              g2.addColorStop(0, 'rgba(255,250,228,' + 0.97 * hot + ')');
-              g2.addColorStop(0.3, 'rgba(250,186,84,' + 0.9 * hot + ')');
-              g2.addColorStop(0.65, 'rgba(168,98,48,' + 0.6 * hot + ')');
-              g2.addColorStop(1, 'rgba(90,66,46,0)');
-              x.fillStyle = g2;
-              x.beginPath(); x.arc(padX + lox, cy + loy, lr, 0, 7); x.fill();
-            }
-          }
-        }
-        // white-hot core, first moments only
-        if (t < 0.6 && !visual.fizzle) {
-          x.save();
-          x.globalCompositeOperation = 'lighter';
-          var cg = x.createRadialGradient(padX, cy, 1, padX, cy, r * 0.7);
-          cg.addColorStop(0, 'rgba(255,255,245,' + (0.9 * (1 - t / 0.6)) + ')');
-          cg.addColorStop(1, 'rgba(255,240,200,0)');
-          x.fillStyle = cg;
-          x.beginPath(); x.arc(padX, cy, r * 0.7, 0, 7); x.fill();
-          x.restore();
-        }
-        // condensation ring blooming around the fireball (clean detonations only)
-        if (t > 0.08 && t < 0.85 && !visual.fizzle && rag < 0.5) {
-          var ct = (t - 0.08) / 0.77;
-          x.strokeStyle = 'rgba(255,255,255,' + (0.5 * (1 - ct)) + ')';
-          x.lineWidth = 2.5;
-          x.save();
-          x.translate(padX, cy);
-          x.scale(1, 0.6);
-          x.beginPath(); x.arc(0, 0, r * (0.9 + ct * 1.6), 0, 7); x.stroke();
-          x.restore();
-        }
-      } else if (outcome.type === 'dud') {
-        // just the initiator's sad puff
-        if (t < 3) {
-          x.fillStyle = 'rgba(150,132,100,' + (0.4 * (1 - t / 3)) + ')';
-          x.beginPath(); x.arc(padX, padY - 4 - t * 6, 4 + t * 5, 0, 7); x.fill();
-        }
-      }
-
-      // --- fragmentation spray (casing signature) ---
-      if (fbR > 0 && !visual.fizzle) {
-        if (frags.length === 0) {
-          for (var i = 0; i < visual.fragCount; i++) {
-            var a = -Math.PI * (0.12 + 0.76 * ((i * 61) % 100) / 100);
-            var spread = visual.fragSpread;
-            var v = fbR * (2.2 + 3.2 * ((i * 37) % 100) / 100) * (0.5 + spread);
-            frags.push({ a: a, v: v, drift: (((i * 17) % 100) / 100 - 0.5) * spread * 3 });
-          }
-        }
-        x.strokeStyle = 'rgba(70,58,40,.6)';
-        x.lineWidth = 1;
-        for (var f = 0; f < frags.length; f++) {
-          var fr = frags[f];
-          var ft = clamp(t * 0.9, 0, 1.6);
-          var fx = padX + Math.cos(fr.a) * fr.v * ft * 0.4 + fr.drift * ft * 30;
-          var fy = padY + Math.sin(fr.a) * fr.v * ft * 0.4 + 60 * ft * ft; // gravity, fictional
-          if (fy < padY + 4 && t < 2.2) {
-            x.beginPath();
-            x.moveTo(fx, fy);
-            x.lineTo(fx - Math.cos(fr.a) * 4, fy - Math.sin(fr.a) * 4 + 2 * ft);
-            x.stroke();
-          }
-        }
-      }
-
-      // --- ground shockwave ring racing toward the camera ---
-      if (fbR > 0 && soundAt != null && !visual.fizzle) {
-        var prog = clamp((camT - detAt) / (soundAt - detAt), 0, 1.05);
-        if (prog > 0.02 && prog < 1.02) {
-          var maxR = W * 1.35;
-          var rr = prog * prog * maxR; // accelerating perspective
-          x.save();
-          x.translate(padX, padY);
-          x.scale(1, 0.26);
-          var ringA = (1 - prog * 0.75) * 0.6 + 0.1;
-          // dust wall behind the front
-          x.strokeStyle = 'rgba(196,158,104,' + ringA * 0.85 + ')';
-          x.lineWidth = 14 + prog * 44;
-          x.beginPath(); x.arc(0, 0, Math.max(rr - 16, 0), 0, 7); x.stroke();
-          x.strokeStyle = 'rgba(214,180,126,' + ringA * 0.5 + ')';
-          x.lineWidth = 30 + prog * 60;
-          x.beginPath(); x.arc(0, 0, Math.max(rr - 40, 0), 0, 7); x.stroke();
-          // the bright pressure front itself
-          x.strokeStyle = 'rgba(252,248,232,' + ringA + ')';
-          x.lineWidth = 3.5 + prog * 8;
-          x.beginPath(); x.arc(0, 0, rr, 0, 7); x.stroke();
-          x.restore();
-        }
-      }
-
-      // --- crater left behind ---
-      if (fbR > 0 && t > 2.6) {
-        var craterPx = (outcome.craterActual || 0) * pxPerM;
-        var ca = clamp((t - 2.6) / 1.2, 0, 1) * 0.55;
-        x.save();
-        x.translate(padX, padY);
-        x.scale(1, 0.3);
-        x.fillStyle = 'rgba(74,56,38,' + ca + ')';
-        x.beginPath(); x.arc(0, 0, craterPx / 2, 0, 7); x.fill();
-        x.strokeStyle = 'rgba(120,94,60,' + ca + ')';
-        x.lineWidth = 3;
-        x.beginPath(); x.arc(0, 0, craterPx / 2, 0, 7); x.stroke();
-        x.restore();
-      }
-    }
-
-    /* seismograph strip along the bottom of the feed */
-    function drawSeismoStrip(tAbs) {
-      var sy = H * 0.885, sw = W * 0.44, sx = W * 0.05, sh = 26;
-      ctx.fillStyle = 'rgba(10,16,22,.55)';
-      ctx.fillRect(sx - 6, sy - sh / 2 - 6, sw + 12, sh + 12);
-      ctx.strokeStyle = 'rgba(156,200,234,.3)';
-      ctx.strokeRect(sx - 6, sy - sh / 2 - 6, sw + 12, sh + 12);
-      // advance trace
-      var amp = 0.8;
-      if (soundHappened && soundAt != null) {
-        var since = camT - soundAt;
-        if (since >= 0 && since < 3) amp = 12 * Math.exp(-since * 1.6) + 0.8;
-      }
-      seismo.push(clamp((Math.random() - 0.5) * amp * 2, -sh / 2 + 2, sh / 2 - 2));
-      if (seismo.length > 120) seismo.shift();
-      ctx.strokeStyle = 'rgba(126,212,154,.9)';
-      ctx.lineWidth = 1.2;
-      ctx.beginPath();
-      for (var i = 0; i < seismo.length; i++) {
-        var px = sx + (i / 120) * sw;
-        var py = sy + seismo[i];
-        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-      }
-      ctx.stroke();
-      ctx.font = '8px Menlo, monospace';
-      ctx.fillStyle = 'rgba(156,200,234,.7)';
-      ctx.textAlign = 'left';
-      ctx.fillText('SEISMO CH-2', sx - 2, sy - sh / 2 - 10);
-    }
-
-    function drawGrain(alpha) {
-      if (!grainTiles.length) return;
-      var tile = grainTiles[(Math.random() * 3) | 0];
-      ctx.save();
-      ctx.globalAlpha = alpha * 8; // tiles are pre-faded
-      var ox = -(Math.random() * 96) | 0, oy = -(Math.random() * 96) | 0;
-      for (var yy = oy; yy < H; yy += 96)
-        for (var xx = ox; xx < W; xx += 96)
-          ctx.drawImage(tile, xx, yy);
-      ctx.restore();
-    }
-
-    /* ---- controls ---- */
-    function bindControls() {
-      var armBtn = $('btn-arm');
-      var armP = 0, armIv = null;
-      function armStart(e) {
-        e.preventDefault();
-        PGAudio.armLatch();
-        clearInterval(armIv);
-        armIv = setInterval(function () {
-          armP += 4;
-          armBtn.style.setProperty('--p', armP);
-          if (armP >= 100) {
-            clearInterval(armIv);
-            armed();
-          }
-        }, 40);
-      }
-      function armStop() {
-        clearInterval(armIv);
-        if (phase === 'idle') { armP = 0; armBtn.style.setProperty('--p', 0); }
-      }
-      armBtn.addEventListener('pointerdown', armStart);
-      armBtn.addEventListener('pointerup', armStop);
-      armBtn.addEventListener('pointercancel', armStop);
-      armBtn.addEventListener('pointerleave', armStop);
-      $('btn-fire').addEventListener('click', function () { PGAudio.tap(); fire(); });
-      $('btn-replay').addEventListener('click', function () { PGAudio.tap(); startReplay(); });
-      $('btn-telemetry').addEventListener('click', function () {
-        PGAudio.tap();
-        buildAdjudication();
-        show('scr-adjud');
-      });
-      window.addEventListener('resize', function () { if (active) size(); if (triCanvas) { sizeTriangle(); refreshBench(); } });
-    }
-
-    return { enter: enter, onShow: onShow, onHide: onHide, bindControls: bindControls };
-  })();
-
-  /* ================= ADJUDICATION ================= */
-  function gaugeSVG(id, min, max, bandLo, bandHi, val, unit, hasData) {
-    var W2 = 400, H2 = 74, pad = 16;
-    function xOf(v) { return pad + (v - min) / (max - min) * (W2 - pad * 2); }
-    var ticks = '';
-    var step = (max - min) / 8;
-    for (var k = 0; k <= 8; k++) {
-      var v = min + step * k;
-      var tx = xOf(v);
-      var lbl = Math.abs(v) < 0.0001 ? '0' : (max - min <= 4 ? v.toFixed(2).replace(/0$/, '') : String(Math.round(v)));
-      ticks += '<line x1="' + tx + '" y1="40" x2="' + tx + '" y2="46" stroke="rgba(156,200,234,.5)" stroke-width="1"/>' +
-        '<text x="' + tx + '" y="60" fill="#7ba3c4" font-size="9" font-family="Menlo,monospace" text-anchor="middle">' +
-        lbl + '</text>';
-    }
-    var needle = '';
-    if (hasData) {
-      var nx = clamp(xOf(val), pad, W2 - pad);
-      needle = '<g class="needle" style="transform:translateX(' + (nx - xOf(min)) + 'px)">' +
-        '<line x1="' + xOf(min) + '" y1="12" x2="' + xOf(min) + '" y2="44" stroke="#f0b95c" stroke-width="2.5"/>' +
-        '<path d="M' + (xOf(min) - 5) + ' 8 L' + (xOf(min) + 5) + ' 8 L' + xOf(min) + ' 16 Z" fill="#f0b95c"/></g>';
-    }
-    return '<svg class="gauge-svg" viewBox="0 0 ' + W2 + ' ' + H2 + '" id="' + id + '">' +
-      '<rect x="' + pad + '" y="24" width="' + (W2 - pad * 2) + '" height="12" rx="2" fill="rgba(156,200,234,.1)"/>' +
-      '<rect x="' + xOf(bandLo) + '" y="18" width="' + (xOf(bandHi) - xOf(bandLo)) + '" height="24" fill="rgba(74,157,99,.25)" stroke="#4a9d63" stroke-width="1.2"/>' +
-      '<text x="' + xOf((bandLo + bandHi) / 2) + '" y="14" fill="#63c584" font-size="8.5" font-family="Menlo,monospace" text-anchor="middle" letter-spacing="1">SPEC BAND</text>' +
-      ticks + needle +
-      '</svg>';
+  }
+  function exitWiring() {
+    // close the door over whatever you did
+    tween(500, function (t) { bay.casingMesh.userData.doorPivot.rotation.x = -2.0 * (1 - t); });
+    PGAudio.thunk(false);
+    later(420, enterDet);
   }
 
-  function buildAdjudication() {
-    var r = S.result;
-    var o = r.outcome, R = PG.RFP, v = r.vantage;
-    var sheet = $('adjud-scroll');
-    var craterHasData = o.craterActual != null && o.type !== 'cookoff';
-    var timerHasData = o.timerDelta != null && o.type !== 'cookoff';
+  /* ================= CLOSE-OUT STAGE 2 — DETONATOR ================= */
+  function enterDet() {
+    S.phase = 'det';
+    S.closeoutStep = 1;
+    setStageBar(1);
+    $('wiring-ui').classList.add('hidden');
+    $('det-ui').classList.remove('hidden');
+    var d = casingDims(S.assembly.casing);
+    var wellL = V3(wellX(S.assembly.casing), d.r + 0.05, 0);
+    var wellW = bay.device.localToWorld(wellL.clone());
+    // open the cap
+    if (bay.capPivot) tween(600, function (t) { bay.capPivot.rotation.z = 1.9 * t; bay.capPivot.position.y = (d.r + 0.055) + 0.10 * t; });
+    tweenOrbitTo(wellW.clone().add(V3(0.72, 0.62, 0.95)), wellW.clone().add(V3(-0.05, 0.02, 0)), 1000, function () {
+      // padded case + detonator appear
+      var ds = { slam: 0, jolt: 0, p: 0, seated: false, drag: null };
+      var caseG = new THREE.Group();
+      var box = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.14, 0.2), mat(0x4a3b28));
+      caseG.add(box);
+      var foam = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.05, 0.16), mat(0x2b2b31, { shin: 2 }));
+      foam.position.y = 0.05;
+      caseG.add(foam);
+      caseG.position.copy(wellW.clone().add(V3(0.34, 0.28, 0.42)));
+      bay.scene.add(caseG);
+      var det = buildDetonator();
+      det.position.copy(caseG.position.clone().add(V3(0, 0.13, 0)));
+      det.rotation.z = 0.25;
+      bay.scene.add(det);
+      ds.caseG = caseG; ds.det = det;
+      ds.path = [
+        det.position.clone(),
+        wellW.clone().add(V3(0, 0.55, 0)),
+        wellW.clone().add(V3(0, 0.30, 0)),
+        wellW.clone().add(V3(0, 0.115, 0))
+      ];
+      bay.detStage = ds;
+    });
+  }
+  function detPathPoint(p) {
+    var path = bay.detStage.path;
+    var segs = path.length - 1;
+    var f = clamp(p, 0, 1) * segs;
+    var i = Math.min(Math.floor(f), segs - 1);
+    return path[i].clone().lerp(path[i + 1], f - i);
+  }
+  function detClosestParam(worldPt) {
+    var path = bay.detStage.path;
+    var best = 0, bestD = 1e9;
+    for (var i = 0; i <= 60; i++) {
+      var t = i / 60;
+      var d = detPathPoint(t).distanceTo(worldPt);
+      if (d < bestD) { bestD = d; best = t; }
+    }
+    return best;
+  }
+  function detDown(e, p) {
+    var ds = bay.detStage;
+    if (!ds || ds.seated) return;
+    var sp = worldToScreen(ds.det.position, bay.camera);
+    if (Math.hypot(sp.x - p.x, sp.y - p.y) < 70) {
+      ds.drag = { pid: e.pointerId, lastX: p.x, lastY: p.y, lastT: performance.now(), lastV: 0 };
+      PGAudio.pickup();
+    }
+  }
+  function detMove(e, p) {
+    var ds = bay.detStage;
+    if (!ds || !ds.drag || e.pointerId !== ds.drag.pid || ds.seated) return;
+    var now = performance.now();
+    var dt = Math.max(now - ds.drag.lastT, 1) / 1000;
+    var dist = Math.hypot(p.x - ds.drag.lastX, p.y - ds.drag.lastY);
+    var v = dist / dt; // px/s
+    ds.drag.lastX = p.x; ds.drag.lastY = p.y; ds.drag.lastT = now;
+    // project pointer to a camera-facing plane through the well
+    var ndc = new THREE.Vector2((p.x / W) * 2 - 1, -(p.y / H) * 2 + 1);
+    raycaster.setFromCamera(ndc, bay.camera);
+    var n = new THREE.Vector3();
+    bay.camera.getWorldDirection(n);
+    var plane = new THREE.Plane().setFromNormalAndCoplanarPoint(n, ds.path[2]);
+    var hit = new THREE.Vector3();
+    if (!raycaster.ray.intersectPlane(plane, hit)) return;
+    var target = detClosestParam(hit);
+    ds.p += clamp(target - ds.p, -0.09, 0.09);
+    // steadiness: speed spikes hurt, and hurt double in the well
+    var jolt = clamp((v - 700) / 1900, 0, 1);
+    ds.jolt = Math.max(ds.jolt * 0.9, jolt);
+    if (ds.p > 0.55) {
+      ds.slam = Math.max(ds.slam, jolt);
+      PGAudio.slide();
+    }
+    updateSteady(ds);
+    ds.det.position.copy(detPathPoint(ds.p));
+    ds.det.rotation.z = 0.25 * (1 - clamp(ds.p * 2, 0, 1));
+    if (ds.p >= 0.97) seatDetonator(v);
+  }
+  function detUp(e, p) {
+    var ds = bay.detStage;
+    if (ds && ds.drag && e.pointerId === ds.drag.pid) ds.drag = null;
+  }
+  function updateSteady(ds) {
+    var fill = $('steady-fill');
+    fill.style.width = (ds.jolt * 100) + '%';
+    var read = $('steady-read');
+    if (ds.slam > 0.55) { read.textContent = 'SHOCK IMPULSE LOGGED'; read.className = 'bad'; }
+    else if (ds.jolt > 0.66) { read.textContent = 'TOO FAST'; read.className = 'bad'; }
+    else if (ds.jolt > 0.33) { read.textContent = 'EASY…'; read.className = 'warn'; }
+    else { read.textContent = 'STEADY'; read.className = ''; }
+  }
+  function seatDetonator(v) {
+    var ds = bay.detStage;
+    if (ds.seated) return;
+    ds.seated = true;
+    ds.drag = null;
+    ds.det.position.copy(ds.path[3]);
+    ds.det.rotation.z = 0;
+    S.assembly.det.seated = true;
+    S.assembly.det.slam = clamp(ds.slam, 0, 1);
+    if (ds.slam > PG2.SLAM_THRESHOLD) {
+      PGAudio.slam();
+      toast('Seated hard. Shock impulse logged to the handling record.');
+    } else {
+      PGAudio.seatClick();
+      toast('Detonator seated. A small, reassuring click.');
+    }
+    updateSteady(ds);
+    // cap closes back over it
+    var d = casingDims(S.assembly.casing);
+    if (bay.capPivot) later(500, function () {
+      tween(500, function (t) {
+        bay.capPivot.rotation.z = 1.9 * (1 - t);
+        bay.capPivot.position.y = (d.r + 0.055) + 0.10 * (1 - t);
+      }, function () { PGAudio.thunk(false); });
+    });
+    later(300, function () { $('btn-det-done').classList.remove('hidden'); });
+  }
 
-    var linesHtml = Object.keys(r.lines).map(function (k) {
-      var L = r.lines[k];
-      var st = L.pass ? '<span class="stamp-mini pass">PASS</span>' : '<span class="stamp-mini fail">FAIL</span>';
-      if ((k === 'crater' || k === 'timer') && (o.craterActual == null && k === 'crater' || o.timerDelta == null && k === 'timer'))
-        st = '<span class="stamp-mini na">NO DATA</span>';
-      return '<tr><td>' + L.label + '</td><td class="val">' + L.value + '</td><td class="verdict">' + st + '</td></tr>';
-    }).join('');
+  /* ================= CLOSE-OUT STAGE 3 — ARM ================= */
+  function enterArm() {
+    S.phase = 'arm';
+    S.closeoutStep = 2;
+    setStageBar(2);
+    $('det-ui').classList.add('hidden');
+    $('arm-ui').classList.remove('hidden');
+    if (bay.detStage) {
+      bay.scene.remove(bay.detStage.caseG);
+      bay.scene.remove(bay.detStage.det);
+    }
+    var pm = bay.armPanelMesh;
+    var pw = pm.getWorldPosition(new THREE.Vector3());
+    bay.armStage = { coverOpen: false, drag: null };
+    tweenOrbitTo(pw.clone().add(V3(0.28, 0.32, 0.78)), pw, 900, function () {
+      stampChecklist();
+    });
+  }
+  function stampChecklist() {
+    var a = S.assembly;
+    var lines = [
+      { id: 'ck-wiring', ok: PG2.WIRES.every(function (c) { return a.wires[c]; }),
+        okTxt: '✓ ROUTED', sub: 'three conductors landed' },
+      { id: 'ck-torque', ok: PG2.WIRES.every(function (c) { return a.torques[c]; }),
+        okTxt: '✓ TORQUED', sub: 'all terminals to spec' },
+      { id: 'ck-det', ok: a.det.seated,
+        okTxt: a.det.slam > PG2.SLAM_THRESHOLD ? '✓ SEATED*' : '✓ SEATED',
+        sub: a.det.slam > PG2.SLAM_THRESHOLD ? '*handling log attached' : 'clean seat, full depth' }
+    ];
+    lines.forEach(function (l, i) {
+      later(350 + i * 550, function () {
+        var el = $(l.id);
+        el.classList.add('shown');
+        var st = el.querySelector('.ck-stamp');
+        if (l.ok) {
+          st.innerHTML = l.okTxt + '<span class="ck-sub">' + l.sub + '</span>';
+          st.className = 'ck-stamp ok';
+          PGAudio.stampThud();
+        } else {
+          st.innerHTML = '¯\\_(ツ)_/¯ UNVERIFIED';
+          st.className = 'ck-stamp unv';
+          PGAudio.buzz();
+        }
+      });
+    });
+    later(350 + 3 * 550 + 200, function () {
+      $('btn-torange').classList.remove('hidden');
+    });
+  }
+  function armDown(e, p) {
+    var st = bay.armStage;
+    if (!st) return;
+    var pm = bay.armPanelMesh;
+    var coverW = pm.userData.coverPivot.getWorldPosition(new THREE.Vector3());
+    var sp = worldToScreen(coverW, bay.camera);
+    if (!st.coverOpen) {
+      if (Math.hypot(sp.x - p.x, sp.y - p.y) < 90) st.drag = { pid: e.pointerId, sy: p.y, kind: 'cover' };
+      return;
+    }
+    // cover open: tap the lever
+    var levW = pm.userData.leverPivot.getWorldPosition(new THREE.Vector3());
+    var lp = worldToScreen(levW, bay.camera);
+    if (Math.hypot(lp.x - p.x, lp.y - p.y) < 90 && !S.assembly.armed) {
+      S.assembly.armed = true;
+      PGAudio.switchClack();
+      tween(260, function (t) { pm.userData.leverPivot.rotation.x = lerp(-0.5, 0.6, t); });
+      pm.userData.led.material.emissive.setHex(0xff2f1e);
+      pm.userData.led.material.emissiveIntensity = 1.4;
+      pm.userData.led.material.color.setHex(0xff5040);
+      $('ck-foot').innerHTML = '<b style="color:#8f2418">ARMED.</b> The device is now interested in everything you do.';
+      toast('ARMED. Kindly stop touching it.');
+    }
+  }
+  function armMove(e, p) {
+    var st = bay.armStage;
+    if (!st || !st.drag || e.pointerId !== st.drag.pid) return;
+    if (st.drag.kind === 'cover' && !st.coverOpen) {
+      var dy = st.drag.sy - p.y;
+      var pm = bay.armPanelMesh;
+      var ang = clamp(dy / 90, 0, 1) * -1.9;
+      pm.userData.coverPivot.rotation.x = ang;
+      if (dy > 62) {
+        st.coverOpen = true;
+        st.drag = null;
+        PGAudio.coverFlick();
+        tween(220, function (t) { pm.userData.coverPivot.rotation.x = lerp(ang, -2.1, t); });
+        $('ck-foot').textContent = 'Guard open. The switch waits.';
+      }
+    }
+  }
+  function armUp(e, p) {
+    var st = bay.armStage;
+    if (!st || !st.drag || e.pointerId !== st.drag.pid) return;
+    if (st.drag.kind === 'cover' && !st.coverOpen) {
+      var pm = bay.armPanelMesh;
+      var cur = pm.userData.coverPivot.rotation.x;
+      tween(200, function (t) { pm.userData.coverPivot.rotation.x = lerp(cur, 0, t); });
+    }
+    st.drag = null;
+  }
 
-    var vStats = v.catastrophic
-      ? '<b>TEST RESULT: WITHDRAWN IN CONFUSION.</b> No telemetry supplied. A brochure was supplied instead.'
-      : 'Crater ⌀ <b>' + v.crater.toFixed(1) + ' m</b> · timer Δ <b>' + (v.timerDelta >= 0 ? '+' : '') + v.timerDelta.toFixed(2) + ' s</b> · unit cost <b>' + fmt$(v.cost) + '</b>' +
-        (v.cost > R.costCap ? ' <span style="color:#8d2f24">(' + Math.round((v.cost / R.costCap - 1) * 100) + '% OVER CAP)</span>' : '') +
-        '<br>Adjudicated value: <b>' + fmt$(v.value) + '</b> vs your <b>' + fmt$(r.value) + '</b>';
+  function setStageBar(step) {
+    document.querySelectorAll('.sb-step').forEach(function (el) {
+      var i = parseInt(el.dataset.step, 10);
+      el.classList.toggle('on', i === step);
+      el.classList.toggle('done', i < step);
+    });
+  }
+  function tweenOrbitTo(camPos, target, dur, done) {
+    var o = bay.orbit;
+    var c0 = bay.camera.position.clone();
+    var t0 = o.target.clone();
+    bay.lockOrbit = true;
+    tween(dur, function (t) {
+      bay.camera.position.lerpVectors(c0, camPos, t);
+      o.target.lerpVectors(t0, target, t);
+      bay.camera.lookAt(o.target);
+    }, done);
+  }
 
-    var bannerCls = r.award === 'player' ? 'win' : (r.award === 'vantage' ? 'lose' : 'none');
-    var bannerTitle = r.award === 'player' ? 'CONTRACT AWARDED' : (r.award === 'vantage' ? 'CONTRACT LOST' : 'CONTRACT WITHDRAWN');
-    var bannerSub = r.award === 'player' ? 'REDLINE ORDNANCE WORKS — pending paperwork, of which there is a great deal'
-      : r.award === 'vantage' ? 'Awarded to Vantage Dynamics. Their brochure was already printed.'
-      : 'Nobody met specification. The Authority is disappointed in the entire industry.';
-    var starsHtml = '';
-    if (r.award === 'player') {
-      starsHtml = '<div class="ab-stars">';
-      for (var s = 1; s <= 3; s++) starsHtml += '<span class="' + (s <= r.stars ? '' : 'dim') + '">★</span>';
-      starsHtml += '</div>';
+  /* ================= RANGE SCENE ================= */
+  function initRange() {
+    var scene = new THREE.Scene();
+    scene.background = gradientTexture([[0, '#6fa5cf'], [0.42, '#c8d5cf'], [0.6, '#f0d9a8'], [1, '#e8c68a']], true);
+    scene.fog = new THREE.Fog(0xdccdaa, 900, 2600);
+    var camera = new THREE.PerspectiveCamera(7, W / H, 0.5, 6000);
+
+    scene.add(new THREE.HemisphereLight(0xcfe0f0, 0x8a6a42, 0.85));
+    var sun = new THREE.DirectionalLight(0xfff3da, 1.0);
+    sun.position.set(-800, 900, 500);
+    scene.add(sun);
+
+    // terrain
+    var tg = new THREE.PlaneGeometry(6000, 6000, 56, 56);
+    var pos = tg.attributes.position;
+    var colors = [];
+    var col = new THREE.Color();
+    for (var i = 0; i < pos.count; i++) {
+      var x = pos.getX(i), y = pos.getY(i);
+      var r2 = Math.hypot(x, y);
+      var h = 0;
+      if (r2 > 60) {
+        h = Math.sin(x * 0.004 + 1.7) * Math.cos(y * 0.0031) * 7 +
+            Math.sin(x * 0.013 + y * 0.009) * 2.5;
+        h *= clamp((r2 - 60) / 300, 0, 1);
+      }
+      pos.setZ(i, h);
+      var shade = 0.86 + Math.sin(x * 0.05) * Math.cos(y * 0.043) * 0.07;
+      col.setRGB(0.83 * shade, 0.63 * shade, 0.38 * shade);
+      colors.push(col.r, col.g, col.b);
+    }
+    tg.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    tg.computeVertexNormals();
+    var terrain = new THREE.Mesh(tg, new THREE.MeshLambertMaterial({ vertexColors: true }));
+    terrain.rotation.x = -Math.PI / 2;
+    scene.add(terrain);
+
+    // mesas (three ridge lines, fading with distance)
+    var mesas = [];
+    [{ z: -700, h: 90, c: 0xa97c54, sp: 1900 }, { z: -1150, h: 130, c: 0xb98f6b, sp: 2600 }, { z: -1700, h: 170, c: 0xc9a887, sp: 3400 }].forEach(function (m, mi) {
+      var pts = [], n = 26;
+      for (var i = 0; i <= n; i++) {
+        var x = -m.sp / 2 + m.sp * i / n;
+        var hh = (Math.sin(i * 2.3 + mi * 5) * 0.5 + 0.5) * m.h * (i % 5 === 2 ? 1 : 0.55) + 8;
+        pts.push({ x: x, h: hh });
+      }
+      var shape = new THREE.Shape();
+      shape.moveTo(pts[0].x, 0);
+      pts.forEach(function (p2) { shape.lineTo(p2.x, p2.h); });
+      shape.lineTo(pts[n].x, 0);
+      shape.closePath();
+      var geo = new THREE.ExtrudeGeometry(shape, { depth: 60, bevelEnabled: false });
+      var mesh = new THREE.Mesh(geo, mat(m.c, { shin: 2 }));
+      mesh.position.set(0, 0, m.z);
+      scene.add(mesh);
+      mesas.push(mesh);
+    });
+
+    // pad
+    var pad = new THREE.Group();
+    var slab = new THREE.Mesh(new THREE.BoxGeometry(10, 0.6, 10), mat(0xb9b3a4, { shin: 4 }));
+    slab.position.y = 0.3;
+    pad.add(slab);
+    var mast = new THREE.Mesh(new THREE.BoxGeometry(0.5, 7, 0.5), mat(0x8f2f24));
+    mast.position.set(-4.5, 3.5, -4);
+    pad.add(mast);
+    scene.add(pad);
+
+    // device on trestle (built from the actual assembly at range entry)
+    var deviceHolder = new THREE.Group();
+    deviceHolder.position.set(0, 1.6, 0);
+    deviceHolder.scale.set(1.6, 1.6, 1.6);
+    scene.add(deviceHolder);
+
+    // flatbed truck
+    var truck = new THREE.Group();
+    var bed = new THREE.Mesh(new THREE.BoxGeometry(7, 0.5, 2.6), mat(0x51616e));
+    bed.position.set(-0.7, 1.35, 0);
+    truck.add(bed);
+    var cab = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.9, 2.4), mat(0xb0392b));
+    cab.position.set(3.4, 1.9, 0);
+    truck.add(cab);
+    var glass = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.7, 2.0), mat(0x9cc8ea, { shin: 80 }));
+    glass.position.set(4.4, 2.3, 0);
+    truck.add(glass);
+    for (var wi = 0; wi < 3; wi++) {
+      [-1.2, 1.2].forEach(function (z) {
+        var wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.55, 0.4, 12), mat(0x22262b, { shin: 4 }));
+        wheel.rotation.x = Math.PI / 2;
+        wheel.position.set(-2.6 + wi * 2.9, 0.55, z);
+        truck.add(wheel);
+      });
+    }
+    scene.add(truck);
+    truck.visible = false;
+
+    // heat shimmer bands
+    var shimmer = [];
+    for (var si = 0; si < 3; si++) {
+      var sm = new THREE.Mesh(new THREE.PlaneGeometry(2400, 14 + si * 9),
+        new THREE.MeshBasicMaterial({ color: 0xfff4dc, transparent: true, opacity: 0.05, depthWrite: false }));
+      sm.position.set(0, 9 + si * 12, -420 - si * 260);
+      scene.add(sm);
+      shimmer.push(sm);
     }
 
-    var payRows =
-      '<tr><td>DEVELOPMENT AWARD</td><td>' + (r.payout.award ? fmt$(r.payout.award) : '—') + '</td></tr>' +
-      '<tr><td>PRECISION BONUS</td><td>' + (r.payout.bonus ? '+' + fmt$(r.payout.bonus) : '—') + '</td></tr>' +
-      '<tr><td>UNIT COST</td><td>−' + fmt$(r.payout.unitCost) + '</td></tr>' +
-      '<tr><td>QA PROGRAM SPEND</td><td>−' + fmt$(r.payout.qaSpend) + '</td></tr>' +
-      '<tr class="net"><td>NET TO REDLINE</td><td class="' + (r.payout.net >= 0 ? 'pos' : 'neg') + '">' + (r.payout.net < 0 ? '−' : '') + fmt$(Math.abs(r.payout.net)) + '</td></tr>';
+    return {
+      scene: scene, camera: camera, pad: pad, deviceHolder: deviceHolder,
+      truck: truck, mesas: mesas, shimmer: shimmer,
+      fx: null, shake: 0, mode: 'idle'
+    };
+  }
 
-    sheet.innerHTML =
-      '<div class="adjud-sheet">' +
-        '<div class="adjud-head">REPUBLIC PROVING AUTHORITY · FORM PG-77</div>' +
-        '<div class="adjud-title">TELEMETRY &amp; ADJUDICATION</div>' +
-        '<div class="adjud-sub">TEST SERIES ' + S.seed + ' · AS READ FROM STATION 7 · THE GRAPH DOESN’T LIE</div>' +
+  /* ---------- range flow ---------- */
+  function enterRange() {
+    clearLater();
+    S.result = PG2.adjudicate(S.assembly, S.seed);
+    if (!range) range = initRange();
+    S.phase = 'truck';
+    showUI('ui-range');
+    $('stage-bar').classList.add('hidden');
+    $('arm-ui').classList.add('hidden');
+    $('cam-overlay').classList.add('hidden');
+    $('cam-tick').classList.add('hidden');
+    $('measure-svg').classList.add('hidden');
+    $('btn-arm').classList.add('hidden');
+    $('btn-fire').classList.add('hidden');
+    $('arm-ring').style.setProperty('--p', 0);
+    $('flash').style.opacity = 0;
+    $('dustwall').style.opacity = 0;
+    // clean leftovers from a previous run
+    if (range.fx && range.fx.group) range.scene.remove(range.fx.group);
+    range.fx = null;
+    if (range.craterG) { range.scene.remove(range.craterG); range.craterG = null; }
+    range.deviceHolder.visible = true;
+    if (range.trestle) range.trestle.visible = false;
+    range.shake = 0;
+    // put the real device on the flatbed
+    var dh = range.deviceHolder;
+    for (var i = dh.children.length - 1; i >= 0; i--) dh.remove(dh.children[i]);
+    var dev = buildRangeDevice();
+    dh.add(dev);
+    dh.position.set(-0.7, 2.0, 0);
+    dh.scale.set(0.62, 0.62, 0.62);
+    range.truck.add(dh);
+    range.truck.visible = true;
+    range.truck.position.set(-90, 0, 34);
+    range.camera.fov = 30;
+    range.camera.updateProjectionMatrix();
+    range.mode = 'truck';
+    range.truckT = 0;
+    setCaption('SECTOR 9 · ACCESS ROAD', 'The device rides out to Pad A. It has never looked more certain of anything.');
+    PGAudio.engineStart();
+    $('btn-skip-truck').classList.remove('hidden');
+    later(7000, stationSeven);
+  }
+  function buildRangeDevice() {
+    // rebuild from assembly (independent copies for the range scene)
+    var g = new THREE.Group();
+    var a = S.assembly;
+    if (!a.casing) return g;
+    g.add(buildCasing(a.casing));
+    var d = casingDims(a.casing);
+    a.canisters.forEach(function (c, i) {
+      if (!c) return;
+      var m = buildCanister(c);
+      m.position.set(slotXs(a.casing)[i], d.r + 0.04, 0);
+      g.add(m);
+    });
+    if (a.timer) { var t = buildTimer(); t.position.set(d.L / 2 + 0.02, 0, 0); g.add(t); }
+    if (a.battery) { var b = buildBattery(); b.position.set(-d.L / 2 - 0.16, 0, 0); g.add(b); }
+    if (a.cap) { var c2 = buildCap(); c2.position.set(wellX(a.casing), d.r + 0.055, 0); g.add(c2); }
+    if (a.fins) { var f = buildFins(); f.position.set(-d.L / 2 + 0.28, 0, 0); g.add(f); }
+    if (a.panel) { var p = buildArmPanel(); p.position.set(-d.L * 0.31, 0.05, d.r + 0.02); p.userData.leverPivot.rotation.x = a.armed ? 0.6 : -0.5; g.add(p); }
+    return g;
+  }
+  function stationSeven() {
+    if (S.phase !== 'truck') return;
+    clearLater();
+    S.phase = 'station';
+    PGAudio.engineStop();
+    $('btn-skip-truck').classList.add('hidden');
+    range.mode = 'station';
+    range.truck.visible = false;
+    // device moves to a trestle on the pad
+    var dh = range.deviceHolder;
+    range.truck.remove(dh);
+    range.scene.add(dh);
+    dh.position.set(0, 2.1, 0);
+    dh.scale.set(1.7, 1.7, 1.7);
+    // trestle
+    if (!range.trestle) {
+      var tr = new THREE.Group();
+      [-0.9, 0.9].forEach(function (x) {
+        var leg = new THREE.Mesh(new THREE.BoxGeometry(0.28, 1.5, 1.6), mat(0x6b4a2a));
+        leg.position.set(x, 0.75, 0);
+        tr.add(leg);
+      });
+      range.scene.add(tr);
+      range.trestle = tr;
+    }
+    range.trestle.visible = true;
+    // Station 7 long lens
+    range.camera.position.set(60, 14, 1600);
+    range.camera.fov = 7;
+    range.camera.updateProjectionMatrix();
+    range.camera.lookAt(0, 3, 0);
+    $('cam-overlay').classList.remove('hidden');
+    $('cam-station').textContent = PG2.RFP.camera.id + ' — ' + PG2.RFP.camera.km.toFixed(1) + ' KM';
+    $('cam-clock').textContent = 'T−00:05.0';
+    PGAudio.wind();
+    setCaption('STATION 7 · LONG LENS · f/64', 'The review board raises its binoculars. Heat swims over the pan.');
+    later(1800, function () { $('btn-arm').classList.remove('hidden'); });
+  }
 
-        '<div class="gauge-card"><h4><span>MEASURED CRATER DIAMETER (m)</span>' +
-          (craterHasData ? '<b class="' + (r.lines.crater.pass ? 'pass' : 'fail') + '">' + o.craterActual.toFixed(1) + ' m</b>' : '<b class="fail">NO DATA</b>') + '</h4>' +
-          (craterHasData ? gaugeSVG('g-crater', 8, 32, R.craterMin, R.craterMax, o.craterActual, 'm', true)
-            : '<div class="nodata">NO CRATER DATA — SEE INCIDENT REPORT</div>') +
+  /* hold-to-arm */
+  (function () {
+    var armHold = null;
+    var btn = $('btn-arm');
+    btn.addEventListener('pointerdown', function (e) {
+      PGAudio.init();
+      btn.setPointerCapture(e.pointerId);
+      armHold = { t0: performance.now(), iv: setInterval(function () {
+        var p = clamp((performance.now() - armHold.t0) / 1100, 0, 1);
+        $('arm-ring').style.setProperty('--p', p * 100);
+        if (p >= 1) { clearInterval(armHold.iv); armHold = null; rangeArmed(); }
+      }, 16) };
+    });
+    function cancel() {
+      if (armHold) { clearInterval(armHold.iv); armHold = null; $('arm-ring').style.setProperty('--p', 0); }
+    }
+    btn.addEventListener('pointerup', cancel);
+    btn.addEventListener('pointercancel', cancel);
+  })();
+  function rangeArmed() {
+    $('btn-arm').classList.add('hidden');
+    PGAudio.armLatch();
+    PGAudio.klaxon();
+    setCaption('RANGE HOT · RANGE HOT', 'All personnel to the bunker. The lunch tent stays where it is.');
+    later(1700, function () { $('btn-fire').classList.remove('hidden'); });
+  }
+  $('btn-fire').addEventListener('click', function () {
+    if (S.phase !== 'station') return;
+    $('btn-fire').classList.add('hidden');
+    startCountdown();
+  });
+
+  var rangeT = { camT: 0, detAt: null, soundAt: null, detDone: false, soundDone: false, lastBeep: null };
+  function startCountdown() {
+    S.phase = 'counting';
+    setCaption('', '');
+    var o = S.result.outcome;
+    rangeT.camT = 0;
+    rangeT.detDone = false;
+    rangeT.soundDone = false;
+    rangeT.lastBeep = 6;
+    rangeT.detAt = o.fired ? 5 + o.detT : null;
+    rangeT.soundAt = rangeT.detAt != null ? rangeT.detAt + PG2.RFP.soundDelay : null;
+    rangeT.dudHandled = false;
+  }
+  function updateCamClock() {
+    var tm = rangeT.camT - 5;
+    var sign = tm < 0 ? 'T−' : 'T+';
+    var a2 = Math.abs(tm);
+    var mm = String(Math.floor(a2 / 60)).padStart(2, '0');
+    var ss = (a2 % 60).toFixed(1).padStart(4, '0');
+    $('cam-clock').textContent = sign + mm + ':' + ss;
+  }
+
+  /* ---------- detonation FX ---------- */
+  function spriteTexture(inner, outer) {
+    var c = document.createElement('canvas');
+    c.width = c.height = 128;
+    var x = c.getContext('2d');
+    var g = x.createRadialGradient(64, 64, 6, 64, 64, 62);
+    g.addColorStop(0, inner);
+    g.addColorStop(1, outer);
+    x.fillStyle = g;
+    x.fillRect(0, 0, 128, 128);
+    var t = new THREE.CanvasTexture(c);
+    t.encoding = THREE.sRGBEncoding;
+    return t;
+  }
+  var TX = null;
+  function fxTextures() {
+    if (TX) return TX;
+    TX = {
+      fire: spriteTexture('rgba(255,244,214,1)', 'rgba(255,120,30,0)'),
+      smoke: spriteTexture('rgba(70,58,48,.85)', 'rgba(70,58,48,0)'),
+      dust: spriteTexture('rgba(196,150,94,.8)', 'rgba(196,150,94,0)'),
+      flash: spriteTexture('rgba(255,255,255,1)', 'rgba(255,255,255,0)')
+    };
+    return TX;
+  }
+  function igniteFX() {
+    var vis = S.result.visual;
+    var tx = fxTextures();
+    var fxGroup = new THREE.Group();
+    range.scene.add(fxGroup);
+    var fx = { t: 0, sprites: [], debris: null, ring: null, torus: null, vis: vis, group: fxGroup };
+    var scale = 14 + vis.crater * 1.6;             // fireball metres-ish
+    if (vis.fizzle) scale = 10;
+    // DOM flash — silent
+    if (!vis.fizzle) {
+      var flash = $('flash');
+      flash.style.transition = 'none';
+      flash.style.opacity = 0.95 * vis.bright;
+      later(90, function () {
+        flash.style.transition = 'opacity 1.1s ease';
+        flash.style.opacity = 0;
+      });
+    }
+    // lobe directions (ragged blasts lean)
+    var lobes = [];
+    var lobeR = PG2.stream(S.seed, 'lobes');
+    for (var li = 0; li < 2; li++) {
+      var a = lobeR() * Math.PI * 2;
+      lobes.push(V3(Math.cos(a) * vis.ragged, 1, Math.sin(a) * vis.ragged).normalize());
+    }
+    var n = vis.fizzle ? 7 : 16;
+    var rand = PG2.stream(S.seed, 'fxrand');
+    for (var i = 0; i < n; i++) {
+      var m = new THREE.SpriteMaterial({
+        map: vis.fizzle ? tx.smoke : tx.fire,
+        transparent: true, depthWrite: false,
+        blending: vis.fizzle ? THREE.NormalBlending : THREE.AdditiveBlending
+      });
+      var sp = new THREE.Sprite(m);
+      var dir = lobes[i % 2].clone().add(V3((rand() - 0.5) * 1.1, rand() * 0.8, (rand() - 0.5) * 1.1)).normalize();
+      sp.userData = {
+        dir: dir,
+        speed: (vis.fizzle ? 4 : 18) * (0.5 + rand()),
+        grow: scale * (0.5 + rand() * 0.8),
+        delay: vis.fizzle ? rand() * 1.6 : rand() * 0.12
+      };
+      sp.position.set(0, 2, 0);
+      sp.scale.set(0.1, 0.1, 1);
+      fxGroup.add(sp);
+      fx.sprites.push(sp);
+    }
+    // emissive core
+    if (!vis.fizzle) {
+      var core = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12),
+        new THREE.MeshBasicMaterial({ color: 0xfff0cc, transparent: true, opacity: 1 }));
+      core.position.set(0, 3, 0);
+      fxGroup.add(core);
+      fx.core = core;
+      // dust torus
+      var torus = new THREE.Mesh(new THREE.TorusGeometry(1, 2.2, 8, 28),
+        new THREE.MeshLambertMaterial({ color: 0xc4965e, transparent: true, opacity: 0.75 }));
+      torus.rotation.x = Math.PI / 2;
+      torus.position.y = 1.5;
+      fxGroup.add(torus);
+      fx.torus = torus;
+      // ground shock ring racing outward at the (invented) speed of sound
+      var ring = new THREE.Mesh(new THREE.RingGeometry(0.8, 1, 48),
+        new THREE.MeshBasicMaterial({ color: 0xfff6e2, transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false }));
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.y = 0.5;
+      fxGroup.add(ring);
+      fx.ring = ring;
+      // debris streaks
+      var dg = new THREE.BufferGeometry();
+      var cnt = 46, pos2 = new Float32Array(cnt * 3), vel = [];
+      for (var di = 0; di < cnt; di++) {
+        pos2[di * 3] = 0; pos2[di * 3 + 1] = 2; pos2[di * 3 + 2] = 0;
+        var dv = lobes[di % 2].clone().add(V3((rand() - 0.5) * 1.4, rand() * 1.1, (rand() - 0.5) * 1.4));
+        dv.normalize().multiplyScalar(25 + rand() * 45 * (0.5 + vis.yield01));
+        vel.push(dv);
+      }
+      dg.setAttribute('position', new THREE.BufferAttribute(pos2, 3));
+      var pts = new THREE.Points(dg, new THREE.PointsMaterial({ color: 0x3c2f22, size: 2.4, sizeAttenuation: true }));
+      fxGroup.add(pts);
+      fx.debris = { pts: pts, vel: vel };
+    }
+    // remove the device — it is now philosophy
+    range.deviceHolder.visible = false;
+    if (range.trestle) range.trestle.visible = false;
+    fx.scale = scale;
+    range.fx = fx;
+  }
+  function stepFX(dt) {
+    var fx = range.fx;
+    if (!fx) return;
+    fx.t += dt;
+    var t = fx.t;
+    fx.sprites.forEach(function (sp) {
+      var u = sp.userData;
+      var tt = Math.max(t - u.delay, 0);
+      if (tt <= 0) return;
+      var life = fx.vis.fizzle ? 2.6 : 2.2;
+      var k = clamp(tt / life, 0, 1);
+      sp.position.addScaledVector(u.dir, u.speed * dt * (1 - k * 0.7));
+      var s = u.grow * easeOut(k);
+      sp.scale.set(s, s, 1);
+      sp.material.opacity = (1 - k) * (fx.vis.fizzle ? 0.8 : 1);
+      if (!fx.vis.fizzle) {
+        sp.material.color = sp.material.color || new THREE.Color();
+        sp.material.color.setRGB(1, clamp(1 - k * 0.8, 0.2, 1), clamp(0.8 - k, 0.05, 1));
+      }
+    });
+    if (fx.core) {
+      var ck = clamp(t / 0.7, 0, 1);
+      var cs = 1 + easeOut(ck) * fx.scale * 0.5;
+      fx.core.scale.set(cs, cs, cs);
+      fx.core.material.opacity = 1 - ck;
+      if (ck >= 1) { fx.group.remove(fx.core); fx.core = null; }
+    }
+    if (fx.torus) {
+      var tk = clamp(t / 2.8, 0, 1);
+      var tr = 1 + easeOut(tk) * fx.vis.crater * 1.9;
+      fx.torus.scale.set(tr, tr, 1);
+      fx.torus.material.opacity = 0.75 * (1 - tk);
+      if (tk >= 1) { fx.group.remove(fx.torus); fx.torus = null; }
+    }
+    if (fx.ring) {
+      var rr = 333 * t; // invented sound speed ~ 1.6km in 4.8s
+      fx.ring.scale.set(rr, rr, 1);
+      fx.ring.material.opacity = clamp(0.55 - rr / 4000, 0, 1);
+      if (rr > 2400) { fx.group.remove(fx.ring); fx.ring = null; }
+    }
+    if (fx.debris) {
+      var pos = fx.debris.pts.geometry.attributes.position;
+      for (var i = 0; i < fx.debris.vel.length; i++) {
+        var v = fx.debris.vel[i];
+        v.y -= 30 * dt;
+        pos.setXYZ(i, pos.getX(i) + v.x * dt, Math.max(pos.getY(i) + v.y * dt, 0), pos.getZ(i) + v.z * dt);
+      }
+      pos.needsUpdate = true;
+      if (t > 4) { fx.group.remove(fx.debris.pts); fx.debris = null; }
+    }
+  }
+
+  /* ---------- crater reveal + measuring ---------- */
+  function craterReveal() {
+    S.phase = 'crater';
+    var crater = S.result.outcome.craterActual || 0;
+    var r = Math.max(crater / 2, 1.6);
+    // crater meshes
+    if (range.craterG) range.scene.remove(range.craterG);
+    var g = new THREE.Group();
+    var bowl = new THREE.Mesh(new THREE.CircleGeometry(r, 36),
+      new THREE.MeshLambertMaterial({ color: 0x4a3826 }));
+    bowl.rotation.x = -Math.PI / 2;
+    bowl.position.y = 0.7;
+    g.add(bowl);
+    var rim = new THREE.Mesh(new THREE.TorusGeometry(r, r * 0.16, 8, 36),
+      new THREE.MeshLambertMaterial({ color: 0x8a6a44 }));
+    rim.rotation.x = Math.PI / 2;
+    rim.position.y = 0.6;
+    rim.scale.z = 0.25;
+    g.add(rim);
+    // smoke wisps
+    var tx = fxTextures();
+    for (var i = 0; i < 5; i++) {
+      var sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tx.smoke, transparent: true, opacity: 0.35, depthWrite: false }));
+      sp.position.set((i - 2) * r * 0.3, r * 0.4 + i, 0);
+      sp.scale.set(r * 0.9, r * 0.9, 1);
+      sp.userData.rise = 0.4 + i * 0.13;
+      g.add(sp);
+      range.craterSmoke = range.craterSmoke || [];
+    }
+    range.scene.add(g);
+    range.craterG = g;
+    // push-in
+    var c = range.camera;
+    c.fov = 26;
+    c.updateProjectionMatrix();
+    var from = V3(r * 7.5, r * 5.5, r * 9.5);
+    var to = V3(r * 4.2, r * 3.1, r * 5.4);
+    setCaption('SURVEY PASS · PAD A', S.result.outcome.fired ? 'The dust votes last. Measuring…' : 'There is a device-shaped silence on the pad.');
+    tween(3800, function (t) {
+      c.position.lerpVectors(from, to, t);
+      c.lookAt(0, 0.5, 0);
+    }, function () { drawMeasure(r); }, easeInOut);
+  }
+  function drawMeasure(r) {
+    var svg = $('measure-svg');
+    svg.classList.remove('hidden');
+    var pL = worldToScreen(V3(-r, 0.8, 0), range.camera);
+    var pR = worldToScreen(V3(r, 0.8, 0), range.camera);
+    // svg space maps 1:1 to screen via viewBox reset
+    svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+    svg.style.width = W + 'px';
+    svg.style.left = '0'; svg.style.top = '0'; svg.style.transform = 'none';
+    svg.style.height = H + 'px';
+    var y = (pL.y + pR.y) / 2 - 12;
+    var crater = S.result.outcome.craterActual || 0;
+    var R = PG2.RFP;
+    svg.innerHTML =
+      '<line class="msr-line" x1="' + pL.x + '" y1="' + y + '" x2="' + pL.x + '" y2="' + y + '" id="msr-main"/>' +
+      '<line class="msr-line" x1="' + pL.x + '" y1="' + (y - 9) + '" x2="' + pL.x + '" y2="' + (y + 9) + '"/>' +
+      '<line class="msr-line" x1="' + pR.x + '" y1="' + (y - 9) + '" x2="' + pR.x + '" y2="' + (y + 9) + '" opacity="0"/>' +
+      '<text id="msr-txt" x="' + ((pL.x + pR.x) / 2) + '" y="' + (y - 16) + '" text-anchor="middle" font-size="17">⌀ 0.0 m</text>' +
+      '<g id="msr-band"></g>';
+    var main = svg.querySelector('#msr-main');
+    var endTick = svg.querySelectorAll('line')[2];
+    var txt = svg.querySelector('#msr-txt');
+    var t0 = performance.now();
+    (function anim() {
+      var t = clamp((performance.now() - t0) / 1600, 0, 1);
+      var e = easeInOut(t);
+      main.setAttribute('x2', lerp(pL.x, pR.x, e));
+      txt.textContent = '⌀ ' + (crater * e).toFixed(1) + ' m';
+      PGAudio.measureTick();
+      if (t < 1) requestAnimationFrame(anim);
+      else {
+        endTick.setAttribute('opacity', '1');
+        PGAudio.typeDing();
+        // spec band ruler (0–30 m, centered under the measurement)
+        var cx = (pL.x + pR.x) / 2;
+        var yb = y + 26;
+        var rulerW = Math.min(W * 0.7, 260);
+        var rx = cx - rulerW / 2;
+        var perM = rulerW / 30;
+        var g = svg.querySelector('#msr-band');
+        g.innerHTML =
+          '<line class="msr-line" x1="' + rx + '" y1="' + yb + '" x2="' + (rx + rulerW) + '" y2="' + yb + '" opacity=".6"/>' +
+          '<line class="msr-band" x1="' + (rx + R.craterMin * perM) + '" y1="' + yb + '" x2="' + (rx + R.craterMax * perM) + '" y2="' + yb + '"/>' +
+          '<text x="' + (rx + R.craterMin * perM) + '" y="' + (yb + 14) + '" text-anchor="middle" font-size="9">18</text>' +
+          '<text x="' + (rx + R.craterMax * perM) + '" y="' + (yb + 14) + '" text-anchor="middle" font-size="9">24</text>' +
+          '<circle cx="' + (rx + clamp(crater, 0, 30) * perM) + '" cy="' + yb + '" r="4" fill="' +
+            (S.result.stamps.size.ok ? '#7ed49a' : '#ff7a68') + '"/>';
+        later(2200, showScore);
+      }
+    })();
+  }
+
+  /* ---------- captions ---------- */
+  function setCaption(small, main) {
+    $('range-caption').innerHTML = (small ? '<span class="cap-small">' + small + '</span>' : '') + (main || '');
+  }
+
+  /* ---------- dud / no-fire hold ---------- */
+  function dudHold() {
+    var o = S.result.outcome;
+    var line1 = o.type === 'unarmed'
+      ? 'The device sits there. The desert sits there. Everyone sits there.'
+      : 'Nothing. The firing circuit kept the news to itself.';
+    setCaption('T+00:06 · NO EVENT', line1);
+    later(3400, function () {
+      setCaption('T+02:00 · RANGE SAFETY PROTOCOL', 'A volunteer is selected. His helmet is two sizes too large.');
+    });
+    later(6800, function () {
+      PGAudio.stampThud();
+      setCaption('', '<b>MADE SAFE.</b> The long stick has questions for the Assembly Bay.');
+    });
+    later(9000, craterRevealOrScore);
+  }
+  function craterRevealOrScore() {
+    $('cam-tick').classList.add('hidden');
+    if (S.result.outcome.fired) craterReveal();
+    else showScore();
+  }
+
+  /* ================= SCORECARD ================= */
+  function showScore() {
+    clearLater();
+    S.phase = 'score';
+    showUI(null);
+    $('measure-svg').classList.add('hidden');
+    var r = S.result;
+    var R = PG2.RFP;
+    if (r.win) PGAudio.fanfare(); else PGAudio.sadDrone();
+    var el = $('score-scroll');
+    function stampCard(lbl, st) {
+      return '<div class="stamp-card"><div class="sc-lbl">' + lbl + '</div>' +
+        '<div class="sc-val">' + st.value + '</div>' +
+        '<div><span class="stamp-big ' + (st.ok ? 'pass' : 'fail') + '">' + (st.ok ? 'IN SPEC' : 'OUT') + '</span></div>' +
+        '<div class="sc-spec">SPEC: ' + st.spec + '</div></div>';
+    }
+    var stars = '';
+    for (var i = 0; i < 3; i++) stars += '<span class="' + (i < r.stars ? '' : 'dim') + '">★</span>';
+    el.innerHTML =
+      '<div class="score-sheet">' +
+        '<div class="score-head">REPUBLIC PROVING AUTHORITY · ADJUDICATION</div>' +
+        '<div class="score-title">RANGE DAY RESULTS</div>' +
+        '<div class="score-sub">' + R.id + ' · TEST SERIES ' + S.seed + '</div>' +
+        '<div class="stamp-row">' +
+          stampCard('SIZE', r.stamps.size) +
+          stampCard('TIMING', r.stamps.timing) +
+          stampCard('CLEAN', r.stamps.clean) +
         '</div>' +
-        '<div class="gauge-card"><h4><span>TIMER ACCURACY Δ (s)</span>' +
-          (timerHasData ? '<b class="' + (r.lines.timer.pass ? 'pass' : 'fail') + '">' + (o.timerDelta >= 0 ? '+' : '') + o.timerDelta.toFixed(2) + ' s</b>' : '<b class="fail">NO DATA</b>') + '</h4>' +
-          (timerHasData ? gaugeSVG('g-timer', -1, 1, -R.timerTol, R.timerTol, o.timerDelta, 's', true)
-            : '<div class="nodata">NO TIMING DATA RECORDED</div>') +
+        '<div class="award-banner ' + (r.win ? 'win' : 'lose') + '">' +
+          '<div class="ab-kicker">' + (r.win ? 'CONTRACT AWARDED' : 'CONTRACT NOT AWARDED') + '</div>' +
+          '<div class="ab-title">' + (r.win ? 'REDLINE ORDNANCE WORKS' : (r.vantage.ok ? 'VANTAGE DYNAMICS' : 'NO AWARD MADE')) + '</div>' +
+          '<div class="ab-stars">' + stars + '</div>' +
         '</div>' +
-
-        '<div class="gauge-card"><h4><span>SPEC-LINE ADJUDICATION</span><b>MERIT ' + r.merit + ' PTS</b></h4>' +
-          '<table class="score-table">' + linesHtml +
-          '<tr><td>FORMULA 9(b) — merit × $40 − adj. price ' + fmt$(r.adjustedPrice) + '</td><td class="val">' + fmt$(r.value) + '</td><td class="verdict"></td></tr>' +
-          '</table>' +
-        '</div>' +
-
-        '<div class="gauge-card"><h4><span>PAYOUT — REDLINE ORDNANCE WORKS</span></h4>' +
-          '<table class="pay-table">' + payRows + '</table></div>' +
-
+        '<table class="pay-table">' +
+          '<tr><td>DEVELOPMENT AWARD</td><td>' + (r.payout.award ? fmt$(r.payout.award) : '—') + '</td></tr>' +
+          '<tr><td>CLEAN-DETONATION BONUS</td><td>' + (r.payout.bonus ? '+' + fmt$(r.payout.bonus) : '—') + '</td></tr>' +
+          '<tr><td>PARTS (AS BUILT)</td><td>−' + fmt$(r.payout.cost) + '</td></tr>' +
+          '<tr class="net"><td>NET TO REDLINE</td><td class="' + (r.payout.net >= 0 ? 'pos' : 'neg') + '">' +
+            (r.payout.net >= 0 ? '' : '−') + fmt$(Math.abs(r.payout.net)) + '</td></tr>' +
+        '</table>' +
         '<div class="clipping">' +
-          '<div class="clip-mast"><b>ORDNANCE WEEKLY</b><span>THE TRADE PAPER OF RECORD · 10¢</span></div>' +
-          '<div class="clip-headline">' + v.headline + '</div>' +
-          '<div class="clip-sub">' + v.sub + '</div>' +
-          '<div class="clip-stats">' + vStats + '</div>' +
+          '<div class="clip-mast"><b>ORDNANCE WEEKLY</b><span>TRADE PAPER OF RECORD</span></div>' +
+          '<div class="clip-headline">' + r.vantage.headline + '</div>' +
+          '<div class="clip-sub">' + r.vantage.sub + '</div>' +
         '</div>' +
-
-        '<div class="award-banner ' + bannerCls + '">' +
-          '<div class="ab-kicker">DECISION OF THE REVIEW BOARD</div>' +
-          '<div class="ab-title">' + bannerTitle + '</div>' +
-          '<div class="ab-sub">' + bannerSub + '</div>' + starsHtml +
-        '</div>' +
-
-        (r.incident ? '<button id="btn-incident" type="button">📄 READ INCIDENT REPORT — FORM IR-3</button>' : '') +
-
-        '<div class="adjud-btns">' +
-          '<button id="btn-retry" type="button">RETRY<span class="sub">SAME SERIES · KEEP DESIGN</span></button>' +
+        (r.incident ? '<button id="btn-incident" type="button">READ INCIDENT REPORT — FORM IR-3</button>' : '') +
+        '<div class="score-btns">' +
+          '<button id="btn-retry" type="button">RETRY<span class="sub">KEEPS YOUR BUILD</span></button>' +
           '<button id="btn-newcontract" type="button">NEW CONTRACT<span class="sub">FRESH SERIES</span></button>' +
         '</div>' +
+        '<div class="score-seed">SERIES ' + S.seed + ' · SAME BUILD + SAME SERIES = SAME RESULT · ALL SCIENCE INVENTED</div>' +
       '</div>';
-
-    sheet.scrollTop = 0;
-
-    // animate needles in
-    requestAnimationFrame(function () {
-      sheet.querySelectorAll('.needle').forEach(function (n) {
-        var target = n.style.transform;
-        n.style.transform = 'translateX(0px)';
-        n.style.transition = 'transform 1.1s cubic-bezier(.3,1.3,.4,1)';
-        requestAnimationFrame(function () { requestAnimationFrame(function () { n.style.transform = target; }); });
-      });
-    });
-
-    if (r.award === 'player') setTimeout(function () { PGAudio.fanfare(); }, 500);
-    else setTimeout(function () { PGAudio.sadDrone(); }, 500);
-
-    var ib = $('btn-incident');
-    if (ib) ib.addEventListener('click', openIncident);
+    showScreen('scr-score');
+    if (r.incident) $('btn-incident').addEventListener('click', showIncident);
     $('btn-retry').addEventListener('click', function () {
       PGAudio.tap();
-      resetQA();
-      toast('Series ' + S.seed + ' re-slated. Same batches, same weather, same Vantage. Adjust and return.');
-      buildBench();
-      show('scr-bench');
+      enterBuild(true);
     });
     $('btn-newcontract').addEventListener('click', function () {
       PGAudio.tap();
-      S.seed = PG.makeSeed();
-      resetQA();
-      buildRFP(true);
-      show('scr-rfp');
+      S.seed = PG2.makeSeed();
+      startContract();
     });
   }
-
-  /* ================= INCIDENT REPORT ================= */
-  function openIncident() {
+  function showIncident() {
+    PGAudio.tap();
     var inc = S.result.incident;
-    if (!inc) return;
     var doc = $('incident-doc');
-    var today = 'DAY ' + (100 + (S.seed.charCodeAt(0) % 60)) + ' · FY 7';
     doc.innerHTML =
       '<div class="ir-agency">REPUBLIC PROVING AUTHORITY</div>' +
-      '<div class="ir-form">' + inc.form + ' · FILE UNDER: LESSONS, UNLEARNED</div>' +
+      '<div class="ir-form">' + inc.form + ' · RANGE INCIDENT REPORT</div>' +
       '<div class="ir-title">INCIDENT REPORT</div>' +
-      '<hr class="doc-rule">' +
       '<div class="ir-row">' +
-        '<div class="ir-field"><div class="ir-lbl">DATE</div><div class="ir-val" data-type="' + today + '"></div></div>' +
-        '<div class="ir-field"><div class="ir-lbl">SERIES</div><div class="ir-val" data-type="' + inc.series + '"></div></div>' +
-        '<div class="ir-field"><div class="ir-lbl">CONTRACTOR</div><div class="ir-val" data-type="REDLINE ORDNANCE WORKS"></div></div>' +
+        '<div class="ir-field"><div class="ir-lbl">SERIES</div><div class="ir-val">' + inc.series + '</div></div>' +
+        '<div class="ir-field"><div class="ir-lbl">CONTRACTOR</div><div class="ir-val">REDLINE ORDNANCE WORKS</div></div>' +
       '</div>' +
       '<div class="ir-row">' +
-        '<div class="ir-field"><div class="ir-lbl">OUTCOME CLASSIFICATION</div><div class="ir-val" data-type="' + inc.outcome + '"></div></div>' +
-        '<div class="ir-field" style="flex:0 0 90px"><div class="ir-lbl">CLAUSE</div><div class="ir-val" data-type="' + inc.clause + '"></div></div>' +
+        '<div class="ir-field"><div class="ir-lbl">OUTCOME</div><div class="ir-val" id="ir-outcome"></div></div>' +
       '</div>' +
-      '<div class="ir-block"><div class="ir-lbl">FINDING OF FACT</div><div class="ir-boxed" data-type="' + inc.cause + '"></div></div>' +
-      '<div class="ir-block"><div class="ir-lbl">ROOT CAUSE (WITH RECEIPT)</div><div class="ir-boxed rc" data-type="' + inc.receipt + '"></div></div>' +
-      '<div class="ir-block"><div class="ir-lbl">CONTRIBUTING FACTORS</div><ul class="ir-contrib">' +
-        inc.contributing.map(function (c) { return '<li data-type="' + c + '"></li>'; }).join('') +
-      '</ul></div>' +
-      '<div class="ir-block"><div class="ir-lbl">DISPOSITION</div><div class="ir-boxed" data-type="' + inc.disposition + '"></div></div>' +
+      '<div class="ir-block"><div class="ir-lbl">NARRATIVE OF EVENT</div><div class="ir-boxed" id="ir-cause"></div></div>' +
+      '<div class="ir-block"><div class="ir-lbl">ROOT CAUSE (NAMED, AS ALWAYS)</div><div class="ir-boxed rc" id="ir-receipt"></div></div>' +
+      '<div class="ir-block"><div class="ir-lbl">DISPOSITION</div><div class="ir-boxed" id="ir-disp"></div></div>' +
       '<div class="ir-stamp" id="ir-stamp">FILED</div>' +
-      '<div class="ir-foot">FAILURES ARE NEVER DICE. FAILURES ARE RECEIPTS. — RANGE MASTER’S OFFICE</div>';
-
+      '<div class="ir-foot">RETAIN FOR YOUR RECORDS. THE AUTHORITY RETAINS ONE ANYWAY.</div>';
     $('incident-overlay').classList.remove('hidden');
-    $('incident-overlay').scrollTop = 0;
-
-    // typewriter fill
-    var fields = Array.prototype.slice.call(doc.querySelectorAll('[data-type]'));
+    // typewriter fills
+    var fields = [
+      ['ir-outcome', inc.outcome], ['ir-cause', inc.cause],
+      ['ir-receipt', inc.receipt], ['ir-disp', inc.disposition]
+    ];
     var fi = 0;
-    function typeNext() {
+    function typeField() {
       if (fi >= fields.length) {
-        setTimeout(function () {
-          $('ir-stamp').classList.add('stamped');
-          PGAudio.stampThud();
-        }, 300);
+        var st = $('ir-stamp');
+        st.classList.add('stamped');
+        PGAudio.stampThud();
         return;
       }
-      var f = fields[fi++];
-      var txt = f.getAttribute('data-type');
-      f.classList.add('typing');
+      var el2 = $(fields[fi][0]);
+      var txt = fields[fi][1];
+      el2.classList.add('typing');
       var ci = 0;
       var iv = setInterval(function () {
-        ci += 2 + ((Math.random() * 2) | 0);
-        f.textContent = txt.slice(0, ci);
+        ci += 2;
+        el2.textContent = txt.slice(0, ci);
         PGAudio.typeKey();
         if (ci >= txt.length) {
-          f.textContent = txt;
-          f.classList.remove('typing');
           clearInterval(iv);
-          if (fi === 3) PGAudio.typeDing();
-          setTimeout(typeNext, 90);
+          el2.classList.remove('typing');
+          fi++;
+          setTimeout(typeField, 180);
         }
-      }, 28);
+      }, 24);
     }
-    setTimeout(typeNext, 350);
+    setTimeout(typeField, 350);
   }
+  $('btn-incident-close').addEventListener('click', function () {
+    PGAudio.tap();
+    $('incident-overlay').classList.add('hidden');
+  });
 
-  /* ================= FLOW WIRING ================= */
-  function acceptContract() {
-    buildBench();
-    show('scr-bench');
-    toast('Contract accepted. The forecast is on the RFP. Read it twice.');
-  }
+  /* ================= MAIN LOOP ================= */
+  var lastFrame = performance.now();
+  function loop(now) {
+    requestAnimationFrame(loop);
+    var dt = Math.min((now - lastFrame) / 1000, 0.05);
+    lastFrame = now;
+    stepTweens(now);
 
-  function goRange() {
-    // final resolution locked in now
-    S.result = PG.adjudicate(S.design, S.seed, S.qaSpend);
-    var qa = S.design.qa;
-    var nothing = !qa.env && qa.mic === 'skip' && !qa.batch.some(function (b, i) { return b && b.tier === S.design.fuse[i]; });
-    if (nothing) toast('QA record: none. Noted in the file.');
-    Range.enter(S.result);
-    show('scr-range');
-  }
+    if (S.phase === 'title' || S.phase === 'rfp' || S.phase === 'score') return;
 
-  function init() {
-    // deterministic series for testing / sharing: ?seed=ABCDE
-    var sm = (location.search || '').match(/[?&]seed=([A-Za-z0-9]+)/);
-    if (sm) S.seed = sm[1].toUpperCase();
+    if (S.phase === 'build' || S.phase === 'wiring' || S.phase === 'det' || S.phase === 'arm') {
+      // idle spin on the work stand (build only)
+      if (S.phase === 'build') {
+        if (!dragPart && bay.spinEnabled !== false && now - bay.lastTouch > 3500 && Object.keys(pointers).length === 0) {
+          bay.device.rotation.y += dt * 0.22;
+        }
+        bayCam();
+      }
+      // stand bounce on part snap
+      if (bay.bounce > 0.01) {
+        bay.bounce *= Math.pow(0.0018, dt);
+        var by = 1.32 - Math.sin(performance.now() * 0.03) * 0.016 * bay.bounce;
+        bay.device.position.y = by;
+      }
+      // node marker pulse
+      var pulse = 1 + Math.sin(now * 0.007) * 0.18;
+      nodeMarkers.forEach(function (mk) { mk.scale.set(pulse, pulse, pulse); });
+      renderer.render(bay.scene, bay.camera);
+      return;
+    }
 
-    // audio on first gesture
-    var boot = function () {
-      PGAudio.init();
-      document.removeEventListener('pointerdown', boot);
-    };
-    document.addEventListener('pointerdown', boot);
-
-    $('btn-start').addEventListener('click', function () {
-      PGAudio.init(); PGAudio.tap();
-      buildRFP(false);
-      show('scr-rfp');
-    });
-    $('btn-accept').addEventListener('click', function () {
-      PGAudio.stampThud();
-      acceptContract();
-    });
-
-    // bench tabs
-    $('bench-tabs').querySelectorAll('button').forEach(function (b) {
-      b.addEventListener('click', function () {
-        PGAudio.click();
-        $('bench-tabs').querySelectorAll('button').forEach(function (x) { x.classList.toggle('active', x === b); });
-        ['fill', 'casing', 'fuse', 'ledger'].forEach(function (t) {
-          $('pane-' + t).classList.toggle('active', t === b.dataset.tab);
-        });
-        if (b.dataset.tab === 'fill') { sizeTriangle(); refreshBench(); }
+    /* range phases */
+    if (range) {
+      // heat shimmer
+      range.shimmer.forEach(function (sm, i) {
+        sm.position.y = 9 + i * 12 + Math.sin(now * 0.0011 + i * 2.2) * 2.4;
+        sm.material.opacity = 0.035 + 0.03 * (0.5 + 0.5 * Math.sin(now * 0.0017 + i));
       });
-    });
-    $('btn-toqa').addEventListener('click', function () {
-      PGAudio.tap();
-      buildQA();
-      show('scr-qa');
-    });
-    $('btn-backbench').addEventListener('click', function () {
-      PGAudio.tap();
-      buildBench();
-      show('scr-bench');
-    });
-    $('btn-torange').addEventListener('click', function () {
-      PGAudio.tap();
-      goRange();
-    });
-    $('btn-incident-close').addEventListener('click', function () {
-      PGAudio.tap();
-      $('incident-overlay').classList.add('hidden');
-    });
-
-    Range.bindControls();
-    show('scr-title');
+      range.mesas.forEach(function (m, i) {
+        m.position.y = Math.sin(now * 0.0021 + i * 1.4) * 0.55;
+      });
+      if (S.phase === 'truck') {
+        range.truckT += dt;
+        var tx2 = lerp(-90, 0, easeInOut(clamp(range.truckT / 6.4, 0, 1)));
+        range.truck.position.x = tx2;
+        range.truck.position.z = 34;
+        range.camera.position.set(tx2 + 16, 4.5, 62);
+        range.camera.lookAt(tx2, 2.5, 34);
+      }
+      if (S.phase === 'counting') {
+        rangeT.camT += dt;
+        updateCamClock();
+        var tMinus = 5 - rangeT.camT;
+        var whole = Math.ceil(tMinus);
+        if (!rangeT.detDone && whole >= 0 && whole <= 4 && whole !== rangeT.lastBeep && tMinus > -0.05) {
+          rangeT.lastBeep = whole;
+          PGAudio.beep(whole === 0);
+        }
+        if (rangeT.detAt != null && !rangeT.detDone && rangeT.camT >= rangeT.detAt) {
+          rangeT.detDone = true;
+          igniteFX();
+          if (S.result.outcome.type === 'early') {
+            $('cam-tick').textContent = 'OFF-CUE EVENT — T−' + Math.abs(5 - rangeT.camT).toFixed(1) + ' s';
+            $('cam-tick').classList.remove('hidden');
+          } else if (S.result.outcome.type === 'misfire' && rangeT.detAt > 5.2) {
+            $('cam-tick').textContent = 'LATE EVENT — T+' + (rangeT.camT - 5).toFixed(1) + ' s';
+            $('cam-tick').classList.remove('hidden');
+          }
+          if (S.result.visual.fizzle) {
+            PGAudio.detonation(0.3, true);
+            setCaption('', 'Smoke. A great deal of smoke, arranged vertically.');
+            later(4200, craterRevealOrScore);
+          }
+        }
+        if (rangeT.soundAt != null && !rangeT.soundDone && rangeT.camT >= rangeT.soundAt && !S.result.visual.fizzle) {
+          rangeT.soundDone = true;
+          range.shake = 10 + S.result.visual.dust * 9;
+          PGAudio.detonation(clamp(S.result.visual.dust, 0.25, 1.25), false);
+          PGAudio.seismo();
+          var dw = $('dustwall');
+          dw.style.transition = 'none';
+          dw.style.opacity = 0.9;
+          later(160, function () {
+            dw.style.transition = 'opacity 2.4s ease';
+            dw.style.opacity = 0;
+          });
+          $('cam-tick').textContent = 'WAVEFRONT — T+' + S.result.visual.soundDelay.toFixed(1) + ' s · ' + PG2.RFP.camera.km.toFixed(1) + ' KM';
+          $('cam-tick').classList.remove('hidden');
+          later(2600, craterRevealOrScore);
+        }
+        if (rangeT.detAt == null && rangeT.camT > 6.2 && !rangeT.dudHandled) {
+          rangeT.dudHandled = true;
+          PGAudio.wind();
+          dudHold();
+        }
+      }
+      stepFX(dt);
+      if (range.craterG) {
+        range.craterG.children.forEach(function (ch) {
+          if (ch.isSprite) { ch.position.y += (ch.userData.rise || 0.4) * dt * 2; ch.material.opacity = Math.max(ch.material.opacity - dt * 0.02, 0.12); }
+        });
+      }
+      // camera shake
+      if (range.shake > 0.05) {
+        range.shake = Math.max(0, range.shake - dt * (range.shake > 5 ? 10 : 4));
+        var c = range.camera;
+        c.position.x += (Math.random() - 0.5) * range.shake * 0.6;
+        c.position.y += (Math.random() - 0.5) * range.shake * 0.45;
+      }
+      renderer.render(range.scene, range.camera);
+    }
   }
 
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
-  else init();
+  /* ================= WIRE-UP UI ================= */
+  $('btn-start').addEventListener('click', function () {
+    PGAudio.init(); PGAudio.tap();
+    startContract();
+  });
+  function startContract() {
+    S.phase = 'rfp';
+    showUI(null);
+    buildRFP();
+    showScreen('scr-rfp');
+  }
+  $('btn-accept').addEventListener('click', function () {
+    PGAudio.init(); PGAudio.stampThud();
+    enterBuild(false);
+  });
+  $('btn-closeout').addEventListener('click', function () {
+    PGAudio.tap();
+    enterWiring();
+  });
+  $('btn-panel-done').addEventListener('click', function () {
+    PGAudio.tap();
+    $('btn-panel-done').classList.add('hidden');
+    exitWiring();
+  });
+  $('btn-det-done').addEventListener('click', function () {
+    PGAudio.tap();
+    $('btn-det-done').classList.add('hidden');
+    enterArm();
+  });
+  $('btn-torange').addEventListener('click', function () {
+    PGAudio.tap();
+    $('btn-torange').classList.add('hidden');
+    enterRange();
+  });
+  $('btn-skip-truck').addEventListener('click', function () {
+    PGAudio.tap();
+    stationSeven();
+  });
+
+  /* ================= DEBUG / TEST API ================= */
+  window.__pg = {
+    state: function () {
+      return { phase: S.phase, seed: S.seed, assembly: JSON.parse(JSON.stringify(S.assembly)) };
+    },
+    result: function () { return S.result; },
+    setSpin: function (on) { bay.spinEnabled = !!on; },
+    nodes: function () {
+      var out = {};
+      nodeList().forEach(function (n) {
+        out[n.id] = worldToScreen(bay.device.localToWorld(n.pos.clone()), bay.camera);
+      });
+      return out;
+    },
+    nodesFor: function (partId) {
+      var out = {};
+      nodeList().forEach(function (n) {
+        if (n.accepts.indexOf(partId) < 0) return;
+        out[n.id] = worldToScreen(bay.device.localToWorld(n.pos.clone()), bay.camera);
+      });
+      return out;
+    },
+    wireAnchors: function () {
+      if (!bay.wiring) return null;
+      var out = { posts: {}, terms: {} };
+      PG2.WIRES.forEach(function (c) { out.posts[c] = screenOfLocal(bay.wiring.posts[c].local); });
+      Object.keys(bay.wiring.terms).forEach(function (t) { out.terms[t] = screenOfLocal(bay.wiring.terms[t].local); });
+      out.layout = PG2.panelLayout(S.seed);
+      return out;
+    },
+    detAnchors: function () {
+      if (!bay.detStage) return null;
+      var ds = bay.detStage;
+      return {
+        det: worldToScreen(ds.det.position, bay.camera),
+        above: worldToScreen(ds.path[1], bay.camera),
+        mid: worldToScreen(ds.path[2], bay.camera),
+        seat: worldToScreen(ds.path[3], bay.camera),
+        p: ds.p, seated: ds.seated, slam: ds.slam
+      };
+    },
+    armAnchors: function () {
+      if (!bay.armPanelMesh) return null;
+      var pm = bay.armPanelMesh;
+      return {
+        cover: worldToScreen(pm.userData.coverPivot.getWorldPosition(new THREE.Vector3()), bay.camera),
+        lever: worldToScreen(pm.userData.leverPivot.getWorldPosition(new THREE.Vector3()), bay.camera),
+        coverOpen: bay.armStage ? bay.armStage.coverOpen : false
+      };
+    },
+    glOK: function () {
+      var gl = renderer.getContext();
+      return !!gl && !gl.isContextLost();
+    },
+    sampleGL: function () {
+      // render the active scene, then read back a pixel block — proves real WebGL output
+      var scene = null, cam = null;
+      if (S.phase === 'build' || S.phase === 'wiring' || S.phase === 'det' || S.phase === 'arm') {
+        scene = bay.scene; cam = bay.camera;
+      } else if (range) {
+        scene = range.scene; cam = range.camera;
+      }
+      if (!scene) return { ok: false, reason: 'no active scene' };
+      renderer.render(scene, cam);
+      var gl = renderer.getContext();
+      var w = gl.drawingBufferWidth, h = gl.drawingBufferHeight;
+      var px = new Uint8Array(24 * 24 * 4);
+      gl.readPixels(Math.floor(w / 2) - 12, Math.floor(h / 2) - 12, 24, 24, gl.RGBA, gl.UNSIGNED_BYTE, px);
+      var sum = 0, distinct = {};
+      for (var i = 0; i < px.length; i += 4) {
+        sum += px[i] + px[i + 1] + px[i + 2];
+        distinct[px[i] + ',' + px[i + 1] + ',' + px[i + 2]] = 1;
+      }
+      return { ok: sum > 0, sum: sum, distinct: Object.keys(distinct).length };
+    }
+  };
+
+  /* ================= BOOT ================= */
+  initGL();
+  bay = initBay();
+  makeIcons();
+  buildShelf();
+  bayCam();
+  requestAnimationFrame(loop);
 
 })();
