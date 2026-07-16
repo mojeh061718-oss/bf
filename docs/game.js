@@ -44,6 +44,42 @@
   };
   function rfp() { return PG2.CONTRACTS[S.contract]; }
 
+  /* ================= SETTINGS + SAVE (the game persists; the demo didn't) ================= */
+  var SAVE_KEY = 'pg2.save.v1';
+  var SETTINGS = { sound: true, skipCine: false, lefty: false };
+  var SAVE = { contracts: {} };   // per-contract id: { won, stars, net, wonOn, tests }
+  function loadSave() {
+    try {
+      var raw = localStorage.getItem(SAVE_KEY);
+      if (!raw) return;
+      var s = JSON.parse(raw);
+      if (s && s.settings) {
+        SETTINGS.sound = s.settings.sound !== false;
+        SETTINGS.skipCine = !!s.settings.skipCine;
+        SETTINGS.lefty = !!s.settings.lefty;
+      }
+      if (s && s.contracts) SAVE.contracts = s.contracts;
+    } catch (e) { /* private mode etc — play in-memory */ }
+  }
+  function persist() {
+    try {
+      localStorage.setItem(SAVE_KEY, JSON.stringify({ v: 1, settings: SETTINGS, contracts: SAVE.contracts }));
+    } catch (e) {}
+  }
+  function contractRec(idx) {
+    var id = PG2.CONTRACTS[idx].id;
+    if (!SAVE.contracts[id]) SAVE.contracts[id] = { won: false, stars: 0, net: null, wonOn: null, tests: 0 };
+    return SAVE.contracts[id];
+  }
+  function contractUnlocked(idx) {
+    if (idx === 0) return true;
+    return contractRec(idx - 1).won || urlContract === idx;
+  }
+  function applySettings() {
+    PGAudio.setMuted(!SETTINGS.sound);
+    document.body.classList.toggle('lefty', SETTINGS.lefty);
+  }
+
   var timers = [];
   function later(ms, fn) { var t = setTimeout(fn, ms); timers.push(t); return t; }
   function clearLater() { timers.forEach(clearTimeout); timers = []; }
@@ -377,23 +413,26 @@
     rim.position.set(-5, 3, -4);
     scene.add(rim);
 
-    // floor: radial glow + grid, canvas texture
+    // floor: radial glow + grid, canvas texture — also the chalk diary of your attempts
     var fc = document.createElement('canvas');
     fc.width = fc.height = 512;
     var fx = fc.getContext('2d');
-    fx.fillStyle = '#0a1826';
-    fx.fillRect(0, 0, 512, 512);
-    var fg2 = fx.createRadialGradient(256, 256, 30, 256, 256, 250);
-    fg2.addColorStop(0, '#22405e');
-    fg2.addColorStop(1, '#0a1826');
-    fx.fillStyle = fg2;
-    fx.fillRect(0, 0, 512, 512);
-    fx.strokeStyle = 'rgba(140,190,235,.16)';
-    fx.lineWidth = 1;
-    for (var i = 0; i <= 16; i++) {
-      fx.beginPath(); fx.moveTo(i * 32, 0); fx.lineTo(i * 32, 512); fx.stroke();
-      fx.beginPath(); fx.moveTo(0, i * 32); fx.lineTo(512, i * 32); fx.stroke();
+    function drawFloorBase() {
+      fx.fillStyle = '#0a1826';
+      fx.fillRect(0, 0, 512, 512);
+      var fg2 = fx.createRadialGradient(256, 256, 30, 256, 256, 250);
+      fg2.addColorStop(0, '#22405e');
+      fg2.addColorStop(1, '#0a1826');
+      fx.fillStyle = fg2;
+      fx.fillRect(0, 0, 512, 512);
+      fx.strokeStyle = 'rgba(140,190,235,.16)';
+      fx.lineWidth = 1;
+      for (var i = 0; i <= 16; i++) {
+        fx.beginPath(); fx.moveTo(i * 32, 0); fx.lineTo(i * 32, 512); fx.stroke();
+        fx.beginPath(); fx.moveTo(0, i * 32); fx.lineTo(512, i * 32); fx.stroke();
+      }
     }
+    drawFloorBase();
     var ftx = new THREE.CanvasTexture(fc);
     ftx.encoding = THREE.sRGBEncoding;
     var floor = new THREE.Mesh(new THREE.CircleGeometry(11, 40),
@@ -401,6 +440,95 @@
     floor.rotation.x = -Math.PI / 2;
     floor.receiveShadow = true;
     scene.add(floor);
+    // chalk tallies + (after test #3) a coffee ring — the bay keeps score
+    function repaintFloor(tests) {
+      drawFloorBase();
+      var n = Math.min(tests || 0, 40);
+      var jr = PG2.stream('BAY', 'chalk');
+      fx.lineCap = 'round';
+      for (var i = 0; i < n; i++) {
+        var group = Math.floor(i / 5), inGroup = i % 5;
+        // the engineer's corner: tallies chalked by the clipboard, front-left of the stand
+        var gx = 205 + (group % 3) * 42, gy = 286 + Math.floor(group / 3) * 30;
+        fx.save();
+        fx.translate(gx, gy);
+        fx.rotate((jr() - 0.5) * 0.14 + 0.22);
+        fx.strokeStyle = 'rgba(228,238,248,' + (0.6 + jr() * 0.2).toFixed(2) + ')';
+        fx.lineWidth = 3.6;
+        fx.lineCap = 'round';
+        fx.beginPath();
+        if (inGroup < 4) {
+          var x0 = inGroup * 9 + (jr() - 0.5) * 2;
+          fx.moveTo(x0, (jr() - 0.5) * 2);
+          fx.lineTo(x0 + (jr() - 0.5) * 4, 22 + (jr() - 0.5) * 3);
+        } else {
+          fx.moveTo(-5, 17 + (jr() - 0.5) * 2);
+          fx.lineTo(34, 4 + (jr() - 0.5) * 2);
+        }
+        fx.stroke();
+        fx.restore();
+      }
+      if ((tests || 0) >= 3) {   // somebody's been living out here
+        fx.strokeStyle = 'rgba(158,96,46,.6)';
+        fx.lineWidth = 5.5;
+        fx.beginPath();
+        fx.arc(176, 330, 14, 0.4, Math.PI * 2.1);
+        fx.stroke();
+        fx.strokeStyle = 'rgba(158,96,46,.3)';
+        fx.lineWidth = 4;
+        fx.beginPath();
+        fx.arc(181, 326, 14, 1.2, Math.PI * 1.7);
+        fx.stroke();
+      }
+      ftx.needsUpdate = true;
+    }
+    // clipboard by the stand (appears after test #3, with the coffee)
+    var clip = new THREE.Group();
+    var board = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.016, 0.46), mat(0x6b4a2a, { shin: 6 }));
+    board.position.y = 0.01;
+    clip.add(board);
+    var paper = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.006, 0.4), mat(0xe8dfc8, { shin: 4 }));
+    paper.position.y = 0.022;
+    clip.add(paper);
+    var clipbar = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.02, 0.05), mat(0x8f9aa5, { shin: 60 }));
+    clipbar.position.set(0, 0.03, -0.19);
+    clip.add(clipbar);
+    var scrawl = textPlane('IR-3 · IR-3 · IR-3', 0.24, 0.06, { color: '#57503f', px: 40 });
+    scrawl.rotation.x = -Math.PI / 2;
+    scrawl.position.set(0, 0.028, 0.02);
+    clip.add(scrawl);
+    clip.position.set(-1.55, 0.02, 1.62);
+    clip.rotation.y = 0.7;
+    clip.visible = false;
+    scene.add(clip);
+    // work-light rig — quietly scoots around to look over your shoulder
+    var rig = new THREE.Group();
+    var tripod = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.05, 2.15, 8), mat(0x2f3b46));
+    tripod.position.y = 1.07;
+    rig.add(tripod);
+    var feet = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.34, 0.05, 10), mat(0x22303c));
+    feet.position.y = 0.03;
+    rig.add(feet);
+    var head = new THREE.Group();
+    head.position.y = 2.12;
+    var hood = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.23, 0.26, 10), mat(0x3a4c5d));
+    hood.rotation.x = Math.PI / 2;
+    head.add(hood);
+    var lens = new THREE.Mesh(new THREE.CircleGeometry(0.14, 12),
+      new THREE.MeshBasicMaterial({ color: 0xfff2d0 }));
+    lens.position.z = 0.14;
+    head.add(lens);
+    rig.add(head);
+    var wspot = new THREE.SpotLight(0xffe9c4, 0.55, 11, 0.55, 0.6, 1.2);
+    wspot.position.set(0, 2.12, 0.1);
+    rig.add(wspot);
+    var wtarget = new THREE.Object3D();
+    scene.add(wtarget);
+    wtarget.position.set(0, 1.3, 0);
+    wspot.target = wtarget;
+    rig.userData.angle = 2.3;
+    rig.userData.head = head;
+    scene.add(rig);
 
     // work stand
     var stand = new THREE.Group();
@@ -439,7 +567,10 @@
 
     return {
       scene: scene, camera: camera, device: device, stand: stand, nodeGroup: nodeGroup,
-      orbit: orbit, spin: 0, lastTouch: 0, bounce: 0,
+      orbit: orbit, spin: 0, lastTouch: 0,
+      dip: 0, dipV: 0,                       // work stand suspension
+      velTheta: 0, velPhi: 0, velFresh: 0,   // inertial orbit
+      repaintFloor: repaintFloor, clipboard: clip, worklight: rig, floorCanvas: fc,
       wiring: null, detStage: null, armStage: null
     };
   }
@@ -568,18 +699,19 @@
     for (var i = ng.children.length - 1; i >= 0; i--) ng.remove(ng.children[i]);
     nodeMarkers = [];
     if (!draggingPart) return;
+    // wrong-category nodes never light — only nodes that accept this part exist at all
     nodeList().forEach(function (n) {
       if (n.accepts.indexOf(draggingPart) < 0) return;
       var mk = new THREE.Group();
       var s = new THREE.Mesh(new THREE.SphereGeometry(0.055, 10, 8),
-        mat(0x53e07f, { emissive: 0x2fd465, ei: 0.9, transparent: true, opacity: 0.9 }));
+        mat(0x53e07f, { emissive: 0x2fd465, ei: 0.4, transparent: true, opacity: 0.4 }));
       mk.add(s);
       var r = new THREE.Mesh(new THREE.TorusGeometry(0.11, 0.012, 6, 20),
-        mat(0x53e07f, { emissive: 0x2fd465, ei: 0.7, transparent: true, opacity: 0.75 }));
+        mat(0x53e07f, { emissive: 0x2fd465, ei: 0.7, transparent: true, opacity: 0.2 }));
       r.rotation.x = Math.PI / 2;
       mk.add(r);
       mk.position.copy(n.pos);
-      mk.userData.node = n;
+      mk.userData = { node: n, sphere: s, ring: r, prox: 0 };
       ng.add(mk);
       nodeMarkers.push(mk);
     });
@@ -755,8 +887,13 @@
     var r = canvas.getBoundingClientRect();
     return { x: e.clientX - r.left, y: e.clientY - r.top };
   }
+  function partWeight01(id) {
+    var def = PG2.SHELLS[id] || PG2.COMPOUNDS[id] || PG2.PARTS[id];
+    return clamp((def ? def.w : 4) / 30, 0.05, 1);
+  }
   function beginPartDrag(id, e) {
     PGAudio.init(); PGAudio.pickup();
+    hidePartCard();
     var ghost = partBuilder(id);
     ghost.traverse(function (m) {
       if (m.isMesh) {
@@ -767,32 +904,55 @@
       }
     });
     bay.scene.add(ghost);
-    dragPart = { id: id, ghost: ghost, node: null, pid: e.pointerId };
+    dragPart = {
+      id: id, ghost: ghost, node: null, pid: e.pointerId,
+      target: new THREE.Vector3(), snap: false, ghostHot: -1,
+      w: partWeight01(id)
+    };
     refreshNodes(id);
     movePartDrag(e);
+    dragPart.ghost.position.copy(dragPart.target);   // no fly-in from origin
     window.addEventListener('pointermove', movePartDrag);
     window.addEventListener('pointerup', endPartDrag);
     window.addEventListener('pointercancel', endPartDrag);
   }
+  function setGhostHot(hot) {
+    if (!dragPart || dragPart.ghostHot === (hot ? 1 : 0)) return;
+    dragPart.ghostHot = hot ? 1 : 0;
+    dragPart.ghost.traverse(function (m) {
+      if (!m.isMesh) return;
+      m.material.opacity = hot ? 0.92 : 0.5;
+      if (m.material.emissive) {
+        if (hot) {
+          if (m.userData.e0 == null) m.userData.e0 = m.material.emissive.getHex();
+          m.material.emissive.setHex(0x1d5533);   // ghost-preview: this is where it lands
+        } else if (m.userData.e0 != null) {
+          m.material.emissive.setHex(m.userData.e0);
+        }
+      }
+    });
+  }
+  var _mkWP = new THREE.Vector3();
   function movePartDrag(e) {
     if (!dragPart || e.pointerId !== dragPart.pid) return;
     var p = canvasPos(e);
-    // nearest valid node in screen space
-    var best = null, bestD = 76;
+    // progressive node feedback: every valid node knows how near the part is
+    var best = null, bestD = 96;   // magnetic range
     nodeMarkers.forEach(function (mk) {
-      var wp = mk.getWorldPosition(new THREE.Vector3());
-      var sp = worldToScreen(wp, bay.camera);
+      mk.getWorldPosition(_mkWP);
+      var sp = worldToScreen(_mkWP, bay.camera);
       var dd = Math.hypot(sp.x - p.x, sp.y - p.y);
+      mk.userData.prox = clamp(1 - (dd - 55) / 250, 0, 1);   // distant→0 glow, close→1 hot
       if (dd < bestD) { bestD = dd; best = mk.userData.node; }
     });
     if (best && (!dragPart.node || dragPart.node.id !== best.id)) PGAudio.ghostHum();
     dragPart.node = best;
     if (best) {
+      // magnetic pull: the ghost eases into the final pose (see loop)
       var pose = nodePose(best.id, dragPart.id);
-      var wp2 = bay.device.localToWorld(pose.pos.clone());
-      dragPart.ghost.position.copy(wp2);
-      dragPart.ghost.rotation.copy(bay.device.rotation);
-      dragPart.ghost.traverse(function (m) { if (m.isMesh) m.material.opacity = 0.85; });
+      dragPart.target.copy(bay.device.localToWorld(pose.pos.clone()));
+      dragPart.snap = true;
+      setGhostHot(true);
     } else {
       // float on a camera-facing plane through the device
       var ndc = new THREE.Vector2((p.x / W) * 2 - 1, -(p.y / H) * 2 + 1);
@@ -803,10 +963,28 @@
       plane.setFromNormalAndCoplanarPoint(n, bay.orbit.target);
       var hit = new THREE.Vector3();
       raycaster.ray.intersectPlane(plane, hit);
-      if (hit) dragPart.ghost.position.copy(hit);
-      dragPart.ghost.rotation.set(0, 0, 0);
-      dragPart.ghost.traverse(function (m) { if (m.isMesh) m.material.opacity = 0.45; });
+      if (hit) dragPart.target.copy(hit);
+      dragPart.snap = false;
+      setGhostHot(false);
     }
+  }
+  var _gq = new THREE.Quaternion(), _ge = new THREE.Euler();
+  function stepDragGhost(dt) {
+    if (!dragPart || !dragPart.ghost) return;
+    var g = dragPart.ghost;
+    // inertia: heavier parts lag more in the hand
+    var k = Math.min(((dragPart.snap ? 17 : 13) - dragPart.w * 5.5) * dt, 1);
+    var dx = dragPart.target.x - g.position.x;
+    var dy = dragPart.target.y - g.position.y;
+    var dz = dragPart.target.z - g.position.z;
+    g.position.x += dx * k; g.position.y += dy * k; g.position.z += dz * k;
+    if (dragPart.snap) {
+      _gq.copy(bay.device.quaternion);   // ghost-preview: final orientation
+    } else {
+      _ge.set(clamp(dy * 0.55, -0.3, 0.3), 0, clamp(-dx * 0.55, -0.35, 0.35));  // sway with the pull
+      _gq.setFromEuler(_ge);
+    }
+    g.quaternion.slerp(_gq, Math.min(dt * 9, 1));
   }
   function endPartDrag(e) {
     if (!dragPart || (e && e.pointerId !== dragPart.pid)) return;
@@ -819,35 +997,62 @@
     if (dp.node) placePart(dp.id, dp.node);
     else refreshNodes(null);
   }
+  function findPlacedRoot(kind, slot) {
+    var found = null;
+    bay.device.children.forEach(function (ch) {
+      var r = ch.userData.remove;
+      if (!r) return;
+      if (r.kind === kind && (slot == null || r.slot === slot)) found = ch;
+    });
+    return found;
+  }
+  function settleWobble(kind, slot, w) {
+    // spring overshoot: the part lands, squashes, rings down
+    var root = findPlacedRoot(kind, slot);
+    if (!root) return;
+    var amp = 0.05 + w * 0.1;
+    tween(560, function (e, raw) {
+      var kk = Math.exp(-4.8 * raw) * Math.sin(raw * Math.PI * 3.4);
+      root.scale.set(1 + amp * kk, 1 - amp * kk * 0.8, 1 + amp * kk);
+    }, function () { root.scale.set(1, 1, 1); }, function (t) { return t; });
+  }
+  function standDip(w) {
+    bay.dipV -= 0.6 * w;   // the stand takes the weight, proportionally
+  }
   function placePart(id, node) {
     var a = S.assembly;
+    if (/^slot/.test(node.id) && PG2.COMPOUNDS[id] && PG2.COMPOUNDS[id].cost === 0 &&
+        !(a.refine.stock[id] > 0)) {   // refined — comes from stock
+      toast('No ' + PG2.COMPOUNDS[id].name + ' in stock — run ⚗ THE STILL.');
+      refreshNodes(null);
+      return;
+    }
+    pushHistory();
+    var kind, slot = null;
     if (node.id === 'stand') {
       a.shell = id;
       a.canisters = new Array(PG2.SHELLS[id].slots).fill(null);
-      PGAudio.thunk(true);
+      kind = 'shell';
     } else if (/^slot/.test(node.id)) {
-      if (PG2.COMPOUNDS[id] && PG2.COMPOUNDS[id].cost === 0) {   // refined — comes from stock
-        if (!(a.refine.stock[id] > 0)) {
-          toast('No ' + PG2.COMPOUNDS[id].name + ' in stock — run ⚗ THE STILL.');
-          refreshNodes(null);
-          return;
-        }
-        a.refine.stock[id]--;
-      }
+      if (PG2.COMPOUNDS[id] && PG2.COMPOUNDS[id].cost === 0) a.refine.stock[id]--;
       a.canisters[node.slot] = id;
-      PGAudio.thunk(false);
+      kind = 'canister'; slot = node.slot;
     } else {
       a[id] = true;
-      PGAudio.thunk(id === 'battery');
+      kind = id;
     }
-    bay.bounce = 1;
+    var w = partWeight01(id);
+    PGAudio.thunk(w);        // a Big Shell thunks deeper than a canister
+    standDip(w);
     rebuildDevice();
+    settleWobble(kind, slot, w);
     refreshHUD();
   }
   function restock(c) {
     if (c && PG2.COMPOUNDS[c] && PG2.COMPOUNDS[c].cost === 0) S.assembly.refine.stock[c]++;
   }
   function removePart(info) {
+    pushHistory();
     var a = S.assembly;
     if (info.kind === 'shell') {
       (a.canisters || []).forEach(restock);
@@ -862,8 +1067,112 @@
       a[info.kind] = false;
     }
     PGAudio.unsnap();
+    standDip(-partWeight01(info.kind === 'shell' ? 'standard' : info.kind) * 0.4);
+    hidePartCard();
     rebuildDevice();
     refreshHUD();
+  }
+
+  /* ---------- undo / redo (three steps — tinkering demands safe experimentation) ---------- */
+  var hist = { undo: [], redo: [] };
+  function histUI() {
+    $('btn-undo').disabled = !hist.undo.length;
+    $('btn-redo').disabled = !hist.redo.length;
+  }
+  function snapAssembly() { return JSON.stringify(S.assembly); }
+  function pushHistory() {
+    hist.undo.push(snapAssembly());
+    if (hist.undo.length > 3) hist.undo.shift();
+    hist.redo.length = 0;
+    histUI();
+  }
+  function clearHistory() { hist.undo.length = 0; hist.redo.length = 0; histUI(); }
+  function applySnapshot(json) {
+    S.assembly = JSON.parse(json);
+    hidePartCard();
+    rebuildDevice();
+    refreshHUD();
+  }
+  function doUndo() {
+    if (!hist.undo.length || S.phase !== 'build') return;
+    hist.redo.push(snapAssembly());
+    applySnapshot(hist.undo.pop());
+    PGAudio.unsnap();
+    histUI();
+  }
+  function doRedo() {
+    if (!hist.redo.length || S.phase !== 'build') return;
+    hist.undo.push(snapAssembly());
+    applySnapshot(hist.redo.pop());
+    PGAudio.thunk(0.4);
+    histUI();
+  }
+  $('btn-undo').addEventListener('click', function () { PGAudio.init(); doUndo(); });
+  $('btn-redo').addEventListener('click', function () { PGAudio.init(); doRedo(); });
+
+  /* ---------- part info card (long-press a placed part) ---------- */
+  var FLAVOR = {
+    compact: 'Two bays and big dreams. Rated for polite explosions only.',
+    standard: 'The catalog calls it “dependable”, which is catalog for “blameless”.',
+    heavy: 'The patience of a bank vault and the appetite of a quarry.',
+    ember: 'Sloshes if you shake it. Kindly do not shake it.',
+    frost: 'Smells faintly of winter and disapproval.',
+    emberx: 'From your own still. It hums when nobody is listening.',
+    emberxs: 'Left the still angry. Holds a grudge, loses a contest.',
+    timer: 'Counts to five. Never wrong — only ever wired wrong.',
+    battery: 'DC-9 cells. The label says DO NOT LICK because somebody asked.',
+    cap: 'A hat for the important hole. Fits like bureaucracy: snugly.',
+    fins: 'Aerodynamically useless. Morale-critical.',
+    panel: 'One switch, one guard, zero excuses. The little light means it.'
+  };
+  function showPartCard(root, p) {
+    var info = root.userData.remove;
+    if (!info) return;
+    var id = info.kind === 'shell' ? S.assembly.shell
+           : info.kind === 'canister' ? S.assembly.canisters[info.slot] : info.kind;
+    if (!id) return;
+    var def = PG2.SHELLS[id] || PG2.COMPOUNDS[id] || PG2.PARTS[id];
+    $('pc-name').textContent = def.name;
+    $('pc-stats').textContent =
+      (def.cost > 0 ? '$' + def.cost.toLocaleString('en-US') : 'FROM THE STILL') +
+      ' · ' + def.w + ' KG' +
+      (def.slots ? ' · ' + def.slots + ' BAYS' : '') +
+      (def.energy ? ' · ' + def.energy + ' Bd' : '');
+    $('pc-flavor').textContent = FLAVOR[id] || def.blurb || '';
+    var card = $('part-card');
+    card.classList.remove('hidden');
+    card.style.left = clamp(p.x - 115, 8, W - 238) + 'px';
+    card.style.top = clamp(p.y - 140, 60, H - 130) + 'px';
+    PGAudio.tick();
+  }
+  function hidePartCard() { $('part-card').classList.add('hidden'); }
+
+  /* ---------- double-tap focus framing ---------- */
+  function pickPart(p) {
+    var ndc = new THREE.Vector2((p.x / W) * 2 - 1, -(p.y / H) * 2 + 1);
+    raycaster.setFromCamera(ndc, bay.camera);
+    var hits = raycaster.intersectObjects(placedMeshes, false);
+    return hits.length ? hits[0].object.userData.rootPart : null;
+  }
+  function focusPart(root) {
+    var bb = new THREE.Box3().setFromObject(root);
+    var ctr = bb.getCenter(new THREE.Vector3());
+    var size = bb.getSize(new THREE.Vector3()).length();
+    var o = bay.orbit;
+    var t0 = o.target.clone(), r0 = o.radius, r1 = clamp(size * 2.1, 1.3, 5.5);
+    PGAudio.pickup();
+    tween(620, function (t) {
+      o.target.lerpVectors(t0, ctr, t);
+      o.radius = lerp(r0, r1, t);
+    });
+  }
+  function resetFraming() {
+    var o = bay.orbit;
+    var t0 = o.target.clone(), r0 = o.radius;
+    tween(620, function (t) {
+      o.target.lerpVectors(t0, V3(0, 1.25, 0), t);
+      o.radius = lerp(r0, 4.4, t);
+    });
   }
 
   canvas.addEventListener('pointerdown', onCanvasDown);
@@ -876,15 +1185,32 @@
     bay.orbit.radius = clamp(bay.orbit.radius + e.deltaY * 0.004, 2.2, 8.5);
   }, { passive: false });
 
+  var tapCtl = { lastT: 0, lastRoot: null, removeTimer: null, lpTimer: null, lpFired: false };
   function onCanvasDown(e) {
     PGAudio.init();
-    canvas.setPointerCapture && canvas.setPointerCapture(e.pointerId);
+    try { canvas.setPointerCapture && canvas.setPointerCapture(e.pointerId); } catch (err) {}
     var p = canvasPos(e);
     pointers[e.pointerId] = { x: p.x, y: p.y, sx: p.x, sy: p.y, t: performance.now(), moved: false };
     bay.lastTouch = performance.now();
     if (S.phase === 'wiring') { wiringDown(e, p); return; }
     if (S.phase === 'det') { detDown(e, p); return; }
     if (S.phase === 'arm') { armDown(e, p); return; }
+    if (S.phase === 'build' && !dragPart && Object.keys(pointers).length === 1) {
+      hidePartCard();
+      bay.velTheta = bay.velPhi = 0;   // grabbing stops the spin
+      tapCtl.lpFired = false;
+      clearTimeout(tapCtl.lpTimer);
+      var root = pickPart(p);
+      if (root) {
+        var pid = e.pointerId;
+        tapCtl.lpTimer = setTimeout(function () {   // long-press: the part introduces itself
+          var pt2 = pointers[pid];
+          if (!pt2 || pt2.moved || dragPart || S.phase !== 'build') return;
+          tapCtl.lpFired = true;
+          showPartCard(root, p);
+        }, 460);
+      }
+    }
   }
   function onCanvasMove(e) {
     var pt = pointers[e.pointerId];
@@ -894,12 +1220,18 @@
     if (S.phase === 'arm') { armMove(e, p); }
     if (!pt) return;
     var dx = p.x - pt.x, dy = p.y - pt.y;
-    if (Math.hypot(p.x - pt.sx, p.y - pt.sy) > 8) pt.moved = true;
+    if (Math.hypot(p.x - pt.sx, p.y - pt.sy) > 8) {
+      if (!pt.moved) clearTimeout(tapCtl.lpTimer);
+      pt.moved = true;
+    }
     var ids = Object.keys(pointers);
     if (S.phase === 'build' && !dragPart) {
       if (ids.length === 1) {
         bay.orbit.theta -= dx * 0.0065;
-        bay.orbit.phi = clamp(bay.orbit.phi - dy * 0.005, 0.25, 1.5);
+        bay.orbit.phi = clamp(bay.orbit.phi - dy * 0.005, 0.18, 1.56);   // soft clamps spring back in the loop
+        bay.velTheta = -dx * 0.0065 * 60;   // remembered for inertial release
+        bay.velPhi = -dy * 0.005 * 60;
+        bay.velFresh = performance.now();
       } else if (ids.length === 2) {
         var a = pointers[ids[0]], b = pointers[ids[1]];
         var prev = Math.hypot(a.x - b.x, a.y - b.y);
@@ -921,14 +1253,36 @@
     if (S.phase === 'wiring') wiringUp(e, p);
     if (S.phase === 'det') detUp(e, p);
     if (S.phase === 'arm') armUp(e, p);
-    if (pt && !pt.moved && S.phase === 'build' && !dragPart && Object.keys(pointers).length === 1) {
-      // tap: try remove part
-      var ndc = new THREE.Vector2((p.x / W) * 2 - 1, -(p.y / H) * 2 + 1);
-      raycaster.setFromCamera(ndc, bay.camera);
-      var hits = raycaster.intersectObjects(placedMeshes, false);
-      if (hits.length) {
-        var root = hits[0].object.userData.rootPart;
-        if (root && root.userData.remove) removePart(root.userData.remove);
+    if (pt && S.phase === 'build' && !dragPart && Object.keys(pointers).length === 1) {
+      if (pt.moved && performance.now() - bay.velFresh > 90) {
+        bay.velTheta = bay.velPhi = 0;   // held still before release: no inertia
+      }
+      if (!pt.moved) {
+        clearTimeout(tapCtl.lpTimer);
+        if (!tapCtl.lpFired) {
+          var root = pickPart(p);
+          var nowT = performance.now();
+          if (root && root.userData.remove) {
+            if (nowT - tapCtl.lastT < 320 && tapCtl.lastRoot === root) {
+              // double-tap: focus-frame the part instead of removing it
+              clearTimeout(tapCtl.removeTimer);
+              tapCtl.removeTimer = null;
+              focusPart(root);
+              tapCtl.lastT = 0; tapCtl.lastRoot = null;
+            } else {
+              tapCtl.lastT = nowT; tapCtl.lastRoot = root;
+              var info = root.userData.remove;
+              clearTimeout(tapCtl.removeTimer);
+              tapCtl.removeTimer = setTimeout(function () {   // short grace so a double-tap can rescue it
+                tapCtl.removeTimer = null;
+                if (S.phase === 'build' && !dragPart) removePart(info);
+              }, 290);
+            }
+          } else {
+            if (nowT - tapCtl.lastT < 320 && !tapCtl.lastRoot) resetFraming();  // double-tap emptiness: step back
+            tapCtl.lastT = nowT; tapCtl.lastRoot = null;
+          }
+        }
       }
     }
     delete pointers[e.pointerId];
@@ -1007,7 +1361,9 @@
     bay.armStage = null;
     // the tinker loop: a kept build stays EXACTLY as you left it —
     // parts, wires, torque, seating, arming. Tweak one thing. Refire.
-    if (!keepAssembly) S.assembly = PG2.makeAssembly();
+    if (!keepAssembly) { S.assembly = PG2.makeAssembly(); clearHistory(); }
+    histUI();
+    hidePartCard();
     showScreen(null); showUI('ui-bay');
     $('ui-bay').classList.remove('closeout');
     $('bay-brand-txt').textContent = 'REDLINE ORDNANCE WORKS · ' + rfp().id;
@@ -1019,9 +1375,18 @@
     $('det-ui').classList.add('hidden');
     $('arm-ui').classList.add('hidden');
     bay.orbit.theta = 0.7; bay.orbit.phi = 1.18; bay.orbit.radius = 4.4;
+    bay.orbit.target.set(0, 1.25, 0);
+    bay.velTheta = bay.velPhi = 0;
     bay.device.rotation.y = 0;
+    updateStandStory();
     rebuildDevice();
     refreshHUD();
+  }
+  function updateStandStory() {
+    // the bay quietly tells the story of your convergence
+    var tests = contractRec(S.contract).tests;
+    bay.repaintFloor(tests);
+    bay.clipboard.visible = tests >= 3;
   }
 
   /* ================= CLOSE-OUT STAGE 1 — WIRING ================= */
@@ -1553,31 +1918,90 @@
     }, done);
   }
 
-  /* ================= RANGE SCENE ================= */
+  /* ================= RANGE SCENE (v2 — the stage, not the play) ================= */
+  /* time-of-day palettes: each contract picks one; the convoy always drives at dawn */
+  var RANGE_PAL = {
+    dawn: {
+      sky: [[0, '#16264a'], [0.36, '#54628c'], [0.56, '#c8825e'], [0.72, '#eda86e'], [1, '#f5c98c']],
+      fog: 0xd9a878, fogNear: 1250, fogFar: 4100,
+      hemiSky: 0xb9c6e4, hemiGnd: 0x7a5638, hemiI: 0.58,
+      sun: 0xffc182, sunI: 1.2, sunPos: [-950, 210, 480],
+      mesas: [0x8a5a40, 0x9c6d5c, 0xa07890, 0x9884ab],   // warm near → violet far
+      terrTint: 0xffd9b8,
+      shimmer: 0.45, longShadow: true
+    },
+    noon: {
+      sky: [[0, '#4f97d6'], [0.5, '#a9cade'], [0.78, '#e9e3cf'], [1, '#efe6c6']],
+      fog: 0xe8dfc6, fogNear: 1600, fogFar: 4900,
+      hemiSky: 0xdcecf8, hemiGnd: 0xa08a62, hemiI: 1.02,
+      sun: 0xfff6e0, sunI: 1.15, sunPos: [140, 1100, 300],
+      mesas: [0xb08258, 0xc09a76, 0xccb69c, 0xd2c8b8],                 // bleached, blue-shifted far
+      terrTint: 0xffffff,
+      shimmer: 1.0, longShadow: false
+    }
+  };
+  function applyRangePalette(name) {
+    var p = RANGE_PAL[name] || RANGE_PAL.dawn;
+    if (!range.skyCache) range.skyCache = {};
+    if (!range.skyCache[name]) range.skyCache[name] = gradientTexture(p.sky, true);
+    range.scene.background = range.skyCache[name];
+    range.scene.fog.color.setHex(p.fog);
+    range.scene.fog.near = p.fogNear;
+    range.scene.fog.far = p.fogFar;
+    range.hemi.color.setHex(p.hemiSky);
+    range.hemi.groundColor.setHex(p.hemiGnd);
+    range.hemi.intensity = p.hemiI;
+    range.sun.color.setHex(p.sun);
+    range.sun.intensity = p.sunI;
+    range.sun.position.set(p.sunPos[0], p.sunPos[1], p.sunPos[2]);
+    range.mesas.forEach(function (m, i) { m.material.color.setHex(p.mesas[Math.min(i, p.mesas.length - 1)]); });
+    range.terrain.material.color.setHex(p.terrTint);
+    range.shimmerBase = p.shimmer;
+    range.palette = name;
+  }
+  function buildWheel(r, wdt) {
+    var g = new THREE.Group();
+    var tyre = new THREE.Mesh(new THREE.CylinderGeometry(r, r, wdt, 12), mat(0x22262b, { shin: 4 }));
+    tyre.rotation.x = Math.PI / 2;
+    g.add(tyre);
+    var hub = new THREE.Mesh(new THREE.BoxGeometry(r * 1.1, r * 0.34, wdt + 0.04), mat(0x545d66, { shin: 30 }));
+    g.add(hub);
+    return g;
+  }
+  function fakeShadow(w, l) {
+    // dawn drives cheap long shadows — a stretched dark decal, not a shadow map
+    var m = new THREE.Mesh(new THREE.PlaneGeometry(l, w),
+      new THREE.MeshBasicMaterial({ color: 0x1c1208, transparent: true, opacity: 0.26, depthWrite: false }));
+    m.rotation.x = -Math.PI / 2;
+    m.rotation.z = 0.42;   // away from the low sun
+    return m;
+  }
   function initRange() {
     var scene = new THREE.Scene();
-    scene.background = gradientTexture([[0, '#6fa5cf'], [0.42, '#c8d5cf'], [0.6, '#f0d9a8'], [1, '#e8c68a']], true);
     scene.fog = new THREE.Fog(0xe3d4b0, 1400, 3600);
-    var camera = new THREE.PerspectiveCamera(7, W / H, 0.5, 6000);
+    var camera = new THREE.PerspectiveCamera(7, W / H, 0.5, 8000);
 
-    scene.add(new THREE.HemisphereLight(0xcfe0f0, 0x8a6a42, 0.85));
+    var hemi = new THREE.HemisphereLight(0xcfe0f0, 0x8a6a42, 0.85);
+    scene.add(hemi);
     var sun = new THREE.DirectionalLight(0xfff3da, 1.0);
     sun.position.set(-800, 900, 500);
     scene.add(sun);
 
-    // terrain
+    // terrain (flattened along the convoy road corridor at world z≈26)
     var tg = new THREE.PlaneGeometry(6000, 6000, 56, 56);
     var pos = tg.attributes.position;
     var colors = [];
     var col = new THREE.Color();
     for (var i = 0; i < pos.count; i++) {
       var x = pos.getX(i), y = pos.getY(i);
+      var wz = -y;   // plane is rotated -90° about X: local +y → world −z
       var r2 = Math.hypot(x, y);
       var h = 0;
       if (r2 > 60) {
         h = Math.sin(x * 0.004 + 1.7) * Math.cos(y * 0.0031) * 7 +
             Math.sin(x * 0.013 + y * 0.009) * 2.5;
         h *= clamp((r2 - 60) / 300, 0, 1);
+        h *= clamp((Math.abs(wz - 26) - 14) / 26, 0, 1);   // road corridor stays drivable
       }
       pos.setZ(i, h);
       var shade = 0.84 + Math.sin(x * 0.05) * Math.cos(y * 0.043) * 0.09 + Math.sin(x * 0.21 + y * 0.17) * 0.045;
@@ -1590,9 +2014,10 @@
     terrain.rotation.x = -Math.PI / 2;
     scene.add(terrain);
 
-    // mesas (three ridge lines, fading with distance)
+    // mesas — four ridge lines now, blue-shifting into the fog with distance
     var mesas = [];
-    [{ z: -900, h: 48, c: 0x9a6b45, sp: 2200 }, { z: -1500, h: 74, c: 0xb08258, sp: 3000 }, { z: -2200, h: 110, c: 0xc9a37e, sp: 4200 }].forEach(function (m, mi) {
+    [{ z: -900, h: 48, sp: 2200 }, { z: -1500, h: 74, sp: 3000 },
+     { z: -2200, h: 104, sp: 4200 }, { z: -3050, h: 128, sp: 5800 }].forEach(function (m, mi) {
       var pts = [], n = 26;
       for (var i = 0; i <= n; i++) {
         var x = -m.sp / 2 + m.sp * i / n;
@@ -1605,7 +2030,7 @@
       shape.lineTo(pts[n].x, 0);
       shape.closePath();
       var geo = new THREE.ExtrudeGeometry(shape, { depth: 60, bevelEnabled: false });
-      var mesh = new THREE.Mesh(geo, mat(m.c, { shin: 2 }));
+      var mesh = new THREE.Mesh(geo, mat(0xb08258, { shin: 2 }));
       mesh.position.set(0, 0, m.z);
       scene.add(mesh);
       mesas.push(mesh);
@@ -1621,13 +2046,89 @@
     pad.add(mast);
     scene.add(pad);
 
+    // pad dressing — sandbags and cable runs (consumed by any real detonation)
+    var padDress = new THREE.Group();
+    var bagRand = PG2.stream('RANGE', 'bags');
+    for (var bi = 0; bi < 9; bi++) {
+      var bag = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.55, 0.8), mat(0xa89468, { shin: 3 }));
+      var ba = 2.2 + bi * 0.16 + bagRand() * 0.1;
+      bag.position.set(14 + Math.cos(ba) * 3.2 + bagRand(), 0.28 + (bi % 3 === 2 ? 0.5 : 0), 8 + Math.sin(ba) * 2.4);
+      bag.rotation.y = bagRand() * 0.8;
+      padDress.add(bag);
+    }
+    var jbox = new THREE.Mesh(new THREE.BoxGeometry(1.1, 1, 0.8), mat(0x445260, { shin: 10 }));
+    jbox.position.set(14.5, 0.5, 7.4);
+    padDress.add(jbox);
+    var cablePts = [V3(-4.5, 0.12, -3), V3(2, 0.1, 4), V3(9, 0.1, 6.4), V3(14.2, 0.12, 7.2)];
+    var cable = new THREE.Mesh(
+      new THREE.TubeGeometry(new THREE.CatmullRomCurve3(cablePts), 20, 0.07, 5, false),
+      mat(0x1d232a, { shin: 8 }));
+    padDress.add(cable);
+    var cable2 = new THREE.Mesh(
+      new THREE.TubeGeometry(new THREE.CatmullRomCurve3([V3(14.6, 0.12, 7.8), V3(30, 0.1, 22), V3(52, 0.1, 44)]), 12, 0.06, 5, false),
+      mat(0x1d232a, { shin: 8 }));
+    padDress.add(cable2);
+    scene.add(padDress);
+
+    // further out (survives the blast): wind sock, bunker, the volunteer's helmet on a post
+    var farDress = new THREE.Group();
+    var wsPole = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.12, 7, 8), mat(0xd8dde2, { shin: 30 }));
+    wsPole.position.set(-46, 3.5, -22);
+    farDress.add(wsPole);
+    var sock = new THREE.Group();
+    var sockCone = new THREE.Mesh(new THREE.ConeGeometry(0.55, 3.2, 8, 1, true), mat(0xe07b2a, { shin: 6 }));
+    sockCone.rotation.z = Math.PI / 2;
+    sockCone.position.x = 1.6;
+    sock.add(sockCone);
+    sock.position.set(-46, 6.8, -22);
+    sock.rotation.z = -1.05;
+    farDress.add(sock);
+    var bunker = new THREE.Mesh(new THREE.BoxGeometry(9, 2.4, 5), mat(0x8a7a58, { shin: 2 }));
+    bunker.position.set(-38, 1.0, 44);
+    bunker.rotation.y = 0.3;
+    farDress.add(bunker);
+    var slit = new THREE.Mesh(new THREE.BoxGeometry(4.6, 0.5, 0.3), mat(0x14181d, { shin: 2 }));
+    slit.position.set(-37.2, 1.7, 46.4);
+    slit.rotation.y = 0.3;
+    farDress.add(slit);
+    var post = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.14, 2.4, 7), mat(0x6b4a2a));
+    post.position.set(-30, 1.2, 40);
+    farDress.add(post);
+    var helmet = new THREE.Mesh(new THREE.SphereGeometry(0.85, 12, 7, 0, Math.PI * 2, 0, Math.PI / 2),
+      mat(0x7a8452, { shin: 24 }));   // two sizes too large
+    helmet.position.set(-30, 2.35, 40);
+    helmet.rotation.z = 0.22;
+    farDress.add(helmet);
+    scene.add(farDress);
+
+    // jackrabbit (the pre-countdown life beat)
+    var rabbit = new THREE.Group();
+    var rBody = new THREE.Mesh(new THREE.SphereGeometry(0.42, 10, 7), mat(0xb2a28c, { shin: 4 }));
+    rBody.scale.set(1.25, 0.9, 0.8);
+    rBody.position.y = 0.45;
+    rabbit.add(rBody);
+    var rHead = new THREE.Mesh(new THREE.SphereGeometry(0.24, 8, 6), mat(0xb8a894, { shin: 4 }));
+    rHead.position.set(0.48, 0.78, 0);
+    rabbit.add(rHead);
+    [-0.07, 0.07].forEach(function (ez) {
+      var ear = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.62, 0.14), mat(0xa89684, { shin: 4 }));
+      ear.position.set(0.42, 1.24, ez);
+      ear.rotation.z = -0.18;
+      rabbit.add(ear);
+    });
+    var rTail = new THREE.Mesh(new THREE.SphereGeometry(0.12, 6, 5), mat(0xe8e2d4));
+    rTail.position.set(-0.5, 0.5, 0);
+    rabbit.add(rTail);
+    rabbit.visible = false;
+    scene.add(rabbit);
+
     // device on trestle (built from the actual assembly at range entry)
     var deviceHolder = new THREE.Group();
     deviceHolder.position.set(0, 1.6, 0);
     deviceHolder.scale.set(1.6, 1.6, 1.6);
     scene.add(deviceHolder);
 
-    // flatbed truck
+    // flatbed truck (wheels grouped so they can roll)
     var truck = new THREE.Group();
     var bed = new THREE.Mesh(new THREE.BoxGeometry(7, 0.5, 2.6), mat(0x51616e));
     bed.position.set(-0.7, 1.35, 0);
@@ -1638,18 +2139,84 @@
     var glass = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.7, 2.0), mat(0x9cc8ea, { shin: 80 }));
     glass.position.set(4.4, 2.3, 0);
     truck.add(glass);
+    var truckWheels = [];
     for (var wi = 0; wi < 3; wi++) {
       [-1.2, 1.2].forEach(function (z) {
-        var wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.55, 0.4, 12), mat(0x22262b, { shin: 4 }));
-        wheel.rotation.x = Math.PI / 2;
+        var wheel = buildWheel(0.55, 0.4);
         wheel.position.set(-2.6 + wi * 2.9, 0.55, z);
         truck.add(wheel);
+        truckWheels.push(wheel);
       });
     }
     scene.add(truck);
     truck.visible = false;
 
-    // heat shimmer bands
+    // escort truck — rides ahead of the article
+    var escort = new THREE.Group();
+    var ebody = new THREE.Mesh(new THREE.BoxGeometry(4.6, 1.1, 2.2), mat(0x5c6b52));
+    ebody.position.set(-0.3, 1.25, 0);
+    escort.add(ebody);
+    var ecab = new THREE.Mesh(new THREE.BoxGeometry(1.8, 1.5, 2.1), mat(0x4d5a45));
+    ecab.position.set(1.9, 2.1, 0);
+    escort.add(ecab);
+    var eglass = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.6, 1.7), mat(0x9cc8ea, { shin: 80 }));
+    eglass.position.set(2.8, 2.35, 0);
+    escort.add(eglass);
+    var canvasTop = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.9, 2.1), mat(0x8a7a58, { shin: 3 }));
+    canvasTop.position.set(-1.0, 2.25, 0);
+    escort.add(canvasTop);
+    var escortWheels = [];
+    [-1.5, 1.5].forEach(function (x) {
+      [-1.05, 1.05].forEach(function (z) {
+        var wheel = buildWheel(0.5, 0.36);
+        wheel.position.set(x, 0.5, z);
+        escort.add(wheel);
+        escortWheels.push(wheel);
+      });
+    });
+    scene.add(escort);
+    escort.visible = false;
+
+    // convoy-only dressing: road, telephone poles, long fake dawn shadows
+    var convoyG = new THREE.Group();
+    var road = new THREE.Mesh(new THREE.PlaneGeometry(620, 7.5),
+      new THREE.MeshLambertMaterial({ color: 0x9a815c }));
+    road.rotation.x = -Math.PI / 2;
+    road.position.set(-100, 0.14, 26);
+    convoyG.add(road);
+    [-1.6, 1.6].forEach(function (dz) {
+      var rut = new THREE.Mesh(new THREE.PlaneGeometry(620, 0.5),
+        new THREE.MeshLambertMaterial({ color: 0x82694a }));
+      rut.rotation.x = -Math.PI / 2;
+      rut.position.set(-100, 0.16, 26 + dz);
+      convoyG.add(rut);
+    });
+    for (var pi = 0; pi < 16; pi++) {
+      var px = -330 + pi * 24;
+      var pole = new THREE.Group();
+      var pshaft = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.14, 7.2, 6), mat(0x5c4630, { shin: 2 }));
+      pshaft.position.y = 3.6;
+      pole.add(pshaft);
+      var parm = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.12, 0.12), mat(0x4d3a28, { shin: 2 }));
+      parm.position.y = 6.6;
+      pole.add(parm);
+      var pshadow = fakeShadow(0.5, 15);
+      pshadow.position.set(6.4, 0.05, -1.6);
+      pole.add(pshadow);
+      pole.position.set(px, 0, 18.5);
+      convoyG.add(pole);
+    }
+    var truckShadow = fakeShadow(3.4, 17);
+    convoyG.add(truckShadow);
+    var escortShadow = fakeShadow(2.8, 13);
+    convoyG.add(escortShadow);
+    convoyG.visible = false;
+    scene.add(convoyG);
+
+    // dust pool — washboard-road dust kicking from wheels
+    var dustPool = [];
+
+    // heat shimmer bands + a low near-ground layer over the pan
     var shimmer = [];
     for (var si = 0; si < 3; si++) {
       var sm = new THREE.Mesh(new THREE.PlaneGeometry(2400, 14 + si * 9),
@@ -1658,18 +2225,88 @@
       scene.add(sm);
       shimmer.push(sm);
     }
+    var nearShimmer = new THREE.Mesh(new THREE.PlaneGeometry(420, 5),
+      new THREE.MeshBasicMaterial({ color: 0xfff4dc, transparent: true, opacity: 0.06, depthWrite: false }));
+    nearShimmer.position.set(0, 2.4, 70);
+    scene.add(nearShimmer);
 
     return {
-      scene: scene, camera: camera, pad: pad, deviceHolder: deviceHolder,
-      truck: truck, mesas: mesas, shimmer: shimmer,
-      fx: null, shake: 0, mode: 'idle'
+      scene: scene, camera: camera, pad: pad, padDress: padDress, farDress: farDress,
+      sock: sock, rabbit: rabbit, deviceHolder: deviceHolder,
+      truck: truck, truckWheels: truckWheels, escort: escort, escortWheels: escortWheels,
+      convoyG: convoyG, truckShadow: truckShadow, escortShadow: escortShadow,
+      dustPool: dustPool,
+      hemi: hemi, sun: sun, terrain: terrain,
+      mesas: mesas, shimmer: shimmer, nearShimmer: nearShimmer, shimmerBase: 1,
+      fx: null, shake: 0, convoyShake: 0, mode: 'idle', palette: null
     };
   }
 
   /* ---------- range flow ---------- */
+  function buildChains() {
+    // the article is chained to the bed — the player's actual build, tied down
+    if (range.chains) { range.truck.remove(range.chains); range.chains = null; }
+    if (!S.assembly.shell) return;
+    var d = casingDims(S.assembly.shell);
+    var chains = new THREE.Group();
+    var rr = d.r * 0.62 + 0.42;
+    [-0.75, 0.75].forEach(function (dx) {
+      var arc = new THREE.Mesh(new THREE.TorusGeometry(rr, 0.035, 5, 14, Math.PI),
+        mat(0x2e343a, { shin: 30 }));
+      arc.rotation.y = Math.PI / 2;
+      arc.position.set(-0.7 + dx * d.L * 0.62 * 0.5, 1.62, 0);
+      chains.add(arc);
+      [-1, 1].forEach(function (sz) {
+        var buckle = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.22, 0.07), mat(0x8f9aa5, { shin: 60 }));
+        buckle.position.set(-0.7 + dx * d.L * 0.62 * 0.5, 1.5, sz * rr);
+        chains.add(buckle);
+      });
+    });
+    range.truck.add(chains);
+    range.chains = chains;
+  }
+  function spawnDust(x, y, z, big) {
+    var pool = range.dustPool;
+    var d = null;
+    for (var i = 0; i < pool.length; i++) if (!pool[i].live) { d = pool[i]; break; }
+    if (!d) {
+      if (pool.length >= 26) return;
+      d = { sp: new THREE.Sprite(new THREE.SpriteMaterial({ map: fxTextures().dust, transparent: true, depthWrite: false })) };
+      range.scene.add(d.sp);
+      pool.push(d);
+    }
+    d.live = true;
+    d.t = 0;
+    d.life = 1.7 + Math.random() * 0.9;
+    d.sp.visible = true;
+    d.sp.position.set(x, y, z);
+    d.vx = -2.6 - Math.random() * 2;
+    d.vy = 1.3 + Math.random() * 0.9;
+    d.vz = (Math.random() - 0.5) * 1.4;
+    d.grow = (big ? 4.6 : 3.2) + Math.random() * 2.2;
+    d.sp.scale.set(1, 1, 1);
+    d.sp.material.opacity = 0.5;
+  }
+  function stepDust(dt) {
+    range.dustPool.forEach(function (d) {
+      if (!d.live) return;
+      d.t += dt;
+      var k = d.t / d.life;
+      if (k >= 1) { d.live = false; d.sp.visible = false; return; }
+      d.sp.position.x += d.vx * dt;
+      d.sp.position.y += d.vy * dt;
+      d.sp.position.z += d.vz * dt;
+      var s = 1 + d.grow * easeOut(k);
+      d.sp.scale.set(s, s, 1);
+      d.sp.material.opacity = 0.5 * (1 - k);
+    });
+  }
+  var CONVOY_LEN = 14.6;
   function enterRange() {
     clearLater();
     S.attempt++;
+    contractRec(S.contract).tests++;   // chalk on the bay floor, forever
+    persist();
     S.result = PG2.adjudicate(S.assembly, S.seed, rfp());
     if (!range) range = initRange();
     S.phase = 'truck';
@@ -1691,8 +2328,14 @@
     if (range.craterG) { range.scene.remove(range.craterG); range.craterG = null; }
     range.deviceHolder.visible = true;
     range.pad.visible = true;
+    range.padDress.visible = true;
     if (range.trestle) range.trestle.visible = false;
+    range.rabbit.visible = false;
+    range.rabbit.userData.run = null;
     range.shake = 0;
+    range.convoyShake = 0;
+    // THE CONVOY — always at dawn; the range day itself keeps the contract's hour
+    applyRangePalette('dawn');
     // put the real device on the flatbed
     var dh = range.deviceHolder;
     for (var i = dh.children.length - 1; i >= 0; i--) dh.remove(dh.children[i]);
@@ -1701,16 +2344,30 @@
     dh.position.set(-0.7, 2.0, 0);
     dh.scale.set(0.62, 0.62, 0.62);
     range.truck.add(dh);
+    buildChains();
     range.truck.visible = true;
-    range.truck.position.set(-90, 0, 34);
-    range.camera.fov = 30;
-    range.camera.updateProjectionMatrix();
+    range.escort.visible = true;
+    range.convoyG.visible = true;
+    range.truck.position.set(-96, 0, 26);
+    range.escort.position.set(-80, 0, 26);
     range.mode = 'truck';
-    range.truckT = 0;
-    setCaption('SECTOR 9 · ACCESS ROAD', 'The device rides out to Pad A. It has never looked more certain of anything.');
+    var caps = [
+      { t: 0.25, small: 'SECTOR 9 · ACCESS ROAD · 05:41', main: 'Dawn. Two trucks, one article, eleven miles of washboard.' },
+      { t: 3.9, small: 'RADIO · CONVOY LEAD', radio: true, main: '—Range Seven, Range Seven: convoy’s got the article, over.' },
+      { t: 7.1, small: 'RADIO · RANGE SEVEN', radio: true, main: '—Copy, convoy. Pad A is swept. The board brought binoculars and opinions.' },
+      { t: 11.6, small: 'RADIO · CONVOY LEAD', radio: true, main: '—Gate in sight. Keep the dust polite, over and out.' }
+    ];
+    if (!S.result.outcome.slammed) {
+      caps.splice(3, 0, { t: 9.3, small: 'RADIO · ESCORT 2', radio: true, main: '—Article’s riding quiet back there. Wish everything did.' });
+    }
+    range.convoy = {
+      t: 0, t0: performance.now(), shot: -1, capIdx: 0, caps: caps, dustT: 0,
+      slammed: !!S.result.outcome.slammed, joltT0: null
+    };
     PGAudio.engineStart();
     $('btn-skip-truck').classList.remove('hidden');
-    later(7000, stationSeven);
+    if (SETTINGS.skipCine) later(150, stationSeven);
+    else later(CONVOY_LEN * 1000, stationSeven);
   }
   function buildRangeDevice() {
     // rebuild from assembly (independent copies for the range scene)
@@ -1740,6 +2397,11 @@
     $('btn-skip-truck').classList.add('hidden');
     range.mode = 'station';
     range.truck.visible = false;
+    range.escort.visible = false;
+    range.convoyG.visible = false;
+    range.dustPool.forEach(function (d) { d.live = false; d.sp.visible = false; });
+    // the range day keeps the contract's hour: dawn for 041, harsh noon for 048
+    applyRangePalette(rfp().timeOfDay || 'dawn');
     // device moves to a trestle on the pad
     var dh = range.deviceHolder;
     range.truck.remove(dh);
@@ -1767,8 +2429,110 @@
     $('cam-station').textContent = PG2.CAMERA.id + ' — ' + PG2.CAMERA.km.toFixed(1) + ' KM';
     $('cam-clock').textContent = 'T−00:05.0';
     PGAudio.wind();
-    setCaption('STATION 7 · LONG LENS · f/64', 'The review board raises its binoculars. Heat swims over the pan.');
+    setCaption('STATION 7 · LONG LENS · f/64', rfp().timeOfDay === 'noon'
+      ? 'The review board raises its binoculars. Heat swims over the pan.'
+      : 'The review board raises its binoculars. The pan is still cold enough to be honest.');
+    // the pre-countdown life beat: a jackrabbit clears the frame
+    later(2100, startRabbit);
     later(1800, function () { $('btn-arm').classList.remove('hidden'); });
+  }
+  function startRabbit() {
+    if (S.phase !== 'station') return;
+    var r = PG2.stream(S.seed, 'rabbit' + S.attempt);
+    var dir = r() < 0.5 ? 1 : -1;
+    range.rabbit.userData.run = { t: 0, dir: dir, dur: 2.7, z: 1185 + r() * 12 };
+    range.rabbit.visible = true;
+  }
+  function stepRabbit(dt) {
+    var run = range.rabbit.userData.run;
+    if (!run) return;
+    run.t += dt;
+    var k = run.t / run.dur;
+    if (k >= 1) {
+      range.rabbit.visible = false;
+      range.rabbit.userData.run = null;
+      return;
+    }
+    // crosses the long-lens foreground in a few urgent hops
+    var x = 44 + run.dir * lerp(-9, 9, k);
+    var hop = Math.abs(Math.sin(k * Math.PI * 5));
+    range.rabbit.position.set(x, hop * 0.5, run.z);
+    range.rabbit.scale.set(0.55, 0.55 + hop * 0.08, 0.55);   // an honest-sized jackrabbit
+    range.rabbit.rotation.y = run.dir > 0 ? 0 : Math.PI;
+    range.rabbit.rotation.z = hop * 0.22 * (Math.sin(k * Math.PI * 10) > 0 ? 1 : -0.4);
+  }
+  /* the convoy — a proper dawn drive to the range, always skippable */
+  function stepConvoy(dt, now) {
+    var cv = range.convoy;
+    if (!cv) return;
+    cv.t = (now - cv.t0) / 1000;   // wall clock — stays in step with the Station 7 handoff
+    var speed = 8.5;
+    var tx = -96 + speed * cv.t;
+    var ex = tx + 16;
+    // washboard road
+    var bob = Math.sin(cv.t * 21) * 0.045 + Math.sin(cv.t * 33 + 1.7) * 0.028;
+    var bob2 = Math.sin(cv.t * 19 + 3) * 0.038;
+    // pothole beat — only if the detonator went in hard (physical foreshadowing)
+    var jolt = 0;
+    if (cv.slammed && cv.joltT0 == null && cv.t >= 8.55) {
+      cv.joltT0 = cv.t;
+      PGAudio.rattle();
+      PGAudio.radioBlip();
+      range.convoyShake = 1;
+      setCaption('RADIO · ESCORT 2', '—Easy over the washboard, fellas. That article was seated… <b>firmly</b>.');
+    }
+    if (cv.joltT0 != null) {
+      var jt = cv.t - cv.joltT0;
+      if (jt < 0.8) jolt = Math.sin(jt * 15) * Math.exp(-5.5 * jt) * 0.5;
+    }
+    range.truck.position.set(tx, Math.abs(bob) + Math.abs(jolt), 26);
+    range.truck.rotation.z = bob * 0.02 + jolt * 0.05;
+    range.escort.position.set(ex, Math.abs(bob2) + Math.abs(jolt) * 0.2, 26);
+    range.escort.rotation.z = bob2 * 0.02;
+    var roll = speed * dt / 0.55;
+    range.truckWheels.forEach(function (w) { w.rotation.z -= roll; });
+    range.escortWheels.forEach(function (w) { w.rotation.z -= roll * 1.1; });
+    // long dawn shadows ride along
+    range.truckShadow.position.set(tx + 6.4, 0.06, 24);
+    range.escortShadow.position.set(ex + 5.2, 0.06, 24.2);
+    // dust kicks from the wheels
+    cv.dustT += dt;
+    if (cv.dustT > 0.055) {
+      cv.dustT = 0;
+      spawnDust(tx - 3.2, 0.55, 26 + (Math.random() < 0.5 ? 1.1 : -1.1), true);
+      spawnDust(ex - 2.0, 0.5, 26 + (Math.random() < 0.5 ? 1 : -1), false);
+    }
+    // radio chatter
+    while (cv.capIdx < cv.caps.length && cv.t >= cv.caps[cv.capIdx].t) {
+      var c = cv.caps[cv.capIdx++];
+      if (c.radio) PGAudio.radioBlip();
+      setCaption(c.small, c.main);
+    }
+    // three shots: HELD WIDE (let it breathe) → tracking the article → low front
+    var cam = range.camera;
+    var shot = cv.t < 6.5 ? 0 : cv.t < 11 ? 1 : 2;
+    if (shot !== cv.shot) {
+      cv.shot = shot;
+      cam.fov = shot === 0 ? 30 : shot === 1 ? 40 : 30;
+      cam.updateProjectionMatrix();
+      if (shot === 2) PGAudio.enginePitch(1.1);
+    }
+    if (shot === 0) {
+      cam.position.set(-60, 7, 380);
+      cam.lookAt(-60, 17, 0);
+    } else if (shot === 1) {
+      cam.position.set(tx + 5, 3.1 + jolt * 0.4, 37.5);
+      cam.lookAt(tx - 0.6, 2.3, 26);
+    } else {
+      if (cv.t > 13.1 && !cv.dopplerDone) { cv.dopplerDone = true; PGAudio.enginePitch(0.93); }
+      cam.position.set(34, 1.5, 31);
+      cam.lookAt(tx + 7, 2.4, 26);
+    }
+    if (range.convoyShake > 0.02) {
+      range.convoyShake = Math.max(0, range.convoyShake - dt * 1.6);
+      cam.position.x += (Math.random() - 0.5) * range.convoyShake * 0.3;
+      cam.position.y += (Math.random() - 0.5) * range.convoyShake * 0.24;
+    }
   }
 
   /* hold-to-arm */
@@ -1936,7 +2700,7 @@
     // remove the device and pad — they are now philosophy
     range.deviceHolder.visible = false;
     if (range.trestle) range.trestle.visible = false;
-    if (!vis.fizzle) range.pad.visible = false;
+    if (!vis.fizzle) { range.pad.visible = false; range.padDress.visible = false; }
     // rising smoke column (the part the board photographs)
     if (!vis.fizzle) {
       fx.smoke = [];
@@ -2197,6 +2961,15 @@
     b.stars = Math.max(b.stars, r.stars);
     b.net = Math.max(b.net, r.payout.net);
     if (r.win && b.wonOn == null) b.wonOn = S.attempt;
+    // …and into localStorage: a won RFP-041 stays won, and unlocks RFP-048
+    var rec = contractRec(S.contract);
+    rec.stars = Math.max(rec.stars, r.stars);
+    rec.net = rec.net == null ? r.payout.net : Math.max(rec.net, r.payout.net);
+    if (r.win) {
+      rec.won = true;
+      if (rec.wonOn == null) rec.wonOn = S.attempt;
+    }
+    persist();
     var el = $('score-scroll');
     function stampCard(lbl, st) {
       return '<div class="stamp-card"><div class="sc-lbl">' + lbl + '</div>' +
@@ -2332,44 +3105,83 @@
 
     if (S.phase === 'build' || S.phase === 'wiring' || S.phase === 'det' || S.phase === 'arm') {
       stepRefinery(dt, now);
-      // idle spin on the work stand (build only)
       if (S.phase === 'build') {
-        if (!dragPart && bay.spinEnabled !== false && now - bay.lastTouch > 3500 && Object.keys(pointers).length === 0) {
+        var touching = Object.keys(pointers).length > 0;
+        // inertial orbit: released spins coast down exponentially
+        if (!touching && !dragPart && (Math.abs(bay.velTheta) > 0.002 || Math.abs(bay.velPhi) > 0.002)) {
+          bay.orbit.theta += bay.velTheta * dt;
+          bay.orbit.phi += bay.velPhi * dt;
+          var damp = Math.exp(-3.2 * dt);
+          bay.velTheta *= damp; bay.velPhi *= damp;
+        }
+        // soft pitch clamps: overshoot springs back
+        if (!touching) {
+          if (bay.orbit.phi < 0.3) { bay.orbit.phi += (0.3 - bay.orbit.phi) * Math.min(dt * 7, 1); bay.velPhi = 0; }
+          if (bay.orbit.phi > 1.45) { bay.orbit.phi += (1.45 - bay.orbit.phi) * Math.min(dt * 7, 1); bay.velPhi = 0; }
+        }
+        // idle spin on the work stand
+        if (!dragPart && bay.spinEnabled !== false && now - bay.lastTouch > 3500 && !touching) {
           bay.device.rotation.y += dt * 0.22;
         }
         bayCam();
       }
-      // stand bounce on part snap
-      if (bay.bounce > 0.01) {
-        bay.bounce *= Math.pow(0.0018, dt);
-        var by = 1.32 - Math.sin(performance.now() * 0.03) * 0.016 * bay.bounce;
-        bay.device.position.y = by;
+      // dragged part: inertia + magnetic settle
+      stepDragGhost(dt);
+      // the stand takes the weight — damped spring dip
+      if (Math.abs(bay.dip) > 0.0005 || Math.abs(bay.dipV) > 0.0005) {
+        bay.dipV += (-95 * bay.dip - 9.5 * bay.dipV) * dt;
+        bay.dip += bay.dipV * dt;
+        bay.device.position.y = 1.32 + bay.dip;
+        bay.stand.position.y = bay.dip * 0.35;
+      } else if (bay.device.position.y !== 1.32) {
+        bay.device.position.y = 1.32;
+        bay.stand.position.y = 0;
       }
-      // node marker pulse
-      var pulse = 1 + Math.sin(now * 0.007) * 0.18;
-      nodeMarkers.forEach(function (mk) { mk.scale.set(pulse, pulse, pulse); });
+      // progressive node feedback: distant glow → pulsing ring → hot magnetic target
+      nodeMarkers.forEach(function (mk) {
+        var u = mk.userData;
+        var prox = u.prox || 0;
+        u.sphere.material.opacity = 0.32 + prox * 0.6;
+        u.sphere.material.emissiveIntensity = 0.35 + prox * 1.05;
+        var pulse = prox > 0.3 ? 1 + Math.sin(now * (0.006 + prox * 0.009)) * (0.1 + prox * 0.3) : 1;
+        u.ring.scale.set(pulse, pulse, pulse);
+        u.ring.material.opacity = 0.18 + prox * 0.7;
+        var ms = 1 + prox * 0.3;
+        mk.scale.set(ms, ms, ms);
+      });
+      // the work light quietly scoots around to rim-light the side you're studying
+      var rig = bay.worklight;
+      var wantA = bay.orbit.theta + 2.45;
+      var da = Math.atan2(Math.sin(wantA - rig.userData.angle), Math.cos(wantA - rig.userData.angle));
+      rig.userData.angle += da * Math.min(dt * 0.6, 1);
+      rig.position.set(Math.sin(rig.userData.angle) * 3.1, 0, Math.cos(rig.userData.angle) * 3.1);
+      rig.lookAt(0, 0, 0);
+      rig.userData.head.lookAt(0, 1.32, 0);
       renderer.render(bay.scene, bay.camera);
       return;
     }
 
     /* range phases */
     if (range) {
-      // heat shimmer
+      // heat shimmer — strongest near the ground and at noon
+      var shb = range.shimmerBase || 1;
       range.shimmer.forEach(function (sm, i) {
         sm.position.y = 9 + i * 12 + Math.sin(now * 0.0011 + i * 2.2) * 2.4;
-        sm.material.opacity = 0.035 + 0.03 * (0.5 + 0.5 * Math.sin(now * 0.0017 + i));
+        sm.material.opacity = shb * (0.04 + 0.038 * (0.5 + 0.5 * Math.sin(now * 0.0017 + i)));
       });
+      var ns = range.nearShimmer;
+      ns.material.opacity = shb * (0.075 + 0.05 * Math.sin(now * 0.0023));
+      ns.scale.y = 1 + Math.sin(now * 0.0031) * 0.22;
+      ns.position.y = 2.4 + Math.sin(now * 0.0017) * 0.55;
       range.mesas.forEach(function (m, i) {
         m.position.y = Math.sin(now * 0.0021 + i * 1.4) * 0.55;
       });
-      if (S.phase === 'truck') {
-        range.truckT += dt;
-        var tx2 = lerp(-90, 0, easeInOut(clamp(range.truckT / 6.4, 0, 1)));
-        range.truck.position.x = tx2;
-        range.truck.position.z = 34;
-        range.camera.position.set(tx2 + 16, 4.5, 62);
-        range.camera.lookAt(tx2, 2.5, 34);
-      }
+      // the wind sock stirs — the desert is awake
+      range.sock.rotation.y = Math.sin(now * 0.00037) * 0.9 + 0.4;
+      range.sock.rotation.z = -1.05 + Math.sin(now * 0.0016) * 0.22 + Math.sin(now * 0.0037) * 0.08;
+      if (range.rabbit.userData.run) stepRabbit(dt);
+      stepDust(dt);
+      if (S.phase === 'truck') stepConvoy(dt, now);
       if (S.phase === 'counting') {
         rangeT.camT = (now - rangeT.t0) / 1000;   // wall clock — never drifts on slow frames
         updateCamClock();
@@ -2435,9 +3247,72 @@
   }
 
   /* ================= WIRE-UP UI ================= */
+  function starsTxt(n) {
+    var s = '';
+    for (var i = 0; i < 3; i++) s += i < n ? '★' : '☆';
+    return s;
+  }
+  function renderTitleContracts() {
+    var el = $('title-contracts');
+    if (!contractRec(0).won) { el.classList.add('hidden'); return; }
+    el.classList.remove('hidden');
+    el.innerHTML = '';
+    PG2.CONTRACTS.forEach(function (c, i) {
+      var recI = contractRec(i);
+      var unlocked = contractUnlocked(i);
+      var chip = document.createElement('button');
+      chip.type = 'button';
+      chip.id = 'tc-' + c.id;
+      chip.className = 'tc-chip' + (unlocked ? '' : ' locked');
+      chip.innerHTML = '<b>' + c.id + '</b>' +
+        (unlocked
+          ? (recI.won ? '<span class="tc-star">' + starsTxt(recI.stars) + '</span> WON'
+                      : (recI.tests ? 'TEST #' + (recI.tests + 1) + ' AWAITS' : 'OPEN'))
+          : 'LOCKED');
+      chip.addEventListener('click', function () {
+        PGAudio.init();
+        if (!unlocked) { PGAudio.buzz(); toast('Win ' + PG2.CONTRACTS[i - 1].id + ' first. The Authority insists on sequence.'); return; }
+        PGAudio.tap();
+        S.contract = i;
+        S.seed = PG2.makeSeed().toUpperCase();
+        S.attempt = 0;
+        S.assembly = PG2.makeAssembly();
+        startContract();
+      });
+      el.appendChild(chip);
+    });
+  }
   $('btn-start').addEventListener('click', function () {
     PGAudio.init(); PGAudio.tap();
     startContract();
+  });
+
+  /* settings drawer */
+  function refreshSettingsUI() {
+    $('set-sound').classList.toggle('on', SETTINGS.sound);
+    $('set-skip').classList.toggle('on', SETTINGS.skipCine);
+    $('set-lefty').classList.toggle('on', SETTINGS.lefty);
+  }
+  function bindToggle(id, key) {
+    $(id).addEventListener('click', function () {
+      SETTINGS[key] = !SETTINGS[key];
+      applySettings();
+      refreshSettingsUI();
+      persist();
+      PGAudio.tap();
+    });
+  }
+  bindToggle('set-sound', 'sound');
+  bindToggle('set-skip', 'skipCine');
+  bindToggle('set-lefty', 'lefty');
+  $('btn-settings').addEventListener('click', function () {
+    PGAudio.init(); PGAudio.tap();
+    refreshSettingsUI();
+    $('settings-overlay').classList.remove('hidden');
+  });
+  $('set-close').addEventListener('click', function () {
+    PGAudio.tap();
+    $('settings-overlay').classList.add('hidden');
   });
   function startContract() {
     S.phase = 'rfp';
@@ -2523,6 +3398,7 @@
     a.refine.spend += PG2.REFINERY.batchCost;
     var kind = ref.scorched ? 'emberxs' : 'emberx';
     a.refine.stock[kind] += PG2.REFINERY.batchYield;
+    clearHistory();   // the still changed the stock ledger — undo history can't reach behind it
     PGAudio.batchDone(!ref.scorched);
     refStatus(ref.scorched
       ? '<b class="scorch">SCORCHED.</b> Two canisters of weaker, angrier X. They still count. Barely.'
@@ -2665,6 +3541,43 @@
         coverOpen: bay.armStage ? bay.armStage.coverOpen : false
       };
     },
+    save: function () {
+      return JSON.parse(JSON.stringify({ settings: SETTINGS, contracts: SAVE.contracts }));
+    },
+    debugAssembly: function (a) {
+      // test harness only: inject a canned assembly (UI paths are proven separately)
+      S.assembly = JSON.parse(JSON.stringify(a));
+      if (S.phase === 'build') { rebuildDevice(); refreshHUD(); }
+    },
+    history: function () { return { undo: hist.undo.length, redo: hist.redo.length }; },
+    orbit: function () {
+      return { theta: bay.orbit.theta, phi: bay.orbit.phi, radius: bay.orbit.radius,
+               target: { x: bay.orbit.target.x, y: bay.orbit.target.y, z: bay.orbit.target.z },
+               velTheta: bay.velTheta };
+    },
+    partScreen: function (kind, slot) {
+      var root = findPlacedRoot(kind, slot == null ? null : slot);
+      if (!root) return null;
+      var bb = new THREE.Box3().setFromObject(root);
+      return worldToScreen(bb.getCenter(new THREE.Vector3()), bay.camera);
+    },
+    partCardVisible: function () { return !$('part-card').classList.contains('hidden'); },
+    pickAt: function (x, y) {
+      var root = pickPart({ x: x, y: y });
+      return root && root.userData.remove ? root.userData.remove : null;
+    },
+    convoy: function () {
+      return range && range.convoy ? { t: range.convoy.t, shot: range.convoy.shot, slammed: range.convoy.slammed } : null;
+    },
+    palette: function () { return range ? range.palette : null; },
+    standStory: function () {
+      return { tests: contractRec(S.contract).tests, clipboard: bay.clipboard.visible };
+    },
+    floorPixel: function (x, y) {
+      var d = bay.floorCanvas.getContext('2d').getImageData(x, y, 1, 1).data;
+      return [d[0], d[1], d[2], d[3]];
+    },
+    floorScreen: function (wx, wz) { return worldToScreen(V3(wx, 0.02, wz), bay.camera); },
     glOK: function () {
       var gl = renderer.getContext();
       return !!gl && !gl.isContextLost();
@@ -2693,11 +3606,22 @@
   };
 
   /* ================= BOOT ================= */
+  loadSave();
+  applySettings();
+  // default to the freshest unlocked contract (a won 041 points you at 048)
+  if (!urlSeed && urlContract === 0 && contractRec(0).won && !contractRec(1).won) S.contract = 1;
+  renderTitleContracts();
   initGL();
   bay = initBay();
   makeIcons();
   buildShelf();
   bayCam();
   requestAnimationFrame(loop);
+
+  // PWA: offline shell (network-first, so local dev and ?seed= stay honest)
+  if ('serviceWorker' in navigator &&
+      (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
+    try { navigator.serviceWorker.register('sw.js').catch(function () {}); } catch (e) {}
+  }
 
 })();

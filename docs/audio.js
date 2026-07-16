@@ -89,12 +89,18 @@ var PGAudio = (function () {
   }
 
   /* ---- ASSEMBLY BAY ---- */
-  function thunk(big) { // part clicks into a snap node
+  function thunk(w) { // part clicks into a snap node. w = weight 0..1 (or legacy boolean)
     if (!ok()) return;
-    var t = now(), k = big ? 1.35 : 1;
-    osc('sine', 130 * (big ? 0.8 : 1), t, 0.14, 0.45 * k, 60);
-    osc('square', 320, t, 0.03, 0.10 * k, 240);
-    noise(t, 0.05, 0.22 * k, 500, 1600, 'bandpass');
+    if (w === true) w = 0.9; else if (w === false || w == null) w = 0.35;
+    w = Math.min(Math.max(w, 0), 1);
+    var t = now();
+    var k = 0.8 + w * 0.7;                       // loudness with weight
+    var f = 175 - w * 95;                        // a Big Shell thunks deeper than a canister
+    var jig = 0.95 + Math.random() * 0.1;        // never twice the same
+    osc('sine', f * jig, t, 0.10 + w * 0.10, 0.42 * k, f * 0.42);
+    osc('square', (430 - w * 160) * jig, t, 0.03, 0.10 * k, 240);
+    noise(t, 0.04 + w * 0.03, 0.20 * k, 400 + (1 - w) * 500, 1200 + (1 - w) * 1300, 'bandpass');
+    if (w > 0.75) noise(t + 0.05, 0.12, 0.10, 60, 220, 'lowpass');   // heavy: the stand groans
   }
   function pickup() { // lift a part off the shelf
     if (!ok()) return;
@@ -180,7 +186,7 @@ var PGAudio = (function () {
     osc('sine', 1180, t + 0.10, 0.30, 0.06, 1175); // ready tone
   }
 
-  /* ---- FLATBED ---- */
+  /* ---- THE CONVOY ---- */
   var engineNodes = null;
   function engineStart() {
     if (!ok() || engineNodes) return;
@@ -193,10 +199,32 @@ var PGAudio = (function () {
     var lfo = ac.createOscillator(); lfo.frequency.value = 9;
     var lg = ac.createGain(); lg.gain.value = 5;
     lfo.connect(lg); lg.connect(o.frequency);
+    // slow drift LFO — doppler-ish wander as the trucks work the grade
+    var drift = ac.createOscillator(); drift.frequency.value = 0.13;
+    var dg = ac.createGain(); dg.gain.value = 3.2;
+    drift.connect(dg); dg.connect(o.frequency); dg.connect(o2.frequency);
     var f = ac.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 320;
     o.connect(f); o2.connect(g2); g2.connect(f); f.connect(g); g.connect(master);
-    o.start(t); o2.start(t); lfo.start(t);
-    engineNodes = { o: o, o2: o2, lfo: lfo, g: g };
+    // gravel: washboard road under six tires
+    if (!noiseBuf) noise(t, 0.01, 0.0001, 100, 200, 'lowpass'); // ensure buffer
+    var gs = ac.createBufferSource(); gs.buffer = noiseBuf; gs.loop = true;
+    gs.playbackRate.value = 0.7;
+    var gf = ac.createBiquadFilter(); gf.type = 'bandpass'; gf.frequency.value = 950; gf.Q.value = 0.5;
+    var gg = ac.createGain(); gg.gain.setValueAtTime(0.0001, t);
+    gg.gain.linearRampToValueAtTime(0.045, t + 1.2);
+    var glfo = ac.createOscillator(); glfo.frequency.value = 6.5;
+    var glg = ac.createGain(); glg.gain.value = 0.018;
+    glfo.connect(glg); glg.connect(gg.gain);
+    gs.connect(gf); gf.connect(gg); gg.connect(master);
+    o.start(t); o2.start(t); lfo.start(t); drift.start(t); gs.start(t); glfo.start(t);
+    engineNodes = { o: o, o2: o2, lfo: lfo, drift: drift, g: g, gs: gs, glfo: glfo, gg: gg, baseF: 46 };
+  }
+  function enginePitch(mult) { // doppler-ish shift as the convoy nears/passes
+    if (!ac || !engineNodes) return;
+    var t = now();
+    engineNodes.o.frequency.cancelScheduledValues(t);
+    engineNodes.o.frequency.setTargetAtTime(engineNodes.baseF * mult, t, 0.4);
+    engineNodes.o2.frequency.setTargetAtTime(engineNodes.baseF * 2.01 * mult, t, 0.4);
   }
   function engineStop() {
     if (!ac || !engineNodes) return;
@@ -204,7 +232,29 @@ var PGAudio = (function () {
     e.g.gain.cancelScheduledValues(t);
     e.g.gain.setValueAtTime(e.g.gain.value, t);
     e.g.gain.exponentialRampToValueAtTime(0.0001, t + 0.7);
-    try { e.o.stop(t + 0.8); e.o2.stop(t + 0.8); e.lfo.stop(t + 0.8); } catch (err) {}
+    e.gg.gain.cancelScheduledValues(t);
+    e.gg.gain.setValueAtTime(Math.max(e.gg.gain.value, 0.0001), t);
+    e.gg.gain.exponentialRampToValueAtTime(0.0001, t + 0.6);
+    try {
+      e.o.stop(t + 0.8); e.o2.stop(t + 0.8); e.lfo.stop(t + 0.8);
+      e.drift.stop(t + 0.8); e.gs.stop(t + 0.8); e.glfo.stop(t + 0.8);
+    } catch (err) {}
+  }
+  function rattle() { // pothole: the load tests its chains
+    if (!ok()) return;
+    var t = now();
+    osc('sine', 70, t, 0.22, 0.5, 34);
+    noise(t, 0.09, 0.28, 500, 2400, 'lowpass');
+    for (var i = 0; i < 5; i++) {
+      noise(t + 0.06 + i * 0.05, 0.03, 0.12 * (1 - i * 0.16), 2200, 4200, 'bandpass');
+      osc('square', 900 + Math.random() * 700, t + 0.07 + i * 0.05, 0.02, 0.05);
+    }
+  }
+  function radioBlip() { // squelch break before chatter
+    if (!ok()) return;
+    var t = now();
+    noise(t, 0.05, 0.05, 1800, 2600, 'bandpass');
+    osc('square', 1420, t + 0.04, 0.03, 0.03);
   }
 
   /* ---- REFINERY ---- */
@@ -323,7 +373,8 @@ var PGAudio = (function () {
     wireSnap: wireSnap, wireDrop: wireDrop, ratchet: ratchet, torqueDone: torqueDone,
     slide: slide, seatClick: seatClick, slam: slam,
     coverFlick: coverFlick, switchClack: switchClack,
-    engineStart: engineStart, engineStop: engineStop,
+    engineStart: engineStart, engineStop: engineStop, enginePitch: enginePitch,
+    rattle: rattle, radioBlip: radioBlip,
     boilStart: boilStart, boilStop: boilStop, batchDone: batchDone,
     klaxon: klaxon, armLatch: armLatch, beep: beep,
     detonation: detonation, seismo: seismo, wind: wind, measureTick: measureTick,

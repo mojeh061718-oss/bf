@@ -8,6 +8,8 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#0a1b2e">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='6.4' fill='none' stroke='%23e5a13d' stroke-width='1.4'/%3E%3Cpath d='M8 0v5M8 11v5M0 8h5M11 8h5' stroke='%239cc8ea' stroke-width='1.4'/%3E%3C/svg%3E">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-192.png">
 <title>PROVING GROUNDS — Build it right. The graph doesn't lie.</title>
 <link rel="stylesheet" href="style.css">
 </head>
@@ -39,9 +41,34 @@
         <li><b>Tweak ONE thing and refire</b> — the bay keeps your build. Converge on the contract.</li>
       </ol>
       <button id="btn-start" type="button">TAP TO START</button>
+      <div id="title-contracts" class="hidden"></div>
       <p class="title-foot">REDLINE ORDNANCE WORKS · ALL SCIENCE WITHIN IS INVENTED</p>
     </div>
+    <button id="btn-settings" type="button" aria-label="Settings">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 8.4A3.6 3.6 0 1 0 12 15.6 3.6 3.6 0 0 0 12 8.4zm8.9 3.6c0-.5-.05-1-.14-1.47l2.06-1.6-2-3.46-2.43.98a7.9 7.9 0 0 0-2.54-1.47L15.5 2.4h-4l-.35 2.58c-.92.32-1.78.82-2.54 1.47l-2.43-.98-2 3.46 2.06 1.6a8.2 8.2 0 0 0 0 2.94l-2.06 1.6 2 3.46 2.43-.98c.76.65 1.62 1.15 2.54 1.47l.35 2.58h4l.35-2.58a7.9 7.9 0 0 0 2.54-1.47l2.43.98 2-3.46-2.06-1.6c.09-.48.14-.97.14-1.47z"/></svg>
+    </button>
   </section>
+
+  <!-- ================= SETTINGS DRAWER ================= -->
+  <div id="settings-overlay" class="overlay hidden">
+    <div class="set-card">
+      <div class="set-head">FIELD OFFICE · SETTINGS</div>
+      <div class="set-sub">FORM RD-9 (PREFERENCES, PERSONAL, ONE PER CONTRACTOR)</div>
+      <button class="set-row" id="set-sound" type="button">
+        <span class="set-lbl">SOUND<span class="set-note">synthesized on site, no gramophone required</span></span>
+        <span class="set-toggle"></span>
+      </button>
+      <button class="set-row" id="set-skip" type="button">
+        <span class="set-lbl">SKIP CINEMATICS<span class="set-note">straight to Station 7 — the convoy drives itself</span></span>
+        <span class="set-toggle"></span>
+      </button>
+      <button class="set-row" id="set-lefty" type="button">
+        <span class="set-lbl">LEFT-HANDED LAYOUT<span class="set-note">mirrors the bay buttons for the other thumb</span></span>
+        <span class="set-toggle"></span>
+      </button>
+      <button id="set-close" type="button">BACK</button>
+    </div>
+  </div>
 
   <!-- ================= RFP ================= -->
   <section id="scr-rfp" class="screen">
@@ -83,9 +110,19 @@
       <button id="btn-refinery" type="button" class="bay-cta ref hidden">⚗ THE STILL</button>
       <button id="btn-refire" type="button" class="bay-cta refire hidden">REFIRE →<span class="cta-sub">BUILD IS READY</span></button>
       <button id="btn-closeout" type="button" class="bay-cta" disabled>CLOSE-OUT →</button>
+      <div id="undo-bar">
+        <button id="btn-undo" type="button" disabled aria-label="Undo">↶</button>
+        <button id="btn-redo" type="button" disabled aria-label="Redo">↷</button>
+      </div>
       <div id="shelf">
         <div id="shelf-scroll"></div>
       </div>
+    </div>
+
+    <div id="part-card" class="hidden">
+      <div class="pc-name" id="pc-name"></div>
+      <div class="pc-stats" id="pc-stats"></div>
+      <div class="pc-flavor" id="pc-flavor"></div>
     </div>
 
     <!-- close-out stage chrome -->

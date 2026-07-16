@@ -23,6 +23,7 @@ var PG2 = (function () {
       tSpec: 5.0, tTol: 0.4,
       payout: 6000, bonusClean: 500,
       meterMax: 30,
+      timeOfDay: 'dawn',                // range-day palette (presentation only)
       clause: 'The device shall be assembled BY HAND, by the contractor, who shall afterwards sign something.',
       needsRefinery: false
     },
@@ -36,6 +37,7 @@ var PG2 = (function () {
       tSpec: 5.0, tTol: 0.4,
       payout: 12000, bonusClean: 1000,
       meterMax: 50,
+      timeOfDay: 'noon',                // range-day palette (presentation only)
       clause: 'Raw EMBER will not do. The Authority suggests, without legally suggesting anything, that the contractor owns a refinery.',
       needsRefinery: true
     }

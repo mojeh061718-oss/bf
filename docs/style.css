@@ -679,3 +679,100 @@ button { font-family: inherit; color: inherit; background: none; border: none; c
 
 /* close-out stages: clear the deck — the meters return with the shelf */
 #ui-bay.closeout .bay-head, #ui-bay.closeout .bay-hint { display: none; }
+
+/* ============ M1 — SETTINGS ============ */
+#btn-settings {
+  position: absolute; top: calc(12px + var(--sat)); left: 12px;
+  width: 42px; height: 42px; border-radius: 50%;
+  color: var(--bp-dim); border: 1px solid var(--bp-line-soft);
+  background: rgba(9,27,46,.6);
+  display: flex; align-items: center; justify-content: center;
+}
+#btn-settings svg { width: 22px; height: 22px; opacity: .85; }
+#btn-settings:active { color: var(--amber-hot); }
+.set-card {
+  width: 100%; max-width: 380px; margin-top: calc(60px + var(--sat));
+  border: 1px solid var(--bp-line); border-radius: 10px;
+  background: var(--bp-panel); padding: 16px 16px 14px;
+}
+.set-head { font-family: var(--mono); font-size: 11px; font-weight: 800; letter-spacing: .16em; color: var(--amber-hot); }
+.set-sub { font-family: var(--mono); font-size: 8px; letter-spacing: .14em; color: var(--bp-dim); margin: 4px 0 12px; }
+.set-row {
+  display: flex; width: 100%; align-items: center; justify-content: space-between;
+  gap: 12px; text-align: left;
+  padding: 13px 4px; border-top: 1px dashed var(--bp-line-soft);
+}
+.set-lbl { font-size: 13px; font-weight: 800; letter-spacing: .08em; color: var(--bp-text); }
+.set-note { display: block; font-size: 10px; font-weight: 400; letter-spacing: .02em; color: var(--bp-dim); margin-top: 3px; font-family: var(--type); }
+.set-toggle {
+  flex: 0 0 52px; height: 28px; border-radius: 14px; position: relative;
+  background: rgba(10,24,40,.9); border: 1px solid var(--bp-line);
+  transition: background .2s, border-color .2s;
+}
+.set-toggle::after {
+  content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px;
+  border-radius: 50%; background: var(--bp-dim); transition: left .2s, background .2s;
+}
+.set-row.on .set-toggle { background: rgba(229,161,61,.25); border-color: var(--amber); }
+.set-row.on .set-toggle::after { left: 27px; background: var(--amber); }
+#set-close {
+  width: 100%; margin-top: 14px; font-size: 13px; font-weight: 800; letter-spacing: .1em;
+  color: var(--bp-deep); background: var(--amber);
+  padding: 13px; border-radius: 5px; box-shadow: 0 4px 0 #8a5c1a;
+}
+
+/* title contract picker (appears once RFP-041 is on the wall) */
+#title-contracts { display: flex; gap: 8px; justify-content: center; margin-top: 14px; }
+#title-contracts.hidden { display: none; }
+.tc-chip {
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: .1em;
+  color: var(--bp-text); border: 1px solid var(--bp-line); border-radius: 5px;
+  padding: 8px 10px; background: rgba(9,27,46,.6); line-height: 1.5;
+}
+.tc-chip b { color: var(--amber-hot); display: block; font-size: 10.5px; }
+.tc-chip .tc-star { color: var(--amber); }
+.tc-chip.locked { opacity: .4; }
+.tc-chip:not(.locked):active { border-color: var(--amber); }
+
+/* ============ M1 — UNDO / REDO ============ */
+#undo-bar {
+  position: absolute; left: 10px; top: 50%; transform: translateY(-130%);
+  display: flex; flex-direction: column; gap: 8px;
+}
+#undo-bar button {
+  width: 42px; height: 42px; border-radius: 50%;
+  font-size: 20px; line-height: 1;
+  color: var(--bp-bright); border: 1px solid var(--bp-line);
+  background: rgba(9,27,46,.72);
+  transition: opacity .2s;
+}
+#undo-bar button:disabled { opacity: .22; }
+#undo-bar button:not(:disabled):active { color: var(--amber-hot); border-color: var(--amber); }
+
+/* ============ M1 — PART INFO CARD (long-press) ============ */
+#part-card {
+  position: absolute; z-index: 15; max-width: 230px;
+  background: linear-gradient(178deg, #f3ecda, #e6d9ba);
+  color: var(--ink); font-family: var(--type);
+  border-radius: 3px; padding: 10px 12px 11px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.55);
+  pointer-events: none;
+  animation: card-in .22s cubic-bezier(.2,1.4,.4,1) both;
+}
+#part-card::before {
+  content: "PART DATA · RD-CATALOG"; display: block;
+  font-size: 7.5px; letter-spacing: .2em; color: var(--ink-soft);
+  border-bottom: 1.5px solid var(--ink); padding-bottom: 3px; margin-bottom: 5px;
+}
+@keyframes card-in { from { transform: translateY(6px) rotate(-1.5deg) scale(.96); } to { transform: rotate(-1.5deg); } }
+.pc-name { font-size: 14px; font-weight: 700; letter-spacing: .04em; }
+.pc-stats { font-family: var(--mono); font-size: 9.5px; letter-spacing: .08em; color: var(--ink-soft); margin: 4px 0 6px; }
+.pc-flavor { font-size: 11px; line-height: 1.5; font-style: italic; }
+
+/* ============ M1 — LEFT-HANDED MIRROR ============ */
+body.lefty .bay-cta { right: auto; left: 12px; }
+body.lefty .bay-cta.ref { left: auto; right: 12px; }
+body.lefty .bay-cta.pull { left: auto; right: 12px; }
+body.lefty #btn-skip-truck { right: auto; left: 14px; }
+body.lefty #undo-bar { left: auto; right: 10px; }
+
