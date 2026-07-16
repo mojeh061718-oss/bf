@@ -151,10 +151,10 @@ button { font-family: inherit; color: inherit; background: none; border: none; c
 
 .doc-headrow { display: flex; justify-content: space-between; align-items: flex-start; font-size: 10px; letter-spacing: .08em; color: var(--ink-soft); }
 .doc-stamp {
-  position: absolute; top: 44px; right: 14px; transform: rotate(-8deg);
-  font-weight: 700; letter-spacing: .16em; font-size: 15px;
+  position: absolute; top: -6px; right: 8px; transform: rotate(-8deg);
+  font-weight: 700; letter-spacing: .16em; font-size: 13px;
   color: var(--red); border: 3px solid var(--red); border-radius: 3px;
-  padding: 4px 12px; opacity: .78;
+  padding: 3px 10px; opacity: .78;
 }
 .doc-rule { border: 0; border-top: 2px solid var(--ink); margin: 10px 0; }
 .doc-rule.thin { border-top-width: 1px; opacity: .5; }
@@ -207,8 +207,10 @@ button { font-family: inherit; color: inherit; background: none; border: none; c
   padding: calc(10px + var(--sat)) 14px 8px;
   border-bottom: 1px solid var(--bp-line-soft);
 }
-.bh-brand { font-weight: 800; font-size: 13px; letter-spacing: .12em; color: #eaf4fc; }
-.bh-sub { font-family: var(--mono); font-size: 9px; letter-spacing: .16em; color: var(--amber); margin-top: 2px; }
+.bh-left { min-width: 0; flex: 1; overflow: hidden; margin-right: 8px; }
+.bh-brand { font-weight: 800; font-size: 11.5px; letter-spacing: .1em; color: #eaf4fc; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bh-sub { font-family: var(--mono); font-size: 8.5px; letter-spacing: .12em; color: var(--amber); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bh-right { flex-shrink: 0; }
 .bh-right { display: flex; gap: 6px; align-items: center; }
 .chip {
   font-family: var(--mono); font-size: 9.5px; letter-spacing: .08em;
@@ -527,8 +529,8 @@ input[type="range"]::-moz-range-thumb {
 .cam-bl { bottom: calc(7% + var(--sab) * .5 + 10px); left: 14px; font-size: 15px; }
 .cam-br { bottom: calc(7% + var(--sab) * .5 + 10px); right: 14px; font-size: 9px; opacity: .8; }
 .cam-tick {
-  top: 50%; left: 50%; transform: translate(-50%, -140%);
-  font-size: 13px; color: var(--amber-hot);
+  top: 50%; left: 50%; transform: translate(-50%, -190%);
+  font-size: 12px; color: var(--amber-hot); white-space: nowrap;
   border: 1px solid rgba(229,161,61,.7); border-radius: 3px;
   padding: 4px 10px; background: rgba(0,0,0,.55);
   animation: warn-in .25s ease both;
