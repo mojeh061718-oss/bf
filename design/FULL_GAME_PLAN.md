@@ -56,6 +56,29 @@ Wiring/detonator/arm remains the trilogy, deepened by device class: more termina
 **Act III — THE PROGRAM (~10 contracts + finale):** systems engineering at scale. Multi-stage devices, delivery stacks, multi-test campaigns where one article must pass three range days (design for repeatability, not one lucky shot). The finale: the **Centennial Demonstration** — a nation-watching test with every mechanic on the table. *Deterrence-flavored: demonstrations, never deployment.*
 **Contract anatomy everywhere:** 3 headline numbers + 0–2 optional sub-specs. Bureaucratic comedy lives in the paperwork; the bay stays plain-spoken.
 
+## 5.5 The Long Shot Program (founder directive: guided flight to targets thousands of miles away, watched live)
+
+Act III's centerpiece, expanding the delivery-stack idea into a full guided-missile program. Everything stays invented-science and demonstration-framed: targets are always *instrumented test sites* — a painted bullseye on a salt flat, a derelict barge at the Pacific Test Annex, a concrete grid on a leased atoll — never anything inhabited, ever.
+
+### Guidance is tinkering (the same loved loop, new organ)
+The guidance bay adds one hands-on station at a time across Act III:
+- **The Gyro Bench:** spin up and align the inertial gyro by hand — a two-thumb leveling interaction against a drifting bubble level. Sloppy alignment = accumulating drift per 100 miles; the miss distance at the target *is your alignment error, amplified by range*. (Tolerance stack-up made visceral: 0.1° here is 3 miles there.)
+- **The Flight Plan Table:** a paper-map waypoint plot — place the ascent, cruise altitude, and terminal dive point with draggable pins; range vs. fuel vs. wind aloft (shown as forecast arrows) is the puzzle.
+- **The Star Tracker (late Act III):** a mid-course correction instrument you calibrate pre-flight through a small telescope-alignment interaction; better calibration = a bigger correction budget in flight.
+- **Terminal package choice:** camera seeker vs. beacon homing vs. pure ballistic — different budgets, different failure comedy.
+
+### The flight is the show ("watch it in real time")
+Two presentation modes, both from Mission Control — a new scene: the wall map, the plotting table, headset chatter, your telemetry strip:
+- **Mission Control mode (default):** the full flight compressed to 3–5 minutes of continuous live coverage with no dead air: launch pad cam (the silent-flash/delayed-roar treatment at launch scale) → staging seen from a chase plane → the wall-map plot crawling across the ocean with station handoffs ("Tracking handoff: Station 11 has the article") → **the mid-course beat: YOUR correction burn**, performed live with the budget your star-tracker calibration earned (a 10-second thumb-steady interaction — the whole flight funnels through your hands one more time) → terminal dive from the target-side long-lens camera — the same Station 7 language the player already loves, now pointed at an empty atoll — impact, measurement overlay drawing your miss distance against the contract's CEP ring.
+- **Real-Time Range Day (opt-in, the PWA flex):** the flight takes its true duration — 35, 50, 90 minutes for the longest shots. You launch, you pocket the phone, and **a push notification arrives when the article goes terminal**: "STATION 19: article inbound, T−90 seconds." Open the app, watch the terminal phase live, see the plot. Nobody else on mobile does this; it turns the longest contracts into appointment drama and makes the installed-PWA push permission feel *earned by the fiction*.
+- Both modes resolve from the same deterministic sim (gyro error + waypoints + winds + correction input); the replay/decision-log architecture covers flights, so a Long Shot is shareable like any test.
+
+### Contract shape
+Long Shot RFPs score on **CEP at range** (miss distance rings), time-on-target windows, and optional instrument sub-specs ("terminal footage required"). The Weekly RFP rotates Long Shot weeks in at season milestones — the leaderboard becomes "closest to the pin at 2,400 miles," which is the most screenshot-able number in the game.
+
+### Feasibility note (engineering sign-off)
+All of it is squarely buildable in the existing stack: the wall map and ocean plot are three.js/canvas 2D work, the flight sim is a few hundred lines of deterministic invented physics, camera cuts reuse the Station-N grammar, and real-time mode is a timestamp + one push notification — no server flight simulation needed (the outcome is sealed deterministically at launch; the drama is revelation, not computation).
+
 ## 6. The Rival & The World
 
 - **Vantage Dynamics** bids on your contracts with era-appropriate results (statistically simulated in Act I, genuinely design-resolved by Act III — their failures obey the same physics). They adapt to your track record: undercut your costs, poach a supplier (a part gets pricier for a while), and occasionally suffer a public disaster that shifts the next RFP's paranoia ("interlock clauses doubled this season").
