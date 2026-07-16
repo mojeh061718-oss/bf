@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0d0f14">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>The Bake-Off — Three Demos, One Winner</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #0d0f14;
+    color: #e8eaf0;
+    min-height: 100vh;
+    min-height: 100dvh;
+    padding: max(24px, env(safe-area-inset-top)) 20px max(32px, env(safe-area-inset-bottom));
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    background-image: radial-gradient(ellipse 80% 50% at 50% -10%, #1a2030 0%, transparent 60%);
+  }
+  .wrap { width: 100%; max-width: 480px; }
+  header { text-align: center; padding: 28px 0 8px; }
+  .kicker {
+    font-size: 11px; letter-spacing: 0.28em; text-transform: uppercase;
+    color: #7a86a0; font-weight: 600;
+  }
+  h1 {
+    font-size: clamp(30px, 9vw, 40px); font-weight: 800; letter-spacing: -0.02em;
+    margin: 10px 0 6px;
+    background: linear-gradient(180deg, #ffffff, #aab6d0);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .sub { color: #8b96ae; font-size: 14.5px; line-height: 1.5; max-width: 40ch; margin: 0 auto 26px; }
+  .cards { display: flex; flex-direction: column; gap: 16px; }
+  a.card {
+    display: block; text-decoration: none; color: inherit;
+    border-radius: 18px; padding: 20px 20px 18px;
+    border: 1px solid rgba(255,255,255,0.08);
+    background: linear-gradient(160deg, rgba(255,255,255,0.05), rgba(255,255,255,0.015));
+    transition: transform 0.15s ease, border-color 0.15s ease;
+    position: relative; overflow: hidden;
+  }
+  a.card:active { transform: scale(0.98); }
+  .card::before {
+    content: ""; position: absolute; inset: 0 0 auto 0; height: 3px;
+    background: var(--accent);
+  }
+  .camp {
+    font-size: 10.5px; letter-spacing: 0.22em; text-transform: uppercase;
+    color: var(--accent); font-weight: 700;
+  }
+  .card h2 { font-size: 24px; font-weight: 800; letter-spacing: -0.01em; margin: 6px 0 2px; }
+  .tagline { font-style: italic; color: #9aa5bd; font-size: 13.5px; margin-bottom: 10px; }
+  .pitch { font-size: 14px; line-height: 1.55; color: #c3cbdd; margin-bottom: 14px; }
+  .play {
+    display: inline-block; font-weight: 700; font-size: 13.5px;
+    color: #0d0f14; background: var(--accent);
+    padding: 9px 22px; border-radius: 999px; letter-spacing: 0.04em;
+  }
+  .card.demolition { --accent: #ff9f43; }
+  .card.golf       { --accent: #6ee7a0; }
+  .card.poker      { --accent: #e05c6a; }
+  footer { text-align: center; margin-top: 30px; }
+  footer p { color: #5c6578; font-size: 12px; line-height: 1.6; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="kicker">The Studio Presents</div>
+      <h1>The Bake-Off</h1>
+      <p class="sub">Three camps. Three playable demos, each one level of a finished game. Play all three — then pick the one we build.</p>
+    </header>
+
+    <div class="cards">
+      <a class="card demolition" href="bring-it-down/">
+        <div class="camp">Camp Physics</div>
+        <h2>Bring It Down</h2>
+        <div class="tagline">Demolition is a science.</div>
+        <p class="pitch">Cut the beams, place the charges, time the sequence — and drop a seven-story office inside a chalk line without scratching the diner next door. Real structural physics; no two collapses alike.</p>
+        <span class="play">PLAY THE DEMO</span>
+      </a>
+
+      <a class="card golf" href="trickshot/">
+        <div class="camp">Camp Feel</div>
+        <h2>Trickshot Open</h2>
+        <div class="tagline">See the shot nobody else sees.</div>
+        <p class="pitch">One par-3 across a loading bay. Spin, wind, bank shots off a dumpster lid — three ways to hole out, and one legendary line off the awning rail. Committed flicks, honest physics.</p>
+        <span class="play">PLAY THE DEMO</span>
+      </a>
+
+      <a class="card poker" href="bracelet/">
+        <div class="camp">Camp Moat</div>
+        <h2>The Bracelet</h2>
+        <div class="tagline">Everyone starts somewhere. This is somewhere.</div>
+        <p class="pitch">Marco's garage, $1/$2, five regulars who play like people — the rock, the maniac, the station. Scout them in your Notebook, exploit what you learn, and turn $200 into $400.</p>
+        <span class="play">PLAY THE DEMO</span>
+      </a>
+    </div>
+
+    <footer>
+      <p>Playable demos — one level each, built as proof of feel.<br>Best experienced on iPhone. Add to Home Screen for full-screen play.</p>
+    </footer>
+  </div>
+</body>
+</html>
