@@ -141,7 +141,18 @@
     fog.height = Math.round(WCC.DEPTH * FOG_S);
     fogCtx.setTransform(FOG_S, 0, 0, FOG_S, 0, 0);
     fogCtx.globalCompositeOperation = 'source-over';
-    fogCtx.fillStyle = 'rgba(6,8,15,0.965)';
+    fogCtx.fillStyle = '#080b14';
+    fogCtx.fillRect(0, 0, WCC.W, WCC.DEPTH);
+    // subtle grain so the unknown isn't dead-flat
+    var rng = WC.mulberry32(4242);
+    fogCtx.fillStyle = 'rgba(120,140,200,0.05)';
+    for (var i = 0; i < 500; i++) {
+      fogCtx.fillRect(rng() * WCC.W, rng() * WCC.DEPTH, 3 + rng() * 4, 3 + rng() * 4);
+    }
+    var gr = fogCtx.createLinearGradient(0, 0, 0, WCC.DEPTH);
+    gr.addColorStop(0, 'rgba(30,26,50,0.35)');
+    gr.addColorStop(0.4, 'rgba(10,12,24,0)');
+    fogCtx.fillStyle = gr;
     fogCtx.fillRect(0, 0, WCC.W, WCC.DEPTH);
   }
   function coneHW(y) { return lerp(WCC.CONE_TOP, WCC.CONE_BOT, y / WCC.DEPTH); }
@@ -344,21 +355,23 @@
 
     var px = parX * 8;
     // sun
-    var sx = view.ox + view.worldW * 0.72 - px * 1.6, sy = h - Math.min(74, h * 0.3), sr = Math.min(52, h * 0.24);
+    var sx = view.ox + view.worldW * 0.56 - px * 1.6, sy = h - Math.min(58, h * 0.26), sr = Math.min(40, h * 0.19);
     var glow = ctx.createRadialGradient(sx, sy, 0, sx, sy, sr * 3.2);
-    glow.addColorStop(0, 'rgba(255,190,110,0.5)');
+    glow.addColorStop(0, 'rgba(255,190,110,0.45)');
     glow.addColorStop(1, 'rgba(255,190,110,0)');
     ctx.fillStyle = glow;
     ctx.fillRect(sx - sr * 3.2, sy - sr * 3.2, sr * 6.4, sr * 6.4);
     ctx.save();
     ctx.beginPath(); ctx.rect(0, 0, view.w, h); ctx.clip();
-    ctx.fillStyle = '#ffd08a';
+    var sung = ctx.createLinearGradient(0, sy - sr, 0, sy + sr);
+    sung.addColorStop(0, '#ffe3ae');
+    sung.addColorStop(1, '#ff9e58');
+    ctx.fillStyle = sung;
     ctx.beginPath(); ctx.arc(sx, sy, sr, 0, 6.2832); ctx.fill();
-    // geometric slats across sun
-    ctx.fillStyle = 'rgba(119,51,90,0.85)';
-    ctx.fillRect(sx - sr, sy + sr * 0.15, sr * 2, 4);
-    ctx.fillRect(sx - sr, sy + sr * 0.45, sr * 2, 6);
-    ctx.fillRect(sx - sr, sy + sr * 0.75, sr * 2, 8);
+    // two thin geometric slats low across the disc
+    ctx.fillStyle = 'rgba(119,51,90,0.75)';
+    ctx.fillRect(sx - sr - 4, sy + sr * 0.38, sr * 2 + 8, 2.5);
+    ctx.fillRect(sx - sr - 4, sy + sr * 0.66, sr * 2 + 8, 3.5);
     ctx.restore();
 
     // drifting geometric clouds
@@ -645,6 +658,60 @@
   }
 
   /* ---------------- pockets ---------------- */
+  /* clean rim of the UNION of a pocket's circles: fill all circles on a
+     temp canvas, then knock out each circle shrunk by rimW — what's left
+     is a uniform band hugging the outer boundary only. */
+  function drawUnionRim(p, sc, rimW, color, glowColor, glowBlur, alpha) {
+    var minX = 1e9, minY = 1e9, maxX = -1e9, maxY = -1e9, i, c, cx, cy, r;
+    for (i = 0; i < p.circles.length; i++) {
+      c = p.circles[i];
+      cx = w2sx(p.cx + c.dx * sc); cy = w2sy(p.cy + c.dy * sc);
+      r = Math.max(1, c.r * sc * view.scale);
+      if (cx - r < minX) minX = cx - r;
+      if (cx + r > maxX) maxX = cx + r;
+      if (cy - r < minY) minY = cy - r;
+      if (cy + r > maxY) maxY = cy + r;
+    }
+    var pad = 4;
+    var w = maxX - minX + pad * 2, h = maxY - minY + pad * 2;
+    var dpr = view.dpr;
+    var needW = Math.ceil(w * dpr), needH = Math.ceil(h * dpr);
+    if (tmpA.width < needW || tmpA.height < needH) {
+      tmpA.width = Math.max(needW, 320); tmpA.height = Math.max(needH, 320);
+    }
+    var tc = tmpACtx;
+    tc.setTransform(1, 0, 0, 1, 0, 0);
+    tc.clearRect(0, 0, tmpA.width, tmpA.height);
+    tc.setTransform(dpr, 0, 0, dpr, (pad - minX) * dpr, (pad - minY) * dpr);
+    tc.globalCompositeOperation = 'source-over';
+    tc.fillStyle = color;
+    tc.beginPath();
+    for (i = 0; i < p.circles.length; i++) {
+      c = p.circles[i];
+      cx = w2sx(p.cx + c.dx * sc); cy = w2sy(p.cy + c.dy * sc);
+      r = Math.max(1, c.r * sc * view.scale);
+      tc.moveTo(cx + r, cy);
+      tc.arc(cx, cy, r, 0, 6.2832);
+    }
+    tc.fill();
+    tc.globalCompositeOperation = 'destination-out';
+    tc.beginPath();
+    for (i = 0; i < p.circles.length; i++) {
+      c = p.circles[i];
+      cx = w2sx(p.cx + c.dx * sc); cy = w2sy(p.cy + c.dy * sc);
+      r = Math.max(0.5, c.r * sc * view.scale - rimW);
+      tc.moveTo(cx + r, cy);
+      tc.arc(cx, cy, r, 0, 6.2832);
+    }
+    tc.fill();
+    tc.globalCompositeOperation = 'source-over';
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    if (glowColor) { ctx.shadowColor = glowColor; ctx.shadowBlur = glowBlur; }
+    ctx.drawImage(tmpA, 0, 0, needW, needH, minX - pad, minY - pad, w, h);
+    ctx.restore();
+  }
+
   function pocketPathScreen(p, inflate, sc) {
     ctx.beginPath();
     for (var i = 0; i < p.circles.length; i++) {
@@ -690,25 +757,12 @@
         ctx.fillStyle = bg;
         ctx.fillRect(cx - R * 2, cy - R * 2, R * 4, R * 4);
         ctx.restore();
-        // rim
-        ctx.strokeStyle = 'rgba(196,140,255,0.8)';
-        ctx.lineWidth = 1.6;
-        ctx.shadowColor = 'rgba(160,92,255,0.9)'; ctx.shadowBlur = 8;
-        pocketPathScreen(p, 0, scw); ctx.stroke();
-        ctx.shadowBlur = 0;
+        // rim (clean union outline)
+        drawUnionRim(p, scw, 1.8, '#c88cff', 'rgba(160,92,255,0.9)', 9, 0.85);
       } else {
         // unstruck: glowing edge hint only (masked by fog)
-        var pulse = 0.5 + 0.28 * Math.sin(t * 2.2 + i * 1.7);
-        ctx.save();
-        ctx.strokeStyle = 'rgba(198,146,255,' + pulse + ')';
-        ctx.lineWidth = 2;
-        ctx.shadowColor = 'rgba(160,92,255,0.9)';
-        ctx.shadowBlur = 10;
-        pocketPathScreen(p, 0, scw); ctx.stroke();
-        ctx.strokeStyle = 'rgba(255,255,255,' + pulse * 0.25 + ')';
-        ctx.lineWidth = 0.8;
-        pocketPathScreen(p, 3, scw); ctx.stroke();
-        ctx.restore();
+        var pulse = 0.55 + 0.3 * Math.sin(t * 2.2 + i * 1.7);
+        drawUnionRim(p, scw, 2.2, '#c896ff', 'rgba(160,92,255,0.95)', 11, pulse);
       }
     }
   }
@@ -723,14 +777,10 @@
       }
       ctx.save();
       ctx.globalAlpha = fade;
-      ctx.fillStyle = 'rgba(90,230,190,0.09)';
+      ctx.fillStyle = 'rgba(90,230,190,0.08)';
       gasPath(gp); ctx.fill();
-      ctx.strokeStyle = 'rgba(90,230,190,0.5)';
-      ctx.lineWidth = 1.4;
-      ctx.setLineDash([5, 6]);
-      ctx.lineDashOffset = -t * 8;
-      gasPath(gp); ctx.stroke();
-      ctx.setLineDash([]);
+      var gpulse = 0.4 + 0.2 * Math.sin(t * 3 + i * 2.4);
+      drawUnionRim(gp, 1, 1.6, '#5ee6c0', 'rgba(90,230,190,0.8)', 7, fade * gpulse);
       // rising bubbles
       for (var b = 0; b < 3; b++) {
         var u = ((t * 0.35 + b * 0.33 + i * 0.21) % 1);
@@ -1391,8 +1441,6 @@
         WC.setSteer(G, ks);
       }
       WC.step(G, dt);
-      processEvents();
-      processReveals();
       // gas fades
       for (var gi = 0; gi < G.lease.gas.length; gi++) {
         if (!G.lease.gas[gi].alive) gasFade[gi] = Math.min(1, (gasFade[gi] || 0) + dt * 0.8);
@@ -1412,6 +1460,10 @@
       AU.update(dt, { drilling: anyDrill, grinding: anyGrind, pumping: anyPump, speedN: G.upg.bit ? 1 : 0.35, pumpRate: WC.pumpRate(G) });
     } else {
       AU.update(dt, { drilling: false, grinding: false, pumping: false });
+    }
+    if (running) {
+      processEvents();
+      processReveals();
     }
     if (resultsTimer > 0) {
       resultsTimer -= dt;

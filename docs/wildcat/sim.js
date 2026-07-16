@@ -31,8 +31,8 @@
     INTEREST_EVERY: 12,    // seconds
     INTEREST_PCT: 0.012,   // of remaining debt, per tick
     SONAR_START: 3,
-    CONE_TOP: 26,          // sonar cone half-width at surface
-    CONE_BOT: 150,         // at full depth
+    CONE_TOP: 36,          // sonar cone half-width at surface
+    CONE_BOT: 180,         // at full depth
     BLOWOUT_COOLDOWN: 9,   // s derrick offline
     BROKEN_COOLDOWN: 4,
     GAS_BONUS: 100,
