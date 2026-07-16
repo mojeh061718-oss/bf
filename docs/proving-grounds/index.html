@@ -8,12 +8,15 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#0a1b2e">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='6.4' fill='none' stroke='%23e5a13d' stroke-width='1.4'/%3E%3Cpath d='M8 0v5M8 11v5M0 8h5M11 8h5' stroke='%239cc8ea' stroke-width='1.4'/%3E%3C/svg%3E">
-<title>PROVING GROUNDS — The graph doesn't lie.</title>
+<title>PROVING GROUNDS — Build it right. The graph doesn't lie.</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
 <div id="app">
+
+  <!-- ===== 3D VIEWPORT (assembly bay + range day) ===== -->
+  <canvas id="gl"></canvas>
 
   <!-- ================= TITLE ================= -->
   <section id="scr-title" class="screen active">
@@ -29,10 +32,10 @@
       </svg>
       <div class="title-form">FORM RD-1147-A · REPUBLIC PROVING AUTHORITY</div>
       <h1>PROVING<br>GROUNDS</h1>
-      <p class="tagline">The graph doesn’t lie.</p>
+      <p class="tagline">Build it right. The graph doesn’t lie.</p>
       <ol class="howto">
-        <li><b>Read the RFP.</b> Every number on it is a promise you’re about to make.</li>
-        <li><b>Design the charge</b> — blend, casing, fuse chain — then buy down your ignorance in QA.</li>
+        <li><b>Build the device</b> — snap parts together in the assembly bay, KSP style.</li>
+        <li><b>Close it out by hand</b> — wires, torque, detonator. Your hands are the QA department.</li>
         <li><b>Range day tells the truth</b> from 1.6&nbsp;km away. So does the incident report.</li>
       </ol>
       <button id="btn-start" type="button">TAP TO START</button>
@@ -50,71 +53,78 @@
     </div>
   </section>
 
-  <!-- ================= DESIGN BENCH ================= -->
-  <section id="scr-bench" class="screen">
-    <header class="bench-head">
-      <div class="bh-left">
-        <div class="bh-brand">REDLINE ORDNANCE WORKS</div>
-        <div class="bh-sub">RFP-041 · QUARRY BREACH CHARGE</div>
-      </div>
-      <div class="bh-right">
-        <div class="chip chip-forecast" id="chip-forecast">FORECAST 41°C</div>
-        <div class="chip" id="chip-series">SERIES —</div>
+  <!-- ================= ASSEMBLY BAY UI ================= -->
+  <div id="ui-bay" class="ui hidden">
+    <header class="bay-head">
+      <div class="bay-brand">REDLINE ORDNANCE WORKS · BAY 2</div>
+      <div class="bay-meters">
+        <div class="meter" id="m-crater">
+          <div class="m-lbl">PREDICTED CRATER <b id="m-crater-val">—</b></div>
+          <div class="m-track">
+            <div class="m-spec" id="m-crater-spec"></div>
+            <div class="m-band" id="m-crater-band"></div>
+          </div>
+          <div class="m-marks"><span>0</span><span class="m-goal">18–24 m</span><span>30 m</span></div>
+        </div>
+        <div class="meter half">
+          <div class="m-lbl">WEIGHT <b id="m-weight-val">0 kg</b></div>
+          <div class="m-track"><div class="m-fill" id="m-weight-fill"></div></div>
+        </div>
+        <div class="meter half">
+          <div class="m-lbl">COST <b id="m-cost-val">$0</b></div>
+          <div class="m-track"><div class="m-fill" id="m-cost-fill"></div><div class="m-capline"></div></div>
+        </div>
       </div>
     </header>
-    <nav class="bench-tabs" id="bench-tabs">
-      <button data-tab="fill" class="active" type="button">FILL</button>
-      <button data-tab="casing" type="button">CASING</button>
-      <button data-tab="fuse" type="button">FUSE</button>
-      <button data-tab="ledger" type="button">LEDGER</button>
-    </nav>
-    <div class="bench-body" id="bench-body">
-      <div class="tabpane active" id="pane-fill"></div>
-      <div class="tabpane" id="pane-casing"></div>
-      <div class="tabpane" id="pane-fuse"></div>
-      <div class="tabpane" id="pane-ledger"></div>
+
+    <div id="bay-hint" class="bay-hint"></div>
+
+    <div id="stage-build">
+      <button id="btn-closeout" type="button" class="bay-cta" disabled>CLOSE-OUT →</button>
+      <div id="shelf">
+        <div id="shelf-scroll"></div>
+      </div>
     </div>
-    <footer class="bench-status" id="bench-status">
-      <div class="bs-bars">
-        <div class="bs-bar">
-          <div class="bs-lbl"><span>COST</span><b id="bs-cost">$0</b></div>
-          <div class="bs-track"><div class="bs-fill" id="bs-cost-fill"></div><div class="bs-capline"></div></div>
-        </div>
-        <div class="bs-bar">
-          <div class="bs-lbl"><span>WEIGHT</span><b id="bs-weight">0 kg</b></div>
-          <div class="bs-track"><div class="bs-fill" id="bs-weight-fill"></div><div class="bs-capline"></div></div>
-        </div>
-      </div>
-      <div class="bs-chips">
-        <div class="bs-chip" id="bs-crater">⌀ —</div>
-        <div class="bs-chip" id="bs-chain">CHAIN —</div>
-        <button id="btn-toqa" type="button">QA BAY →</button>
-      </div>
-    </footer>
-  </section>
 
-  <!-- ================= QA BAY ================= -->
-  <section id="scr-qa" class="screen">
-    <header class="bench-head">
-      <div class="bh-left">
-        <div class="bh-brand">QA BAY — BLDG. 4</div>
-        <div class="bh-sub">BUY DOWN YOUR IGNORANCE</div>
-      </div>
-      <div class="bh-right">
-        <div class="chip chip-forecast">FORECAST 41°C</div>
-        <button class="chip chip-btn" id="btn-backbench" type="button">← BENCH</button>
-      </div>
-    </header>
-    <div class="qa-body" id="qa-body"></div>
-    <footer class="qa-foot">
-      <div class="qa-spend" id="qa-spend">PROGRAM SPEND $0</div>
-      <button id="btn-torange" type="button">TRUCK TO RANGE →</button>
-    </footer>
-  </section>
+    <!-- close-out stage chrome -->
+    <div id="stage-bar" class="hidden">
+      <div class="sb-step" data-step="0">1 · WIRING</div>
+      <div class="sb-step" data-step="1">2 · DETONATOR</div>
+      <div class="sb-step" data-step="2">3 · ARM</div>
+    </div>
 
-  <!-- ================= RANGE DAY ================= -->
-  <section id="scr-range" class="screen">
-    <canvas id="range-canvas"></canvas>
+    <div id="wiring-ui" class="stage-ui hidden">
+      <div class="stage-note" id="wiring-note">Drag each wire from its post to a terminal. Read the labels.</div>
+      <div id="torque-ring" class="hidden"><div id="torque-ring-fill"></div></div>
+      <button id="btn-panel-done" type="button" class="bay-cta hidden">PANEL CLOSED →</button>
+    </div>
+
+    <div id="det-ui" class="stage-ui hidden">
+      <div class="stage-note">Guide the detonator into the well. <b>Slow is smooth.</b></div>
+      <div class="steady-wrap">
+        <div class="steady-lbl"><span>HANDLING</span><span id="steady-read">STEADY</span></div>
+        <div class="steady-track">
+          <div class="steady-zone"></div>
+          <div class="steady-fill" id="steady-fill"></div>
+        </div>
+      </div>
+      <button id="btn-det-done" type="button" class="bay-cta hidden">CONTINUE →</button>
+    </div>
+
+    <div id="arm-ui" class="stage-ui hidden">
+      <div class="checklist paper" id="checklist">
+        <div class="ck-head">PRE-FLIGHT CLOSE-OUT · RFP-047</div>
+        <div class="ck-line" id="ck-wiring"><span class="ck-name">WIRING ROUTED</span><span class="ck-stamp"></span></div>
+        <div class="ck-line" id="ck-torque"><span class="ck-name">TERMINALS TORQUED</span><span class="ck-stamp"></span></div>
+        <div class="ck-line" id="ck-det"><span class="ck-name">DETONATOR SEATED</span><span class="ck-stamp"></span></div>
+        <div class="ck-foot" id="ck-foot">Flip the guard. Throw the switch.</div>
+      </div>
+      <button id="btn-torange" type="button" class="bay-cta hidden">TRUCK TO RANGE →</button>
+    </div>
+  </div>
+
+  <!-- ================= RANGE DAY UI ================= -->
+  <div id="ui-range" class="ui hidden">
     <div id="cam-overlay" class="hidden">
       <div class="cam-bar cam-bar-top"></div>
       <div class="cam-bar cam-bar-bot"></div>
@@ -123,56 +133,35 @@
       <div class="cam-hud cam-bl" id="cam-clock">T−00:05.0</div>
       <div class="cam-hud cam-br" id="cam-azel">AZ 214.6° · EL 1.2° · f/64</div>
       <div class="cam-hud cam-tick hidden" id="cam-tick"></div>
-      <div class="cam-hud cam-frame hidden" id="cam-frame">FRM 0000</div>
     </div>
-    <div id="range-ui">
-      <div id="range-caption"></div>
-      <div id="range-controls">
-        <button id="btn-arm" type="button" class="hidden">
-          <span id="arm-ring"></span><span id="arm-lbl">HOLD TO ARM</span>
-        </button>
-        <button id="btn-fire" type="button" class="hidden">FIRE</button>
-        <div id="range-after" class="hidden">
-          <button id="btn-replay" type="button">SLOW-MO REPLAY</button>
-          <button id="btn-telemetry" type="button">VIEW TELEMETRY →</button>
-        </div>
-      </div>
+    <div id="flash"></div>
+    <div id="dustwall"></div>
+    <div id="range-caption"></div>
+    <div id="range-controls">
+      <button id="btn-skip-truck" type="button" class="hidden">SKIP ▸</button>
+      <button id="btn-arm" type="button" class="hidden">
+        <span id="arm-ring"></span><span id="arm-lbl">HOLD TO ARM</span>
+      </button>
+      <button id="btn-fire" type="button" class="hidden">FIRE</button>
     </div>
-  </section>
+    <svg id="measure-svg" class="hidden" viewBox="0 0 390 300" preserveAspectRatio="xMidYMid meet"></svg>
+  </div>
 
-  <!-- ================= ADJUDICATION ================= -->
-  <section id="scr-adjud" class="screen">
-    <div class="adjud-scroll" id="adjud-scroll"></div>
+  <!-- ================= SCORECARD ================= -->
+  <section id="scr-score" class="screen">
+    <div class="score-scroll" id="score-scroll"></div>
   </section>
 
   <!-- ================= INCIDENT REPORT ================= -->
   <div id="incident-overlay" class="overlay hidden">
     <div class="paper incident-doc" id="incident-doc"></div>
-    <button id="btn-incident-close" type="button">RETURN TO ADJUDICATION</button>
-  </div>
-
-  <!-- ================= MICROMETER MINIGAME ================= -->
-  <div id="mic-overlay" class="overlay hidden">
-    <div class="mic-card">
-      <div class="mic-head">
-        <div class="mic-title">DIMENSIONAL INSPECTION — CHRONEX TIMER SLEEVE</div>
-        <div class="mic-sub">Drag the vernier sleeve until the datum lines agree. Then LOCK.</div>
-      </div>
-      <div class="mic-timer"><div id="mic-timer-fill"></div></div>
-      <div class="mic-scale-zone" id="mic-zone">
-        <div class="mic-fixed">
-          <div class="mic-datum"></div>
-        </div>
-        <div class="mic-sleeve" id="mic-sleeve"></div>
-        <div class="mic-readout" id="mic-readout">Δ 0.000 in̸</div>
-      </div>
-      <button id="btn-mic-lock" type="button">LOCK MEASUREMENT</button>
-    </div>
+    <button id="btn-incident-close" type="button">RETURN TO SCORECARD</button>
   </div>
 
   <div id="toast" class="hidden"></div>
 </div>
 
+<script src="vendor/three.min.js"></script>
 <script src="sim.js"></script>
 <script src="audio.js"></script>
 <script src="game.js"></script>
