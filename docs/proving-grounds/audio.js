@@ -207,6 +207,44 @@ var PGAudio = (function () {
     try { e.o.stop(t + 0.8); e.o2.stop(t + 0.8); e.lfo.stop(t + 0.8); } catch (err) {}
   }
 
+  /* ---- REFINERY ---- */
+  var boilNodes = null;
+  function boilStart() {
+    if (!ok() || boilNodes) return;
+    var t = now();
+    if (!noiseBuf) noise(t, 0.01, 0.0001, 100, 200, 'lowpass'); // ensure buffer
+    var src = ac.createBufferSource(); src.buffer = noiseBuf; src.loop = true;
+    var f = ac.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 700; f.Q.value = 0.6;
+    var g = ac.createGain(); g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.06, t + 0.4);
+    var lfo = ac.createOscillator(); lfo.frequency.value = 5.5;
+    var lg = ac.createGain(); lg.gain.value = 250;
+    lfo.connect(lg); lg.connect(f.frequency);
+    src.connect(f); f.connect(g); g.connect(master);
+    src.start(t); lfo.start(t);
+    boilNodes = { src: src, lfo: lfo, g: g };
+  }
+  function boilStop() {
+    if (!ac || !boilNodes) return;
+    var t = now(), b = boilNodes; boilNodes = null;
+    b.g.gain.cancelScheduledValues(t);
+    b.g.gain.setValueAtTime(b.g.gain.value, t);
+    b.g.gain.exponentialRampToValueAtTime(0.0001, t + 0.5);
+    try { b.src.stop(t + 0.6); b.lfo.stop(t + 0.6); } catch (err) {}
+  }
+  function batchDone(good) {
+    if (!ok()) return;
+    var t = now();
+    if (good) {
+      osc('triangle', 660, t, 0.2, 0.12);
+      osc('triangle', 880, t + 0.14, 0.4, 0.14);
+      noise(t, 0.3, 0.08, 800, 2400, 'bandpass');
+    } else {
+      osc('sawtooth', 160, t, 0.5, 0.14, 90);
+      noise(t, 0.7, 0.16, 200, 900, 'lowpass');
+    }
+  }
+
   /* ---- RANGE ---- */
   function klaxon() {
     if (!ok()) return;
@@ -286,6 +324,7 @@ var PGAudio = (function () {
     slide: slide, seatClick: seatClick, slam: slam,
     coverFlick: coverFlick, switchClack: switchClack,
     engineStart: engineStart, engineStop: engineStop,
+    boilStart: boilStart, boilStop: boilStop, batchDone: batchDone,
     klaxon: klaxon, armLatch: armLatch, beep: beep,
     detonation: detonation, seismo: seismo, wind: wind, measureTick: measureTick,
     fanfare: fanfare, sadDrone: sadDrone

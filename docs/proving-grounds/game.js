@@ -26,15 +26,23 @@
   }
 
   /* ================= state ================= */
-  var urlSeed = null;
-  try { urlSeed = new URLSearchParams(location.search).get('seed'); } catch (e) {}
+  var urlSeed = null, urlContract = 0;
+  try {
+    var q = new URLSearchParams(location.search);
+    urlSeed = q.get('seed');
+    urlContract = q.get('c') === '2' ? 1 : 0;
+  } catch (e) {}
   var S = {
     seed: (urlSeed || PG2.makeSeed()).toUpperCase(),
     phase: 'title',            // title rfp build wiring det arm truck station counting aftermath crater score
+    contract: urlContract,     // 0 = RFP-041 · 1 = RFP-048 (needs the still)
+    attempt: 0,                // tests fired on this contract — worn with pride
+    best: [null, null],        // per-contract best {stars, net, wonOn}
     assembly: PG2.makeAssembly(),
     result: null,
     closeoutStep: -1
   };
+  function rfp() { return PG2.CONTRACTS[S.contract]; }
 
   var timers = [];
   function later(ms, fn) { var t = setTimeout(fn, ms); timers.push(t); return t; }
@@ -105,7 +113,13 @@
     var x = c.getContext('2d');
     if (opts.bg) { x.fillStyle = opts.bg; x.fillRect(0, 0, c.width, c.height); }
     x.fillStyle = opts.color || '#e8ddc0';
-    x.font = '700 ' + (opts.px || 64) + 'px Menlo, monospace';
+    var px = opts.px || 64;
+    x.font = '700 ' + px + 'px Menlo, monospace';
+    var tw = x.measureText(txt).width;
+    if (tw > c.width * 0.94) {
+      px = Math.floor(px * c.width * 0.94 / tw);
+      x.font = '700 ' + px + 'px Menlo, monospace';
+    }
     x.textAlign = 'center'; x.textBaseline = 'middle';
     x.fillText(txt, c.width / 2, c.height / 2 + 2);
     var tx = new THREE.CanvasTexture(c);
@@ -129,7 +143,7 @@
     return { compact: { L: 1.5, r: 0.34 }, standard: { L: 2.1, r: 0.42 }, heavy: { L: 2.7, r: 0.5 } }[id];
   }
   function slotXs(id) {
-    var d = casingDims(id), n = PG2.CASINGS[id].slots;
+    var d = casingDims(id), n = PG2.SHELLS[id].slots;
     var span = d.L * 0.52, xs = [];
     for (var i = 0; i < n; i++) xs.push(n === 1 ? 0 : -span / 2 + span * i / (n - 1));
     return xs;
@@ -206,11 +220,13 @@
   }
   function buildCanister(comp) {
     var g = new THREE.Group();
-    var hue = comp === 'am4' ? COL.amber : COL.blue;
+    var HUES = { ember: COL.amber, frost: COL.blue, emberx: 0xff7a2e, emberxs: 0x7a5030 };
+    var hue = HUES[comp] || COL.amber;
+    var glow = comp === 'emberx' ? 0.5 : comp === 'emberxs' ? 0.08 : 0.22;
     var body = new THREE.Mesh(new THREE.CylinderGeometry(0.115, 0.115, 0.26, 14), mat(0xb9c2c9));
     body.castShadow = true;
     g.add(body);
-    var band = new THREE.Mesh(new THREE.CylinderGeometry(0.118, 0.118, 0.09, 14), mat(hue, { emissive: hue, ei: 0.22 }));
+    var band = new THREE.Mesh(new THREE.CylinderGeometry(0.118, 0.118, 0.09, 14), mat(hue, { emissive: hue, ei: glow }));
     band.position.y = 0.02;
     g.add(band);
     var top = new THREE.Mesh(new THREE.SphereGeometry(0.115, 14, 7, 0, Math.PI * 2, 0, Math.PI / 2), mat(hue));
@@ -328,8 +344,8 @@
     return g;
   }
   function partBuilder(id) {
-    if (id === 'compact' || id === 'standard' || id === 'heavy') return buildCasing(id);
-    if (id === 'am4' || id === 'crx') return buildCanister(id);
+    if (PG2.SHELLS[id]) return buildCasing(id);
+    if (PG2.COMPOUNDS[id]) return buildCanister(id);
     if (id === 'timer') return buildTimer();
     if (id === 'battery') return buildBattery();
     if (id === 'cap') return buildCap();
@@ -441,17 +457,17 @@
   /* ---------- snap nodes ---------- */
   function nodeList() {
     var a = S.assembly, nodes = [];
-    if (!a.casing) {
-      nodes.push({ id: 'stand', pos: V3(0, 0, 0), accepts: ['compact', 'standard', 'heavy'] });
+    if (!a.shell) {
+      nodes.push({ id: 'stand', pos: V3(0, 0, 0), accepts: Object.keys(PG2.SHELLS) });
       return nodes;
     }
-    var d = casingDims(a.casing);
-    slotXs(a.casing).forEach(function (x, i) {
-      if (!a.canisters[i]) nodes.push({ id: 'slot' + i, pos: V3(x, d.r + 0.1, 0), accepts: ['am4', 'crx'], slot: i });
+    var d = casingDims(a.shell);
+    slotXs(a.shell).forEach(function (x, i) {
+      if (!a.canisters[i]) nodes.push({ id: 'slot' + i, pos: V3(x, d.r + 0.1, 0), accepts: Object.keys(PG2.COMPOUNDS), slot: i });
     });
     if (!a.timer) nodes.push({ id: 'nose', pos: V3(d.L / 2 + 0.05, 0, 0), accepts: ['timer'] });
     if (!a.battery) nodes.push({ id: 'tail', pos: V3(-d.L / 2 - 0.18, 0, 0), accepts: ['battery'] });
-    if (!a.cap) nodes.push({ id: 'well', pos: V3(wellX(a.casing), d.r + 0.12, 0), accepts: ['cap'] });
+    if (!a.cap) nodes.push({ id: 'well', pos: V3(wellX(a.shell), d.r + 0.12, 0), accepts: ['cap'] });
     if (!a.fins) nodes.push({ id: 'finring', pos: V3(-d.L / 2 + 0.3, 0, 0), accepts: ['fins'] });
     if (!a.panel) nodes.push({ id: 'side', pos: V3(-d.L * 0.31, 0.05, d.r + 0.02), accepts: ['panel'] });
     return nodes;
@@ -459,15 +475,15 @@
   function nodePose(nodeId, partId) {
     // local position+rotation a part takes when snapped at a node
     var a = S.assembly;
-    var d = a.casing ? casingDims(a.casing) : null;
+    var d = a.shell ? casingDims(a.shell) : null;
     if (nodeId === 'stand') return { pos: V3(0, 0, 0), rot: V3(0, 0, 0) };
     if (/^slot/.test(nodeId)) {
       var i = parseInt(nodeId.slice(4), 10);
-      return { pos: V3(slotXs(a.casing)[i], d.r + 0.04, 0), rot: V3(0, 0, 0) };
+      return { pos: V3(slotXs(a.shell)[i], d.r + 0.04, 0), rot: V3(0, 0, 0) };
     }
     if (nodeId === 'nose') return { pos: V3(d.L / 2 + 0.02, 0, 0), rot: V3(0, 0, 0) };
     if (nodeId === 'tail') return { pos: V3(-d.L / 2 - 0.16, 0, 0), rot: V3(0, 0, 0) };
-    if (nodeId === 'well') return { pos: V3(wellX(a.casing), d.r + 0.055, 0), rot: V3(0, 0, 0) };
+    if (nodeId === 'well') return { pos: V3(wellX(a.shell), d.r + 0.055, 0), rot: V3(0, 0, 0) };
     if (nodeId === 'finring') return { pos: V3(-d.L / 2 + 0.28, 0, 0), rot: V3(0, 0, 0) };
     if (nodeId === 'side') return { pos: V3(-d.L * 0.31, 0.05, d.r + 0.02), rot: V3(0, 0, 0) };
     return { pos: V3(0, 0, 0), rot: V3(0, 0, 0) };
@@ -486,13 +502,13 @@
     bay.capPivot = null;
     bay.armPanelMesh = null;
     var a = S.assembly;
-    if (!a.casing) { refreshNodes(null); return; }
-    var cas = buildCasing(a.casing);
-    cas.userData.remove = { kind: 'casing' };
+    if (!a.shell) { refreshNodes(null); return; }
+    var cas = buildCasing(a.shell);
+    cas.userData.remove = { kind: 'shell' };
     tagMeshes(cas);
     dev.add(cas);
     bay.casingMesh = cas;
-    var d = casingDims(a.casing);
+    var d = casingDims(a.shell);
     a.canisters.forEach(function (c, i) {
       if (!c) return;
       var m = buildCanister(c);
@@ -522,6 +538,12 @@
       var pq = nodePose('side');
       pm.position.copy(pq.pos);
       pm.userData.remove = { kind: 'panel' };
+      if (a.armed) {
+        pm.userData.leverPivot.rotation.x = 0.6;
+        pm.userData.led.material.emissive.setHex(0xff2f1e);
+        pm.userData.led.material.emissiveIntensity = 1.4;
+        pm.userData.led.material.color.setHex(0xff5040);
+      }
       tagMeshes(pm);
       dev.add(pm);
       bay.armPanelMesh = pm;
@@ -564,22 +586,37 @@
   }
 
   /* ================= SHELF ================= */
-  var SHELF = [
-    { id: 'compact', name: 'COMPACT CASING', group: 'casing' },
-    { id: 'standard', name: 'STANDARD CASING', group: 'casing' },
-    { id: 'heavy', name: 'HEAVY CASING', group: 'casing' },
-    { id: 'am4', name: 'AMMONITE-4 CANISTER', group: 'fill' },
-    { id: 'crx', name: 'CERULEX CANISTER', group: 'fill' },
-    { id: 'timer', name: 'CHRONEX TIMER', group: 'unique' },
-    { id: 'battery', name: 'BATTERY PACK', group: 'unique' },
-    { id: 'cap', name: 'WELL CAP', group: 'unique' },
-    { id: 'panel', name: 'ARM SWITCH PANEL', group: 'unique' },
-    { id: 'fins', name: 'STABILIZER FINS', group: 'unique' }
-  ];
+  var ALL_PART_IDS = ['compact', 'standard', 'heavy', 'ember', 'frost', 'emberx', 'emberxs',
+                      'timer', 'battery', 'cap', 'panel', 'fins'];
+  function shelfList() {
+    var list = [
+      { id: 'compact', name: 'SMALL SHELL', group: 'shell' },
+      { id: 'standard', name: 'STANDARD SHELL', group: 'shell' },
+      { id: 'heavy', name: 'BIG SHELL', group: 'shell' },
+      { id: 'ember', name: 'EMBER CANISTER', group: 'fill' },
+      { id: 'frost', name: 'FROST CANISTER', group: 'fill' }
+    ];
+    if (rfp().needsRefinery) {
+      list.push({ id: 'emberx', name: 'EMBER-X CANISTER', group: 'refined' });
+      list.push({ id: 'emberxs', name: 'SCORCHED X', group: 'refined' });
+    }
+    list.push(
+      { id: 'timer', name: 'TIMER', group: 'unique' },
+      { id: 'battery', name: 'BATTERY', group: 'unique' },
+      { id: 'cap', name: 'WELL CAP', group: 'unique' },
+      { id: 'panel', name: 'ARM SWITCH', group: 'unique' },
+      { id: 'fins', name: 'FINS', group: 'unique' }
+    );
+    return list;
+  }
   function partCost(id) {
-    if (PG2.CASINGS[id]) return PG2.CASINGS[id].cost;
+    if (PG2.SHELLS[id]) return PG2.SHELLS[id].cost;
     if (PG2.COMPOUNDS[id]) return PG2.COMPOUNDS[id].cost;
     return PG2.PARTS[id].cost;
+  }
+  function costLabel(p) {
+    if (p.group === 'refined') return 'FROM THE STILL';
+    return '$' + partCost(p.id).toLocaleString('en-US') + (p.group === 'fill' ? ' ea' : '');
   }
   var iconCache = {};
   function makeIcons() {
@@ -594,8 +631,8 @@
       var dl = new THREE.DirectionalLight(0xfff1dc, 1.0);
       dl.position.set(3, 4, 5);
       sc.add(dl);
-      SHELF.forEach(function (p) {
-        var m = partBuilder(p.id);
+      ALL_PART_IDS.forEach(function (pid) {
+        var m = partBuilder(pid);
         var bb = new THREE.Box3().setFromObject(m);
         var size = bb.getSize(new THREE.Vector3()).length() || 1;
         var ctr = bb.getCenter(new THREE.Vector3());
@@ -604,7 +641,7 @@
         cam.position.set(size * 0.9, size * 0.62, size * 1.15);
         cam.lookAt(0, 0, 0);
         r2.render(sc, cam);
-        iconCache[p.id] = r2.domElement.toDataURL();
+        iconCache[pid] = r2.domElement.toDataURL();
         sc.remove(m);
       });
       r2.dispose();
@@ -614,14 +651,16 @@
   function buildShelf() {
     var sc = $('shelf-scroll');
     sc.innerHTML = '';
-    SHELF.forEach(function (p) {
+    shelfList().forEach(function (p) {
       var t = document.createElement('div');
       t.className = 'tile';
       t.id = 'tile-' + p.id;
-      t.innerHTML = (p.group === 'casing' ? '<span class="t-badge">PICK 1</span>' : '') +
+      var badge = p.group === 'shell' ? '<span class="t-badge">PICK 1</span>'
+                : p.group === 'refined' ? '<span class="t-badge" id="badge-' + p.id + '">×0</span>' : '';
+      t.innerHTML = badge +
         '<img alt="" draggable="false"' + (iconCache[p.id] ? ' src="' + iconCache[p.id] + '"' : '') + '>' +
         '<div class="t-name">' + p.name + '</div>' +
-        '<div class="t-cost">' + fmt$(partCost(p.id)) + (p.group === 'fill' ? ' ea' : '') + '</div>';
+        '<div class="t-cost">' + costLabel(p) + '</div>';
       t.addEventListener('pointerdown', function (e) {
         if (S.phase !== 'build') return;
         e.preventDefault();
@@ -633,23 +672,34 @@
   }
   function refreshShelf() {
     var a = S.assembly;
-    var d = PG2.derive(a);
-    SHELF.forEach(function (p) {
+    var d = PG2.derive(a, rfp());
+    shelfList().forEach(function (p) {
       var t = $('tile-' + p.id);
       if (!t) return;
       var dis = false;
-      if (p.group === 'casing') dis = !!a.casing;
-      else if (p.group === 'fill') dis = !a.casing || d.filled >= d.slots;
-      else dis = !a.casing || !!a[p.id];
+      if (p.group === 'shell') dis = !!a.shell;
+      else if (p.group === 'fill') dis = !a.shell || d.filled >= d.slots;
+      else if (p.group === 'refined') {
+        dis = !a.shell || d.filled >= d.slots || !(a.refine.stock[p.id] > 0);
+        var b = $('badge-' + p.id);
+        if (b) b.textContent = '×' + a.refine.stock[p.id];
+      }
+      else dis = !a.shell || !!a[p.id];
       t.classList.toggle('disabled', dis);
     });
   }
 
   /* ================= HUD ================= */
+  function closeoutReady() {
+    var a = S.assembly;
+    return a.det.seated && PG2.WIRES.every(function (c) { return a.wires[c]; });
+  }
   function refreshHUD() {
-    var d = PG2.derive(S.assembly);
-    var R = PG2.RFP;
-    var maxM = 30;
+    var d = PG2.derive(S.assembly, rfp());
+    var R = rfp();
+    var maxM = R.meterMax;
+    $('m-goal').textContent = R.craterMin + '–' + R.craterMax + ' m';
+    $('m-max').textContent = maxM + ' m';
     var spec = $('m-crater-spec');
     spec.style.left = (R.craterMin / maxM * 100) + '%';
     spec.style.width = ((R.craterMax - R.craterMin) / maxM * 100) + '%';
@@ -675,6 +725,8 @@
     cf.classList.toggle('over', d.overBudget);
     var btn = $('btn-closeout');
     btn.disabled = !(d.complete && !d.overBudget);
+    $('btn-refire').classList.toggle('hidden', !(S.phase === 'build' && closeoutReady() && d.complete && !d.overBudget));
+    $('btn-refinery').classList.toggle('hidden', !(S.phase === 'build' && R.needsRefinery));
     refreshHint(d);
     refreshShelf();
   }
@@ -683,12 +735,15 @@
     if (S.phase !== 'build') { h.style.opacity = 0; return; }
     h.style.opacity = 1;
     var msg;
-    if (!S.assembly.casing) msg = 'Drag a <b>casing</b> from the shelf onto the glowing stand.<br>One finger orbits · pinch zooms.';
-    else if (d.filled === 0) msg = 'Load <b>fill canisters</b> into the open bays.<br>Amber = more bang. Blue = more manners.';
+    if (!S.assembly.shell) msg = 'Drag a <b>shell</b> from the shelf onto the glowing stand.<br>One finger orbits · pinch zooms.';
+    else if (d.filled === 0) msg = rfp().needsRefinery
+      ? 'This job needs <b>EMBER-X</b>. Fire up <b>⚗ THE STILL</b>, then load the bays.'
+      : 'Load <b>canisters</b> into the open bays.<br>Amber EMBER = more bang · blue FROST = calmer.';
     else if (d.missing.length) msg = 'Still missing: <b>' + d.missing.join(' · ') + '</b>.<br>Tap a placed part to take it back off.';
-    else if (d.overBudget) msg = '<b style="color:#ff8d7e">Over budget.</b> The Authority is aware this hurts. The Authority does not care.';
-    else msg = 'Device complete. Hit <b>CLOSE-OUT</b> to wire it up by hand.';
-    h.innerHTML = '<span class="hint-small">ASSEMBLY BAY</span>' + msg;
+    else if (d.overBudget) msg = '<b style="color:#ff8d7e">Over budget.</b> Take something off — the Authority won’t pay a penny past $' + rfp().budget.toLocaleString('en-US') + '.';
+    else if (closeoutReady()) msg = 'Ready. <b>REFIRE</b> as-is — or run <b>CLOSE-OUT</b> to change wiring, seating or arming.';
+    else msg = 'Looks right. Hit <b>CLOSE-OUT</b> to wire it up by hand.';
+    h.innerHTML = '<span class="hint-small">ASSEMBLY BAY · ' + rfp().id + '</span>' + msg;
   }
 
   /* ================= INPUT — bay orbit + part drag + tap remove ================= */
@@ -767,10 +822,18 @@
   function placePart(id, node) {
     var a = S.assembly;
     if (node.id === 'stand') {
-      a.casing = id;
-      a.canisters = new Array(PG2.CASINGS[id].slots).fill(null);
+      a.shell = id;
+      a.canisters = new Array(PG2.SHELLS[id].slots).fill(null);
       PGAudio.thunk(true);
     } else if (/^slot/.test(node.id)) {
+      if (PG2.COMPOUNDS[id] && PG2.COMPOUNDS[id].cost === 0) {   // refined — comes from stock
+        if (!(a.refine.stock[id] > 0)) {
+          toast('No ' + PG2.COMPOUNDS[id].name + ' in stock — run ⚗ THE STILL.');
+          refreshNodes(null);
+          return;
+        }
+        a.refine.stock[id]--;
+      }
       a.canisters[node.slot] = id;
       PGAudio.thunk(false);
     } else {
@@ -781,12 +844,19 @@
     rebuildDevice();
     refreshHUD();
   }
+  function restock(c) {
+    if (c && PG2.COMPOUNDS[c] && PG2.COMPOUNDS[c].cost === 0) S.assembly.refine.stock[c]++;
+  }
   function removePart(info) {
     var a = S.assembly;
-    if (info.kind === 'casing') {
+    if (info.kind === 'shell') {
+      (a.canisters || []).forEach(restock);
+      var keepRefine = a.refine;
       S.assembly = PG2.makeAssembly();
-      toast('Casing removed — everything comes off with it.');
+      S.assembly.refine = keepRefine;
+      toast('Shell removed — everything comes off with it.');
     } else if (info.kind === 'canister') {
+      restock(a.canisters[info.slot]);
       a.canisters[info.slot] = null;
     } else {
       a[info.kind] = false;
@@ -877,7 +947,7 @@
   /* ---------- RFP ---------- */
   var rfpTimers = [];
   function buildRFP() {
-    var R = PG2.RFP;
+    var R = rfp();
     var doc = $('rfp-doc');
     doc.innerHTML =
       '<div class="doc-sec">' +
@@ -897,7 +967,7 @@
       '</div>' +
       '<div class="doc-sec">' +
         '<hr class="doc-rule thin">' +
-        '<p class="spec-clause"><span class="cl">7.4.1(c)</span> — The device shall be assembled BY HAND, by the contractor, who shall afterwards sign something.</p>' +
+        '<p class="spec-clause"><span class="cl">7.4.1(c)</span> — ' + R.clause + '</p>' +
       '</div>' +
       '<div class="doc-sec">' +
         '<hr class="doc-rule thin">' +
@@ -935,13 +1005,14 @@
     bay.wiring = null;
     bay.detStage = null;
     bay.armStage = null;
+    // the tinker loop: a kept build stays EXACTLY as you left it —
+    // parts, wires, torque, seating, arming. Tweak one thing. Refire.
     if (!keepAssembly) S.assembly = PG2.makeAssembly();
-    // reset close-out state (retry keeps the physical build only)
-    S.assembly.wires = { red: null, yellow: null, green: null };
-    S.assembly.torques = { red: false, yellow: false, green: false };
-    S.assembly.det = { seated: false, slam: 0 };
-    S.assembly.armed = false;
     showScreen(null); showUI('ui-bay');
+    $('ui-bay').classList.remove('closeout');
+    $('bay-brand-txt').textContent = 'REDLINE ORDNANCE WORKS · ' + rfp().id;
+    $('bay-attempt').textContent = 'TEST #' + (S.attempt + 1);
+    buildShelf();
     $('stage-build').classList.remove('hidden');
     $('stage-bar').classList.add('hidden');
     $('wiring-ui').classList.add('hidden');
@@ -957,7 +1028,7 @@
   var WIRE_COLORS = { red: COL.wireR, yellow: COL.wireY, green: COL.wireG };
   function panelLocal(x, y, z) {
     // wiring panel local coords → device local (panel centered at (0, .02, r))
-    var d = casingDims(S.assembly.casing);
+    var d = casingDims(S.assembly.shell);
     return V3(x, 0.02 + y, d.r + (z || 0));
   }
   function initWiring() {
@@ -966,7 +1037,7 @@
       twist: null, group: new THREE.Group()
     };
     var lay = PG2.panelLayout(S.seed);
-    var d = casingDims(S.assembly.casing);
+    var d = casingDims(S.assembly.shell);
     // posts (left column): red top, yellow mid, green bottom
     PG2.WIRES.forEach(function (c, i) {
       var y = 0.10 - i * 0.10;
@@ -1000,7 +1071,20 @@
     });
     bay.device.add(w.group);
     bay.wiring = w;
+    // restore wiring already done — the tinker loop keeps your work
+    PG2.WIRES.forEach(function (c) {
+      var t = S.assembly.wires[c];
+      if (t) {
+        w.wires[c].end = t;
+        w.terms[t].wire = c;
+        if (S.assembly.torques[c]) {
+          w.terms[t].mesh.material.color.setHex(0x8f7331);
+          w.terms[t].mesh.scale.set(1, 0.8, 1);
+        }
+      }
+    });
     PG2.WIRES.forEach(function (c) { updateWireCurve(c, null); });
+    updateWiringNote();
   }
   function wireEndLocal(c) {
     var w = bay.wiring;
@@ -1035,6 +1119,7 @@
   function enterWiring() {
     S.phase = 'wiring';
     S.closeoutStep = 0;
+    $('ui-bay').classList.add('closeout');
     $('stage-build').classList.add('hidden');
     $('stage-bar').classList.remove('hidden');
     setStageBar(0);
@@ -1042,8 +1127,8 @@
     $('bay-hint').style.opacity = 0;
     refreshNodes(null);
     // straighten the device & swing camera to the panel
-    var d = casingDims(S.assembly.casing);
-    tweenOrbitTo(V3(0.12, 1.36, d.r + 1.05), V3(0, 1.30, d.r - 0.1), 1100, function () {
+    var d = casingDims(S.assembly.shell);
+    tweenOrbitTo(V3(0.08, 1.44, d.r + 1.72), V3(0, 1.31, d.r - 0.05), 1100, function () {
       if (!bay.wiring) initWiring();
       tween(600, function (t) { bay.casingMesh.userData.doorPivot.rotation.x = -2.0 * t; });
       PGAudio.coverFlick();
@@ -1113,7 +1198,7 @@
     if (!w) return;
     if (w.drag && e.pointerId === w.drag.pid) {
       // project pointer onto the panel plane (device-local z = r+0.03)
-      var d = casingDims(S.assembly.casing);
+      var d = casingDims(S.assembly.shell);
       var ndc = new THREE.Vector2((p.x / W) * 2 - 1, -(p.y / H) * 2 + 1);
       raycaster.setFromCamera(ndc, bay.camera);
       var planePt = bay.device.localToWorld(V3(0, 0, d.r + 0.03));
@@ -1137,7 +1222,7 @@
         var frac = clamp(w.twist.acc / (Math.PI * 2), 0, 1);
         $('torque-ring-fill').style.setProperty('--p', frac * 100);
         w.terms[w.twist.term].mesh.rotation.y += delta;
-        if (frac >= 1) finishTorque();
+        if (frac >= 1) { finishTorque(); return; }   // twist is done and cleared
       }
       w.twist.angle = ang;
     }
@@ -1201,35 +1286,48 @@
     setStageBar(1);
     $('wiring-ui').classList.add('hidden');
     $('det-ui').classList.remove('hidden');
-    var d = casingDims(S.assembly.casing);
-    var wellL = V3(wellX(S.assembly.casing), d.r + 0.05, 0);
+    $('btn-det-done').classList.add('hidden');
+    $('btn-det-pull').classList.add('hidden');
+    var d = casingDims(S.assembly.shell);
+    var wellL = V3(wellX(S.assembly.shell), d.r + 0.05, 0);
     var wellW = bay.device.localToWorld(wellL.clone());
-    // open the cap
-    if (bay.capPivot) tween(600, function (t) { bay.capPivot.rotation.z = 1.9 * t; bay.capPivot.position.y = (d.r + 0.055) + 0.10 * t; });
+    var already = S.assembly.det.seated;
+    if (bay.capPivot && !already) tween(600, function (t) { bay.capPivot.rotation.z = 1.9 * t; bay.capPivot.position.y = (d.r + 0.055) + 0.10 * t; });
     tweenOrbitTo(wellW.clone().add(V3(0.72, 0.62, 0.95)), wellW.clone().add(V3(-0.05, 0.02, 0)), 1000, function () {
-      // padded case + detonator appear
-      var ds = { slam: 0, jolt: 0, p: 0, seated: false, drag: null };
-      var caseG = new THREE.Group();
-      var box = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.14, 0.2), mat(0x4a3b28));
-      caseG.add(box);
-      var foam = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.05, 0.16), mat(0x2b2b31, { shin: 2 }));
-      foam.position.y = 0.05;
-      caseG.add(foam);
-      caseG.position.copy(wellW.clone().add(V3(0.34, 0.28, 0.42)));
-      bay.scene.add(caseG);
-      var det = buildDetonator();
-      det.position.copy(caseG.position.clone().add(V3(0, 0.13, 0)));
-      det.rotation.z = 0.25;
-      bay.scene.add(det);
-      ds.caseG = caseG; ds.det = det;
-      ds.path = [
-        det.position.clone(),
-        wellW.clone().add(V3(0, 0.55, 0)),
-        wellW.clone().add(V3(0, 0.30, 0)),
-        wellW.clone().add(V3(0, 0.115, 0))
-      ];
-      bay.detStage = ds;
+      if (already) {
+        bay.detStage = { seated: true, slam: S.assembly.det.slam, jolt: 0, p: 1, drag: null, det: null, caseG: null, path: null };
+        updateSteady(bay.detStage);
+        toast('Detonator already seated' + (S.assembly.det.slam > PG2.SLAM_THRESHOLD ? ' — with a shock impulse on the log.' : '.'));
+        $('btn-det-done').classList.remove('hidden');
+        $('btn-det-pull').classList.remove('hidden');
+      } else {
+        stageDetCase(wellW);
+      }
     });
+  }
+  function stageDetCase(wellW) {
+    var ds = { slam: 0, jolt: 0, p: 0, seated: false, drag: null };
+    var caseG = new THREE.Group();
+    var box = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.14, 0.2), mat(0x4a3b28));
+    caseG.add(box);
+    var foam = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.05, 0.16), mat(0x2b2b31, { shin: 2 }));
+    foam.position.y = 0.05;
+    caseG.add(foam);
+    caseG.position.copy(wellW.clone().add(V3(0.34, 0.28, 0.42)));
+    bay.scene.add(caseG);
+    var det = buildDetonator();
+    det.position.copy(caseG.position.clone().add(V3(0, 0.13, 0)));
+    det.rotation.z = 0.25;
+    bay.scene.add(det);
+    ds.caseG = caseG; ds.det = det;
+    ds.path = [
+      det.position.clone(),
+      wellW.clone().add(V3(0, 0.55, 0)),
+      wellW.clone().add(V3(0, 0.30, 0)),
+      wellW.clone().add(V3(0, 0.115, 0))
+    ];
+    updateSteady(ds);
+    bay.detStage = ds;
   }
   function detPathPoint(p) {
     var path = bay.detStage.path;
@@ -1250,7 +1348,7 @@
   }
   function detDown(e, p) {
     var ds = bay.detStage;
-    if (!ds || ds.seated) return;
+    if (!ds || ds.seated || !ds.det) return;
     var sp = worldToScreen(ds.det.position, bay.camera);
     if (Math.hypot(sp.x - p.x, sp.y - p.y) < 70) {
       ds.drag = { pid: e.pointerId, lastX: p.x, lastY: p.y, lastT: performance.now(), lastV: 0 };
@@ -1285,7 +1383,7 @@
     updateSteady(ds);
     ds.det.position.copy(detPathPoint(ds.p));
     ds.det.rotation.z = 0.25 * (1 - clamp(ds.p * 2, 0, 1));
-    if (ds.p >= 0.97) seatDetonator(v);
+    if (ds.p >= 0.94) seatDetonator(v);
   }
   function detUp(e, p) {
     var ds = bay.detStage;
@@ -1318,14 +1416,17 @@
     }
     updateSteady(ds);
     // cap closes back over it
-    var d = casingDims(S.assembly.casing);
+    var d = casingDims(S.assembly.shell);
     if (bay.capPivot) later(500, function () {
       tween(500, function (t) {
         bay.capPivot.rotation.z = 1.9 * (1 - t);
         bay.capPivot.position.y = (d.r + 0.055) + 0.10 * (1 - t);
       }, function () { PGAudio.thunk(false); });
     });
-    later(300, function () { $('btn-det-done').classList.remove('hidden'); });
+    later(300, function () {
+      $('btn-det-done').classList.remove('hidden');
+      $('btn-det-pull').classList.remove('hidden');
+    });
   }
 
   /* ================= CLOSE-OUT STAGE 3 — ARM ================= */
@@ -1339,6 +1440,9 @@
       bay.scene.remove(bay.detStage.caseG);
       bay.scene.remove(bay.detStage.det);
     }
+    document.querySelector('.ck-head').textContent = 'PRE-FLIGHT CLOSE-OUT · ' + rfp().id;
+    ['ck-wiring', 'ck-torque', 'ck-det'].forEach(function (id) { $(id).classList.remove('shown'); });
+    $('ck-foot').textContent = S.assembly.armed ? 'Still armed from last time. It remembers.' : 'Flip the guard. Throw the switch.';
     var pm = bay.armPanelMesh;
     var pw = pm.getWorldPosition(new THREE.Vector3());
     bay.armStage = { coverOpen: false, drag: null };
@@ -1384,12 +1488,13 @@
     var coverW = pm.userData.coverPivot.getWorldPosition(new THREE.Vector3());
     var sp = worldToScreen(coverW, bay.camera);
     if (!st.coverOpen) {
-      if (Math.hypot(sp.x - p.x, sp.y - p.y) < 90) st.drag = { pid: e.pointerId, sy: p.y, kind: 'cover' };
+      if (Math.hypot(sp.x - p.x, sp.y - p.y) < 120) st.drag = { pid: e.pointerId, sy: p.y, kind: 'cover' };
       return;
     }
     // cover open: tap the lever
     var levW = pm.userData.leverPivot.getWorldPosition(new THREE.Vector3());
     var lp = worldToScreen(levW, bay.camera);
+    if (Math.hypot(lp.x - p.x, lp.y - p.y) < 90 && S.assembly.armed) { toast('Already armed. Kindly stop touching it.'); return; }
     if (Math.hypot(lp.x - p.x, lp.y - p.y) < 90 && !S.assembly.armed) {
       S.assembly.armed = true;
       PGAudio.switchClack();
@@ -1407,9 +1512,9 @@
     if (st.drag.kind === 'cover' && !st.coverOpen) {
       var dy = st.drag.sy - p.y;
       var pm = bay.armPanelMesh;
-      var ang = clamp(dy / 90, 0, 1) * -1.9;
+      var ang = clamp(dy / 70, 0, 1) * -1.9;
       pm.userData.coverPivot.rotation.x = ang;
-      if (dy > 62) {
+      if (dy > 48) {
         st.coverOpen = true;
         st.drag = null;
         PGAudio.coverFlick();
@@ -1452,7 +1557,7 @@
   function initRange() {
     var scene = new THREE.Scene();
     scene.background = gradientTexture([[0, '#6fa5cf'], [0.42, '#c8d5cf'], [0.6, '#f0d9a8'], [1, '#e8c68a']], true);
-    scene.fog = new THREE.Fog(0xdccdaa, 900, 2600);
+    scene.fog = new THREE.Fog(0xe3d4b0, 1400, 3600);
     var camera = new THREE.PerspectiveCamera(7, W / H, 0.5, 6000);
 
     scene.add(new THREE.HemisphereLight(0xcfe0f0, 0x8a6a42, 0.85));
@@ -1475,8 +1580,8 @@
         h *= clamp((r2 - 60) / 300, 0, 1);
       }
       pos.setZ(i, h);
-      var shade = 0.86 + Math.sin(x * 0.05) * Math.cos(y * 0.043) * 0.07;
-      col.setRGB(0.83 * shade, 0.63 * shade, 0.38 * shade);
+      var shade = 0.84 + Math.sin(x * 0.05) * Math.cos(y * 0.043) * 0.09 + Math.sin(x * 0.21 + y * 0.17) * 0.045;
+      col.setRGB(0.82 * shade, 0.615 * shade, 0.37 * shade);
       colors.push(col.r, col.g, col.b);
     }
     tg.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
@@ -1487,7 +1592,7 @@
 
     // mesas (three ridge lines, fading with distance)
     var mesas = [];
-    [{ z: -700, h: 90, c: 0xa97c54, sp: 1900 }, { z: -1150, h: 130, c: 0xb98f6b, sp: 2600 }, { z: -1700, h: 170, c: 0xc9a887, sp: 3400 }].forEach(function (m, mi) {
+    [{ z: -900, h: 48, c: 0x9a6b45, sp: 2200 }, { z: -1500, h: 74, c: 0xb08258, sp: 3000 }, { z: -2200, h: 110, c: 0xc9a37e, sp: 4200 }].forEach(function (m, mi) {
       var pts = [], n = 26;
       for (var i = 0; i <= n; i++) {
         var x = -m.sp / 2 + m.sp * i / n;
@@ -1564,7 +1669,8 @@
   /* ---------- range flow ---------- */
   function enterRange() {
     clearLater();
-    S.result = PG2.adjudicate(S.assembly, S.seed);
+    S.attempt++;
+    S.result = PG2.adjudicate(S.assembly, S.seed, rfp());
     if (!range) range = initRange();
     S.phase = 'truck';
     showUI('ui-range');
@@ -1578,11 +1684,13 @@
     $('arm-ring').style.setProperty('--p', 0);
     $('flash').style.opacity = 0;
     $('dustwall').style.opacity = 0;
+    window.__pgMeasureDone = false;
     // clean leftovers from a previous run
     if (range.fx && range.fx.group) range.scene.remove(range.fx.group);
     range.fx = null;
     if (range.craterG) { range.scene.remove(range.craterG); range.craterG = null; }
     range.deviceHolder.visible = true;
+    range.pad.visible = true;
     if (range.trestle) range.trestle.visible = false;
     range.shake = 0;
     // put the real device on the flatbed
@@ -1608,18 +1716,18 @@
     // rebuild from assembly (independent copies for the range scene)
     var g = new THREE.Group();
     var a = S.assembly;
-    if (!a.casing) return g;
-    g.add(buildCasing(a.casing));
-    var d = casingDims(a.casing);
+    if (!a.shell) return g;
+    g.add(buildCasing(a.shell));
+    var d = casingDims(a.shell);
     a.canisters.forEach(function (c, i) {
       if (!c) return;
       var m = buildCanister(c);
-      m.position.set(slotXs(a.casing)[i], d.r + 0.04, 0);
+      m.position.set(slotXs(a.shell)[i], d.r + 0.04, 0);
       g.add(m);
     });
     if (a.timer) { var t = buildTimer(); t.position.set(d.L / 2 + 0.02, 0, 0); g.add(t); }
     if (a.battery) { var b = buildBattery(); b.position.set(-d.L / 2 - 0.16, 0, 0); g.add(b); }
-    if (a.cap) { var c2 = buildCap(); c2.position.set(wellX(a.casing), d.r + 0.055, 0); g.add(c2); }
+    if (a.cap) { var c2 = buildCap(); c2.position.set(wellX(a.shell), d.r + 0.055, 0); g.add(c2); }
     if (a.fins) { var f = buildFins(); f.position.set(-d.L / 2 + 0.28, 0, 0); g.add(f); }
     if (a.panel) { var p = buildArmPanel(); p.position.set(-d.L * 0.31, 0.05, d.r + 0.02); p.userData.leverPivot.rotation.x = a.armed ? 0.6 : -0.5; g.add(p); }
     return g;
@@ -1656,7 +1764,7 @@
     range.camera.updateProjectionMatrix();
     range.camera.lookAt(0, 3, 0);
     $('cam-overlay').classList.remove('hidden');
-    $('cam-station').textContent = PG2.RFP.camera.id + ' — ' + PG2.RFP.camera.km.toFixed(1) + ' KM';
+    $('cam-station').textContent = PG2.CAMERA.id + ' — ' + PG2.CAMERA.km.toFixed(1) + ' KM';
     $('cam-clock').textContent = 'T−00:05.0';
     PGAudio.wind();
     setCaption('STATION 7 · LONG LENS · f/64', 'The review board raises its binoculars. Heat swims over the pan.');
@@ -1695,17 +1803,18 @@
     startCountdown();
   });
 
-  var rangeT = { camT: 0, detAt: null, soundAt: null, detDone: false, soundDone: false, lastBeep: null };
+  var rangeT = { camT: 0, t0: 0, detAt: null, soundAt: null, detDone: false, soundDone: false, lastBeep: null };
   function startCountdown() {
     S.phase = 'counting';
     setCaption('', '');
     var o = S.result.outcome;
+    rangeT.t0 = performance.now();
     rangeT.camT = 0;
     rangeT.detDone = false;
     rangeT.soundDone = false;
     rangeT.lastBeep = 6;
     rangeT.detAt = o.fired ? 5 + o.detT : null;
-    rangeT.soundAt = rangeT.detAt != null ? rangeT.detAt + PG2.RFP.soundDelay : null;
+    rangeT.soundAt = rangeT.detAt != null ? rangeT.detAt + PG2.SOUND_DELAY : null;
     rangeT.dudHandled = false;
   }
   function updateCamClock() {
@@ -1755,8 +1864,8 @@
       var flash = $('flash');
       flash.style.transition = 'none';
       flash.style.opacity = 0.95 * vis.bright;
-      later(90, function () {
-        flash.style.transition = 'opacity 1.1s ease';
+      later(80, function () {
+        flash.style.transition = 'opacity 0.3s ease-out';
         flash.style.opacity = 0;
       });
     }
@@ -1767,7 +1876,7 @@
       var a = lobeR() * Math.PI * 2;
       lobes.push(V3(Math.cos(a) * vis.ragged, 1, Math.sin(a) * vis.ragged).normalize());
     }
-    var n = vis.fizzle ? 7 : 16;
+    var n = vis.fizzle ? 7 : 10;
     var rand = PG2.stream(S.seed, 'fxrand');
     for (var i = 0; i < n; i++) {
       var m = new THREE.SpriteMaterial({
@@ -1777,10 +1886,11 @@
       });
       var sp = new THREE.Sprite(m);
       var dir = lobes[i % 2].clone().add(V3((rand() - 0.5) * 1.1, rand() * 0.8, (rand() - 0.5) * 1.1)).normalize();
+      if (!vis.fizzle) m.color.setRGB(0.8, 0.3, 0.09);   // additive: keep the sum orange
       sp.userData = {
         dir: dir,
         speed: (vis.fizzle ? 4 : 18) * (0.5 + rand()),
-        grow: scale * (0.5 + rand() * 0.8),
+        grow: scale * (0.38 + rand() * 0.55),
         delay: vis.fizzle ? rand() * 1.6 : rand() * 0.12
       };
       sp.position.set(0, 2, 0);
@@ -1797,7 +1907,7 @@
       fx.core = core;
       // dust torus
       var torus = new THREE.Mesh(new THREE.TorusGeometry(1, 2.2, 8, 28),
-        new THREE.MeshLambertMaterial({ color: 0xc4965e, transparent: true, opacity: 0.75 }));
+        new THREE.MeshLambertMaterial({ color: 0x9c7043, transparent: true, opacity: 0.7 }));
       torus.rotation.x = Math.PI / 2;
       torus.position.y = 1.5;
       fxGroup.add(torus);
@@ -1823,9 +1933,28 @@
       fxGroup.add(pts);
       fx.debris = { pts: pts, vel: vel };
     }
-    // remove the device — it is now philosophy
+    // remove the device and pad — they are now philosophy
     range.deviceHolder.visible = false;
     if (range.trestle) range.trestle.visible = false;
+    if (!vis.fizzle) range.pad.visible = false;
+    // rising smoke column (the part the board photographs)
+    if (!vis.fizzle) {
+      fx.smoke = [];
+      for (var si = 0; si < 8; si++) {
+        var sm = new THREE.Sprite(new THREE.SpriteMaterial({
+          map: tx.smoke, transparent: true, opacity: 0, depthWrite: false
+        }));
+        sm.position.set(0, 4, 0);
+        sm.userData = {
+          delay: 0.6 + si * 0.3,
+          rise: 9 + rand() * 7,
+          drift: (rand() - 0.5) * 3,
+          grow: scale * (0.55 + rand() * 0.5)
+        };
+        fxGroup.add(sm);
+        fx.smoke.push(sm);
+      }
+    }
     fx.scale = scale;
     range.fx = fx;
   }
@@ -1843,17 +1972,30 @@
       sp.position.addScaledVector(u.dir, u.speed * dt * (1 - k * 0.7));
       var s = u.grow * easeOut(k);
       sp.scale.set(s, s, 1);
-      sp.material.opacity = (1 - k) * (fx.vis.fizzle ? 0.8 : 1);
+      sp.material.opacity = Math.pow(1 - k, 1.5) * (fx.vis.fizzle ? 0.8 : 1);
       if (!fx.vis.fizzle) {
         sp.material.color = sp.material.color || new THREE.Color();
         sp.material.color.setRGB(1, clamp(1 - k * 0.8, 0.2, 1), clamp(0.8 - k, 0.05, 1));
       }
     });
+    if (fx.smoke) {
+      fx.smoke.forEach(function (sm) {
+        var u = sm.userData;
+        var tt = Math.max(t - u.delay, 0);
+        if (tt <= 0) return;
+        var k = clamp(tt / 6, 0, 1);
+        sm.position.y = 4 + u.rise * tt * (1 - k * 0.5);
+        sm.position.x = u.drift * tt;
+        var s = u.grow * (0.3 + easeOut(k) * 1.1);
+        sm.scale.set(s, s, 1);
+        sm.material.opacity = 0.5 * (k < 0.15 ? k / 0.15 : 1 - (k - 0.15) / 0.85);
+      });
+    }
     if (fx.core) {
-      var ck = clamp(t / 0.7, 0, 1);
-      var cs = 1 + easeOut(ck) * fx.scale * 0.5;
+      var ck = clamp(t / 0.32, 0, 1);
+      var cs = 1 + easeOut(ck) * fx.scale * 0.24;
       fx.core.scale.set(cs, cs, cs);
-      fx.core.material.opacity = 1 - ck;
+      fx.core.material.opacity = Math.pow(1 - ck, 2) * 0.95;
       if (ck >= 1) { fx.group.remove(fx.core); fx.core = null; }
     }
     if (fx.torus) {
@@ -1886,42 +2028,78 @@
     S.phase = 'crater';
     var crater = S.result.outcome.craterActual || 0;
     var r = Math.max(crater / 2, 1.6);
-    // crater meshes
     if (range.craterG) range.scene.remove(range.craterG);
     var g = new THREE.Group();
-    var bowl = new THREE.Mesh(new THREE.CircleGeometry(r, 36),
-      new THREE.MeshLambertMaterial({ color: 0x4a3826 }));
+    // scorch decal
+    var sc = document.createElement('canvas');
+    sc.width = sc.height = 256;
+    var sx = sc.getContext('2d');
+    var sg = sx.createRadialGradient(128, 128, 12, 128, 128, 128);
+    sg.addColorStop(0, 'rgba(28,20,13,0.95)');
+    sg.addColorStop(0.4, 'rgba(56,40,25,0.8)');
+    sg.addColorStop(0.72, 'rgba(92,68,42,0.35)');
+    sg.addColorStop(1, 'rgba(92,68,42,0)');
+    sx.fillStyle = sg;
+    sx.fillRect(0, 0, 256, 256);
+    var stx = new THREE.CanvasTexture(sc);
+    stx.encoding = THREE.sRGBEncoding;
+    var scorch = new THREE.Mesh(new THREE.PlaneGeometry(r * 4.6, r * 4.6),
+      new THREE.MeshBasicMaterial({ map: stx, transparent: true, depthWrite: false }));
+    scorch.rotation.x = -Math.PI / 2;
+    scorch.position.y = 0.42;
+    g.add(scorch);
+    // bowl: vertex-graded disc, near-black centre out to rim earth
+    var bowlGeo = new THREE.CircleGeometry(r, 36);
+    var bp = bowlGeo.attributes.position;
+    var bc = [];
+    for (var bi = 0; bi < bp.count; bi++) {
+      var dd = Math.hypot(bp.getX(bi), bp.getY(bi)) / r;
+      bc.push(lerp(0.045, 0.16, dd), lerp(0.03, 0.105, dd), lerp(0.018, 0.06, dd));
+    }
+    bowlGeo.setAttribute('color', new THREE.Float32BufferAttribute(bc, 3));
+    var bowl = new THREE.Mesh(bowlGeo, new THREE.MeshBasicMaterial({ vertexColors: true }));
     bowl.rotation.x = -Math.PI / 2;
-    bowl.position.y = 0.7;
+    bowl.position.y = 0.5;
     g.add(bowl);
-    var rim = new THREE.Mesh(new THREE.TorusGeometry(r, r * 0.16, 8, 36),
-      new THREE.MeshLambertMaterial({ color: 0x8a6a44 }));
+    // thrown rim
+    var rim = new THREE.Mesh(new THREE.TorusGeometry(r * 1.04, r * 0.13, 8, 36),
+      new THREE.MeshLambertMaterial({ color: 0x63482c }));
     rim.rotation.x = Math.PI / 2;
-    rim.position.y = 0.6;
-    rim.scale.z = 0.25;
+    rim.position.y = 0.55;
+    rim.scale.z = 0.3;
     g.add(rim);
+    // ejecta chunks
+    var chunkRand = PG2.stream(S.seed, 'chunks');
+    for (var ci = 0; ci < 12; ci++) {
+      var ang = chunkRand() * Math.PI * 2;
+      var dist = r * (1.15 + chunkRand() * 1.6);
+      var cs = r * (0.03 + chunkRand() * 0.06);
+      var chunk = new THREE.Mesh(new THREE.BoxGeometry(cs * 2, cs, cs * 1.4), mat(0x6e5233, { shin: 2 }));
+      chunk.position.set(Math.cos(ang) * dist, 0.5 + cs / 2, Math.sin(ang) * dist);
+      chunk.rotation.set(chunkRand() * 3, chunkRand() * 3, chunkRand() * 3);
+      g.add(chunk);
+    }
     // smoke wisps
     var tx = fxTextures();
     for (var i = 0; i < 5; i++) {
-      var sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tx.smoke, transparent: true, opacity: 0.35, depthWrite: false }));
-      sp.position.set((i - 2) * r * 0.3, r * 0.4 + i, 0);
-      sp.scale.set(r * 0.9, r * 0.9, 1);
-      sp.userData.rise = 0.4 + i * 0.13;
+      var sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tx.smoke, transparent: true, opacity: 0.2, depthWrite: false }));
+      sp.position.set((i - 2) * r * 0.28, r * 0.5 + i * r * 0.18, (i % 2 - 0.5) * r * 0.3);
+      sp.scale.set(r * 0.7, r * 0.7, 1);
+      sp.userData.rise = (0.3 + i * 0.1) * r * 0.12;
       g.add(sp);
-      range.craterSmoke = range.craterSmoke || [];
     }
     range.scene.add(g);
     range.craterG = g;
-    // push-in
+    // low push-in
     var c = range.camera;
-    c.fov = 26;
+    c.fov = 24;
     c.updateProjectionMatrix();
-    var from = V3(r * 7.5, r * 5.5, r * 9.5);
-    var to = V3(r * 4.2, r * 3.1, r * 5.4);
+    var from = V3(r * 6.4, r * 2.6, r * 8.4);
+    var to = V3(r * 3.3, r * 1.35, r * 4.4);
     setCaption('SURVEY PASS · PAD A', S.result.outcome.fired ? 'The dust votes last. Measuring…' : 'There is a device-shaped silence on the pad.');
     tween(3800, function (t) {
       c.position.lerpVectors(from, to, t);
-      c.lookAt(0, 0.5, 0);
+      c.lookAt(0, 0.6, 0);
     }, function () { drawMeasure(r); }, easeInOut);
   }
   function drawMeasure(r) {
@@ -1936,7 +2114,7 @@
     svg.style.height = H + 'px';
     var y = (pL.y + pR.y) / 2 - 12;
     var crater = S.result.outcome.craterActual || 0;
-    var R = PG2.RFP;
+    var R = rfp();
     svg.innerHTML =
       '<line class="msr-line" x1="' + pL.x + '" y1="' + y + '" x2="' + pL.x + '" y2="' + y + '" id="msr-main"/>' +
       '<line class="msr-line" x1="' + pL.x + '" y1="' + (y - 9) + '" x2="' + pL.x + '" y2="' + (y + 9) + '"/>' +
@@ -1962,16 +2140,17 @@
         var yb = y + 26;
         var rulerW = Math.min(W * 0.7, 260);
         var rx = cx - rulerW / 2;
-        var perM = rulerW / 30;
+        var perM = rulerW / R.meterMax;
         var g = svg.querySelector('#msr-band');
         g.innerHTML =
           '<line class="msr-line" x1="' + rx + '" y1="' + yb + '" x2="' + (rx + rulerW) + '" y2="' + yb + '" opacity=".6"/>' +
           '<line class="msr-band" x1="' + (rx + R.craterMin * perM) + '" y1="' + yb + '" x2="' + (rx + R.craterMax * perM) + '" y2="' + yb + '"/>' +
-          '<text x="' + (rx + R.craterMin * perM) + '" y="' + (yb + 14) + '" text-anchor="middle" font-size="9">18</text>' +
-          '<text x="' + (rx + R.craterMax * perM) + '" y="' + (yb + 14) + '" text-anchor="middle" font-size="9">24</text>' +
-          '<circle cx="' + (rx + clamp(crater, 0, 30) * perM) + '" cy="' + yb + '" r="4" fill="' +
+          '<text x="' + (rx + R.craterMin * perM) + '" y="' + (yb + 14) + '" text-anchor="middle" font-size="9">' + R.craterMin + '</text>' +
+          '<text x="' + (rx + R.craterMax * perM) + '" y="' + (yb + 14) + '" text-anchor="middle" font-size="9">' + R.craterMax + '</text>' +
+          '<circle cx="' + (rx + clamp(crater, 0, R.meterMax) * perM) + '" cy="' + yb + '" r="4" fill="' +
             (S.result.stamps.size.ok ? '#7ed49a' : '#ff7a68') + '"/>';
-        later(2200, showScore);
+        window.__pgMeasureDone = true;
+        later(3400, showScore);   // let the measurement breathe
       }
     })();
   }
@@ -2010,8 +2189,14 @@
     showUI(null);
     $('measure-svg').classList.add('hidden');
     var r = S.result;
-    var R = PG2.RFP;
+    var R = rfp();
     if (r.win) PGAudio.fanfare(); else PGAudio.sadDrone();
+    // per-contract bests, worn with pride
+    if (!S.best[S.contract]) S.best[S.contract] = { stars: 0, net: -Infinity, wonOn: null };
+    var b = S.best[S.contract];
+    b.stars = Math.max(b.stars, r.stars);
+    b.net = Math.max(b.net, r.payout.net);
+    if (r.win && b.wonOn == null) b.wonOn = S.attempt;
     var el = $('score-scroll');
     function stampCard(lbl, st) {
       return '<div class="stamp-card"><div class="sc-lbl">' + lbl + '</div>' +
@@ -2021,16 +2206,19 @@
     }
     var stars = '';
     for (var i = 0; i < 3; i++) stars += '<span class="' + (i < r.stars ? '' : 'dim') + '">★</span>';
+    var nextIsC2 = r.win && S.contract === 0;
     el.innerHTML =
       '<div class="score-sheet">' +
         '<div class="score-head">REPUBLIC PROVING AUTHORITY · ADJUDICATION</div>' +
         '<div class="score-title">RANGE DAY RESULTS</div>' +
-        '<div class="score-sub">' + R.id + ' · TEST SERIES ' + S.seed + '</div>' +
+        '<div class="score-sub">' + R.id + ' · TEST #' + S.attempt + ' · SERIES ' + S.seed + '</div>' +
         '<div class="stamp-row">' +
           stampCard('SIZE', r.stamps.size) +
           stampCard('TIMING', r.stamps.timing) +
           stampCard('CLEAN', r.stamps.clean) +
         '</div>' +
+        (r.hint ? '<div class="hint-callout"><span class="hc-kicker">TEST #' + S.attempt +
+          (r.win ? ' — VERDICT' : ' — WHAT TO TWEAK') + '</span>' + r.hint + '</div>' : '') +
         '<div class="award-banner ' + (r.win ? 'win' : 'lose') + '">' +
           '<div class="ab-kicker">' + (r.win ? 'CONTRACT AWARDED' : 'CONTRACT NOT AWARDED') + '</div>' +
           '<div class="ab-title">' + (r.win ? 'REDLINE ORDNANCE WORKS' : (r.vantage.ok ? 'VANTAGE DYNAMICS' : 'NO AWARD MADE')) + '</div>' +
@@ -2039,7 +2227,7 @@
         '<table class="pay-table">' +
           '<tr><td>DEVELOPMENT AWARD</td><td>' + (r.payout.award ? fmt$(r.payout.award) : '—') + '</td></tr>' +
           '<tr><td>CLEAN-DETONATION BONUS</td><td>' + (r.payout.bonus ? '+' + fmt$(r.payout.bonus) : '—') + '</td></tr>' +
-          '<tr><td>PARTS (AS BUILT)</td><td>−' + fmt$(r.payout.cost) + '</td></tr>' +
+          '<tr><td>PARTS &amp; REFINING (AS BUILT)</td><td>−' + fmt$(r.payout.cost) + '</td></tr>' +
           '<tr class="net"><td>NET TO REDLINE</td><td class="' + (r.payout.net >= 0 ? 'pos' : 'neg') + '">' +
             (r.payout.net >= 0 ? '' : '−') + fmt$(Math.abs(r.payout.net)) + '</td></tr>' +
         '</table>' +
@@ -2050,20 +2238,28 @@
         '</div>' +
         (r.incident ? '<button id="btn-incident" type="button">READ INCIDENT REPORT — FORM IR-3</button>' : '') +
         '<div class="score-btns">' +
-          '<button id="btn-retry" type="button">RETRY<span class="sub">KEEPS YOUR BUILD</span></button>' +
-          '<button id="btn-newcontract" type="button">NEW CONTRACT<span class="sub">FRESH SERIES</span></button>' +
+          '<button id="btn-retry" type="button">TWEAK &amp; REFIRE<span class="sub">YOUR BUILD, AS YOU LEFT IT</span></button>' +
+          (nextIsC2
+            ? '<button id="btn-newcontract" type="button">NEXT CONTRACT<span class="sub">RFP-048 · DOUBLE-WIDE</span></button>'
+            : '<button id="btn-newcontract" type="button">NEW CONTRACT<span class="sub">FRESH SERIES</span></button>') +
         '</div>' +
+        '<div class="score-best">BEST ON ' + R.id + ' — <b>' + b.stars + '★</b>' +
+          (b.net > -Infinity ? ' · NET ' + (b.net < 0 ? '−' : '') + fmt$(Math.abs(b.net)) : '') +
+          (b.wonOn ? ' · FIRST WIN ON TEST #' + b.wonOn : '') + '</div>' +
         '<div class="score-seed">SERIES ' + S.seed + ' · SAME BUILD + SAME SERIES = SAME RESULT · ALL SCIENCE INVENTED</div>' +
       '</div>';
     showScreen('scr-score');
     if (r.incident) $('btn-incident').addEventListener('click', showIncident);
     $('btn-retry').addEventListener('click', function () {
       PGAudio.tap();
-      enterBuild(true);
+      enterBuild(true);       // the whole build, untouched — tweak one thing
     });
     $('btn-newcontract').addEventListener('click', function () {
       PGAudio.tap();
+      if (nextIsC2) S.contract = 1;
       S.seed = PG2.makeSeed();
+      S.attempt = 0;
+      S.assembly = PG2.makeAssembly();
       startContract();
     });
   }
@@ -2135,6 +2331,7 @@
     if (S.phase === 'title' || S.phase === 'rfp' || S.phase === 'score') return;
 
     if (S.phase === 'build' || S.phase === 'wiring' || S.phase === 'det' || S.phase === 'arm') {
+      stepRefinery(dt, now);
       // idle spin on the work stand (build only)
       if (S.phase === 'build') {
         if (!dragPart && bay.spinEnabled !== false && now - bay.lastTouch > 3500 && Object.keys(pointers).length === 0) {
@@ -2174,7 +2371,7 @@
         range.camera.lookAt(tx2, 2.5, 34);
       }
       if (S.phase === 'counting') {
-        rangeT.camT += dt;
+        rangeT.camT = (now - rangeT.t0) / 1000;   // wall clock — never drifts on slow frames
         updateCamClock();
         var tMinus = 5 - rangeT.camT;
         var whole = Math.ceil(tMinus);
@@ -2210,7 +2407,7 @@
             dw.style.transition = 'opacity 2.4s ease';
             dw.style.opacity = 0;
           });
-          $('cam-tick').textContent = 'WAVEFRONT — T+' + S.result.visual.soundDelay.toFixed(1) + ' s · ' + PG2.RFP.camera.km.toFixed(1) + ' KM';
+          $('cam-tick').textContent = 'WAVEFRONT — T+' + S.result.visual.soundDelay.toFixed(1) + ' s · ' + PG2.CAMERA.km.toFixed(1) + ' KM';
           $('cam-tick').classList.remove('hidden');
           later(2600, craterRevealOrScore);
         }
@@ -2276,10 +2473,152 @@
     stationSeven();
   });
 
+  /* ================= THE STILL (REFINERY) ================= */
+  var REF_BAND = { lo: 0.58, hi: 0.78 };    // needle band (matches gauge CSS)
+  var ref = {
+    open: false, running: false, heating: false, scorched: false,
+    T: 0, prog: 0, scorch: 0, batchNum: 0, wobbleT: 0, walk: 0, walkTarget: 0, rng: null
+  };
+  function refStatus(html) { $('ref-status').innerHTML = html; }
+  function refStockLine() {
+    var st = S.assembly.refine.stock;
+    $('ref-stock').innerHTML = 'STOCK — EMBER-X <b>×' + st.emberx + '</b> · SCORCHED <b>×' + st.emberxs + '</b> · SPENT <b>' + fmt$(S.assembly.refine.spend) + '</b>';
+  }
+  function updateRefStart() {
+    var d = PG2.derive(S.assembly, rfp());
+    var over = d.cost + PG2.REFINERY.batchCost > rfp().budget;
+    var btn = $('ref-start');
+    btn.disabled = ref.running || over;
+    btn.textContent = over ? 'BUDGET WON’T COVER ANOTHER BATCH'
+      : 'START BATCH — $' + PG2.REFINERY.batchCost + ' · ' + PG2.REFINERY.batchYield + ' CANISTERS';
+  }
+  function openRefinery() {
+    ref.open = true;
+    ref.running = false; ref.heating = false;
+    ref.T = 0; ref.prog = 0; ref.scorch = 0; ref.scorched = false;
+    $('ref-needle').style.top = '96%';
+    $('ref-prog-fill').style.width = '0%';
+    refStatus('The kettle is cold. EMBER goes in ordinary; it comes out with ambitions.');
+    refStockLine();
+    updateRefStart();
+    $('refinery-overlay').classList.remove('hidden');
+  }
+  function startBatch() {
+    ref.running = true; ref.scorched = false;
+    ref.T = 0; ref.prog = 0; ref.scorch = 0;
+    ref.batchNum++;
+    ref.rng = PG2.stream(S.seed, 'refine:' + ref.batchNum);
+    ref.walk = 0; ref.walkTarget = 0; ref.wobbleT = 0;
+    ref.lastNow = 0;
+    refStatus('Batch ' + ref.batchNum + ' on the burner. Hold <b>HEAT</b> — amber band — steady hands.');
+    updateRefStart();
+  }
+  function finishBatch() {
+    ref.running = false;
+    ref.heating = false;
+    $('ref-heat').classList.remove('held');
+    document.querySelector('.ref-card').classList.remove('boiling');
+    PGAudio.boilStop();
+    var a = S.assembly;
+    a.refine.spend += PG2.REFINERY.batchCost;
+    var kind = ref.scorched ? 'emberxs' : 'emberx';
+    a.refine.stock[kind] += PG2.REFINERY.batchYield;
+    PGAudio.batchDone(!ref.scorched);
+    refStatus(ref.scorched
+      ? '<b class="scorch">SCORCHED.</b> Two canisters of weaker, angrier X. They still count. Barely.'
+      : 'Beautiful. Two canisters of <b>EMBER-X</b>, glowing politely.');
+    refStockLine();
+    refreshHUD();
+    updateRefStart();
+  }
+  function stepRefinery(dt, now) {
+    if (!ref.open || !ref.running) return;
+    // the kettle runs on wall time — slow frames must not slow the burner
+    dt = Math.min((now - (ref.lastNow || now)) / 1000, 0.25);
+    ref.lastNow = now;
+    ref.wobbleT += dt;
+    if (ref.wobbleT > 0.5) { ref.wobbleT = 0; ref.walkTarget = (ref.rng() - 0.5) * 0.18; }
+    ref.walk += (ref.walkTarget - ref.walk) * Math.min(dt * 2.2, 1);
+    var rate = ref.heating ? 0.34 : -0.30;
+    ref.T = clamp(ref.T + (rate + ref.walk * 0.55) * dt, 0, 1);
+    var inBand = ref.T >= REF_BAND.lo && ref.T <= REF_BAND.hi;
+    if (inBand) ref.prog += dt;
+    if (ref.T > 0.88) {
+      ref.scorch += dt;
+      if (!ref.scorched && ref.scorch > PG2.REFINERY.scorchLimit) {
+        ref.scorched = true;
+        PGAudio.buzz();
+        refStatus('<b class="scorch">Too hot for too long.</b> The batch has opinions now. Finish it anyway.');
+      }
+    }
+    $('ref-needle').style.top = ((1 - ref.T) * 100) + '%';
+    $('ref-prog-fill').style.width = clamp(ref.prog / PG2.REFINERY.holdSeconds, 0, 1) * 100 + '%';
+    if (ref.prog >= PG2.REFINERY.holdSeconds) finishBatch();
+  }
+  (function () {
+    var hb = $('ref-heat');
+    function down(e) {
+      e.preventDefault();
+      PGAudio.init();
+      if (!ref.running) return;
+      ref.heating = true;
+      hb.classList.add('held');
+      document.querySelector('.ref-card').classList.add('boiling');
+      PGAudio.boilStart();
+    }
+    function up() {
+      ref.heating = false;
+      hb.classList.remove('held');
+      document.querySelector('.ref-card').classList.remove('boiling');
+      PGAudio.boilStop();
+    }
+    hb.addEventListener('pointerdown', down);
+    hb.addEventListener('pointerup', up);
+    hb.addEventListener('pointercancel', up);
+    hb.addEventListener('pointerleave', up);
+  })();
+  $('ref-start').addEventListener('click', function () { PGAudio.tap(); startBatch(); });
+  $('ref-close').addEventListener('click', function () {
+    PGAudio.tap();
+    PGAudio.boilStop();
+    ref.open = false; ref.running = false; ref.heating = false;
+    document.querySelector('.ref-card').classList.remove('boiling');
+    $('refinery-overlay').classList.add('hidden');
+    refreshHUD();
+  });
+  $('btn-refinery').addEventListener('click', function () { PGAudio.tap(); openRefinery(); });
+  $('btn-refire').addEventListener('click', function () { PGAudio.tap(); enterRange(); });
+  $('btn-det-pull').addEventListener('click', function () {
+    PGAudio.unsnap();
+    $('btn-det-pull').classList.add('hidden');
+    $('btn-det-done').classList.add('hidden');
+    S.assembly.det = { seated: false, slam: 0 };
+    if (bay.detStage) {
+      if (bay.detStage.det) bay.scene.remove(bay.detStage.det);
+      if (bay.detStage.caseG) bay.scene.remove(bay.detStage.caseG);
+    }
+    var d = casingDims(S.assembly.shell);
+    var wellW = bay.device.localToWorld(V3(wellX(S.assembly.shell), d.r + 0.05, 0));
+    if (bay.capPivot) tween(500, function (t) { bay.capPivot.rotation.z = 1.9 * t; bay.capPivot.position.y = (d.r + 0.055) + 0.10 * t; });
+    toast('Detonator pulled. Gently, this time.');
+    stageDetCase(wellW);
+  });
+
   /* ================= DEBUG / TEST API ================= */
   window.__pg = {
     state: function () {
-      return { phase: S.phase, seed: S.seed, assembly: JSON.parse(JSON.stringify(S.assembly)) };
+      return {
+        phase: S.phase, seed: S.seed, contract: S.contract, attempt: S.attempt,
+        assembly: JSON.parse(JSON.stringify(S.assembly))
+      };
+    },
+    refineState: function () {
+      return {
+        open: ref.open, running: ref.running, T: ref.T, prog: ref.prog,
+        scorch: ref.scorch, scorched: ref.scorched,
+        stock: JSON.parse(JSON.stringify(S.assembly.refine.stock)),
+        spend: S.assembly.refine.spend
+      };
     },
     result: function () { return S.result; },
     setSpin: function (on) { bay.spinEnabled = !!on; },
@@ -2310,10 +2649,10 @@
       if (!bay.detStage) return null;
       var ds = bay.detStage;
       return {
-        det: worldToScreen(ds.det.position, bay.camera),
-        above: worldToScreen(ds.path[1], bay.camera),
-        mid: worldToScreen(ds.path[2], bay.camera),
-        seat: worldToScreen(ds.path[3], bay.camera),
+        det: ds.det ? worldToScreen(ds.det.position, bay.camera) : null,
+        above: ds.path ? worldToScreen(ds.path[1], bay.camera) : null,
+        mid: ds.path ? worldToScreen(ds.path[2], bay.camera) : null,
+        seat: ds.path ? worldToScreen(ds.path[3], bay.camera) : null,
         p: ds.p, seated: ds.seated, slam: ds.slam
       };
     },
