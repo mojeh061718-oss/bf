@@ -30,6 +30,7 @@ Concepts 01–04 have full design treatments — mechanics specs, example play s
 | [08](08-hexen-draft.md) | **Hexen Draft** | Roguelite hex-board engine-builder; your health is your machine | original |
 | [09](09-southpaw.md) | **Southpaw** | Boxing manager: club fighter to champion, career after career | original (spirit of #2) |
 | [10](10-lockbox.md) | **Lockbox** | Storage-auction appraisal & flipping; knowledge is the skill | original |
+| [11](11-wildcat.md) | **Wildcat** *(wild card)* | Oil-boom tycoon: survey, steer the drill, play the market, upgrade everything | founder wildcard |
 
 ## Comparison Matrix
 
