@@ -41,7 +41,11 @@
         <li><b>Tweak ONE thing and refire</b> — the bay keeps your build. Converge on the contract.</li>
       </ol>
       <button id="btn-start" type="button">TAP TO START</button>
-      <div id="title-contracts" class="hidden"></div>
+      <div id="title-progress" class="hidden"></div>
+      <div class="title-nav">
+        <button id="btn-title-board" type="button">📋 CONTRACT BOARD</button>
+        <button id="btn-title-museum" type="button">🏛 THE MUSEUM</button>
+      </div>
       <p class="title-foot">REDLINE ORDNANCE WORKS · ALL SCIENCE WITHIN IS INVENTED</p>
     </div>
     <button id="btn-settings" type="button" aria-label="Settings">
@@ -70,6 +74,27 @@
     </div>
   </div>
 
+  <!-- ================= CONTRACT BOARD (corkboard of folders) ================= -->
+  <section id="scr-board" class="screen">
+    <div class="board-frame">
+      <div class="board-head">REPUBLIC PROVING AUTHORITY · OPEN SOLICITATIONS</div>
+      <div class="board-sub" id="board-sub"></div>
+      <div class="board-wall" id="board-wall"></div>
+      <div class="board-btns">
+        <button id="btn-board-back" type="button">BACK</button>
+        <button id="btn-board-museum" type="button">THE MUSEUM</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= THE INCIDENT REPORT MUSEUM ================= -->
+  <section id="scr-museum" class="screen">
+    <div class="museum-scroll" id="museum-scroll"></div>
+    <div class="museum-btns">
+      <button id="btn-museum-back" type="button">LEAVE THE MUSEUM</button>
+    </div>
+  </section>
+
   <!-- ================= RFP ================= -->
   <section id="scr-rfp" class="screen">
     <div class="rfp-scroll">
@@ -95,7 +120,7 @@
         </div>
         <div class="meter half">
           <div class="m-lbl">WEIGHT <b id="m-weight-val">0 kg</b></div>
-          <div class="m-track"><div class="m-fill" id="m-weight-fill"></div></div>
+          <div class="m-track"><div class="m-fill" id="m-weight-fill"></div><div class="m-capline hidden" id="m-weight-cap"></div></div>
         </div>
         <div class="meter half">
           <div class="m-lbl">COST <b id="m-cost-val">$0</b></div>
@@ -125,17 +150,21 @@
       <div class="pc-flavor" id="pc-flavor"></div>
     </div>
 
-    <!-- close-out stage chrome -->
-    <div id="stage-bar" class="hidden">
-      <div class="sb-step" data-step="0">1 · WIRING</div>
-      <div class="sb-step" data-step="1">2 · DETONATOR</div>
-      <div class="sb-step" data-step="2">3 · ARM</div>
-    </div>
+    <!-- close-out stage chrome (steps built per contract) -->
+    <div id="stage-bar" class="hidden"></div>
 
     <div id="wiring-ui" class="stage-ui hidden">
       <div class="stage-note" id="wiring-note">Drag each wire from its post to a terminal. Read the labels.</div>
       <div id="torque-ring" class="hidden"><div id="torque-ring-fill"></div></div>
       <button id="btn-panel-done" type="button" class="bay-cta hidden">PANEL CLOSED →</button>
+    </div>
+
+    <div id="dial-ui" class="stage-ui hidden">
+      <div class="stage-note" id="dial-note">Set the timer by hand.</div>
+      <div class="dial-wrap">
+        <svg id="dial-svg" viewBox="0 0 260 260" aria-label="Timer dial"></svg>
+      </div>
+      <button id="btn-dial-done" type="button" class="bay-cta">SET &amp; CLOSE →</button>
     </div>
 
     <div id="det-ui" class="stage-ui hidden">
@@ -155,6 +184,7 @@
       <div class="checklist paper" id="checklist">
         <div class="ck-head">PRE-FLIGHT CLOSE-OUT</div>
         <div class="ck-line" id="ck-wiring"><span class="ck-name">WIRING ROUTED</span><span class="ck-stamp"></span></div>
+        <div class="ck-line" id="ck-dial"><span class="ck-name">TIMER DIAL</span><span class="ck-stamp"></span></div>
         <div class="ck-line" id="ck-torque"><span class="ck-name">TERMINALS TORQUED</span><span class="ck-stamp"></span></div>
         <div class="ck-line" id="ck-det"><span class="ck-name">DETONATOR SEATED</span><span class="ck-stamp"></span></div>
         <div class="ck-foot" id="ck-foot">Flip the guard. Throw the switch.</div>
@@ -192,13 +222,17 @@
     <div class="score-scroll" id="score-scroll"></div>
   </section>
 
-  <!-- ================= THE STILL (REFINERY) ================= -->
+  <!-- ================= THE STILL (REFINERY — now a room with two stations) ================= -->
   <div id="refinery-overlay" class="overlay hidden">
     <div class="ref-card">
-      <div class="ref-head">THE STILL · EMBER → EMBER-X</div>
-      <div class="ref-sub">Hold <b>HEAT</b> to warm the kettle. Keep the needle in the amber band until the batch is done.
+      <div class="ref-tabs">
+        <button id="ref-tab-distil" type="button" class="ref-tab on">⚗ DISTIL · EMBER-X</button>
+        <button id="ref-tab-blend" type="button" class="ref-tab">🫙 BLEND · GLAZE</button>
+      </div>
+      <div class="ref-head" id="ref-head">THE STILL · EMBER → EMBER-X</div>
+      <div class="ref-sub" id="ref-sub">Hold <b>HEAT</b> to warm the kettle. Keep the needle in the amber band until the batch is done.
         Ride it too hot for too long and the batch scorches.</div>
-      <div class="ref-body">
+      <div class="ref-body" id="ref-distil-body">
         <svg class="ref-kettle" viewBox="0 0 90 120" aria-hidden="true">
           <path d="M20 46 h50 v46 a12 12 0 0 1 -12 12 h-26 a12 12 0 0 1 -12 -12 z" fill="#3a4c5d" stroke="#7ba3c4" stroke-width="1.5"/>
           <rect x="38" y="30" width="14" height="18" fill="#2c3b49" stroke="#7ba3c4" stroke-width="1.5"/>
@@ -216,15 +250,40 @@
           <div class="ref-lbl">BATCH</div>
           <div class="ref-progress"><div id="ref-prog-fill"></div></div>
           <div class="ref-status" id="ref-status">The kettle is cold.</div>
-          <div class="ref-stock" id="ref-stock"></div>
         </div>
       </div>
+      <div class="ref-body hidden" id="ref-blend-body">
+        <div class="blend-carboy" id="blend-carboy">
+          <div class="bc-body">FROST</div>
+          <div class="bc-neck"></div>
+        </div>
+        <div class="blend-beaker">
+          <div class="bb-band"></div>
+          <div class="bb-line hi"></div>
+          <div class="bb-line lo"></div>
+          <div class="bb-fill" id="blend-fill"></div>
+        </div>
+        <div class="ref-col">
+          <div class="ref-lbl">POUR TO THE LINE</div>
+          <div class="ref-status" id="blend-status">The carboy waits.</div>
+        </div>
+      </div>
+      <div class="ref-stock" id="ref-stock"></div>
       <button id="ref-heat" type="button">HOLD TO HEAT</button>
+      <button id="blend-pour" type="button" class="hidden">HOLD TO POUR</button>
       <div class="ref-btns">
         <button id="ref-start" type="button">START BATCH — $300 · 2 CANISTERS</button>
+        <button id="blend-start" type="button" class="hidden">START POUR — $220</button>
+        <button id="blend-bottle" type="button" class="hidden" disabled>BOTTLE IT</button>
         <button id="ref-close" type="button">BACK TO THE BAY</button>
       </div>
     </div>
+  </div>
+
+  <!-- ================= ORDNANCE WEEKLY FRONT PAGE (Act I trophy) ================= -->
+  <div id="frontpage-overlay" class="overlay hidden">
+    <div class="paper frontpage-doc" id="frontpage-doc"></div>
+    <button id="btn-frontpage-close" type="button">FRAME IT · BACK TO THE ADJUDICATION</button>
   </div>
 
   <!-- ================= INCIDENT REPORT ================= -->

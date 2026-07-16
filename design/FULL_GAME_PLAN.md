@@ -125,4 +125,4 @@ All of it is squarely buildable in the existing stack: the wall map and ocean pl
 3. **A second interactive biome** (coastal barge tests? arctic range?) — M4 stretch or 1.1?
 
 ---
-*Next action: M1 is underway — assembly-feel refinements and the convoy/desert presentation pass.*
+*Next action: M1 and M2 have shipped — Act I is complete (eight contracts, refinery v1 with GLAZE blending, timer dial, payload arrangement, the fly-off, Incident Museum, contract board, dusk palette, detonation/weather/scarring pass). M3 — The Living Game — is next.*
