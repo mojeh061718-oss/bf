@@ -1,5 +1,5 @@
 /* ============================================================
-   PROVING GROUNDS v2 — sim.js
+   REDSKY INC — sim.js
    Headless, deterministic assembly-state → outcome resolver.
    ALL SCIENCE HEREIN IS INVENTED. Compounds, shells, constants
    and scaling laws are fictional (Halloran crater scaling,
@@ -211,10 +211,110 @@ var PG2 = (function () {
   var OFFSET_GAIN = 0.55;           // CoM lean → crater centre displacement
   var ELLIPSE_GAIN = 0.85;          // CoM lean → long-axis stretch
   var SLAM_THRESHOLD = 0.55;        // detonator handling shock, normalized
-  var WIRES = ['red', 'yellow', 'green'];
-  var WIRE_ROLE = { red: 'bat', yellow: 'tmr', green: 'gnd' };
-  var ROLE_LABEL = { bat: 'BATTERY', tmr: 'TIMER', gnd: 'GROUND' };
-  var WIRE_NAME = { red: 'red battery wire', yellow: 'yellow timer wire', green: 'green ground wire' };
+
+  /* ---------- THE WIRING STATION (M3) ----------
+     Every device ships with a printed WIRING SCHEMATIC. The schematic is the
+     puzzle: the drawing is tidy, the panel is not. Terminal numbers shuffle
+     per series; component positions on the panel shuffle independently.
+     Correctness is graded per RUN — each run wired right / wrong / missing
+     feeds the failure machinery with a named root cause. */
+  var SPOOLS = {
+    red:    { id: 'red',    name: 'RED',    gauge: '12 AWG', duty: 'POWER'  },
+    yellow: { id: 'yellow', name: 'YELLOW', gauge: '16 AWG', duty: 'SIGNAL' },
+    green:  { id: 'green',  name: 'GREEN',  gauge: '14 AWG', duty: 'RETURN' }
+  };
+  var SPOOL_ORDER = ['red', 'yellow', 'green'];
+
+  /* circuit tiers — the schematic complexity ladder (difficulty lives HERE) */
+  var CIRCUITS = {
+    t1: {  // RFP-041/044 — three components, three runs. A first-timer's circuit.
+      key: 't1',
+      comps: [
+        { id: 'bat', name: 'BATTERY PACK',    stamp: 'DC-9',  pins: ['+', '−'] },
+        { id: 'tmr', name: 'TIMER UNIT',      stamp: 'MK.4',  pins: ['IN', 'OUT'] },
+        { id: 'det', name: 'DETONATOR BLOCK', stamp: 'DET-2', pins: ['A', 'B'] }
+      ],
+      runs: [
+        { a: 'bat.0', b: 'tmr.0', color: 'red',    role: 'power',   label: 'BATTERY + → TIMER IN' },
+        { a: 'tmr.1', b: 'det.0', color: 'yellow', role: 'command', label: 'TIMER OUT → DET LEAD A' },
+        { a: 'det.1', b: 'bat.1', color: 'green',  role: 'return',  label: 'DET LEAD B → BATTERY −' }
+      ],
+      decoys: []
+    },
+    t2: {  // RFP-048/052 — a safety switch joins; the timer wants its own ground. 5 runs.
+      key: 't2',
+      comps: [
+        { id: 'bat', name: 'BATTERY PACK',    stamp: 'DC-9',  pins: ['+', '−'] },
+        { id: 'sw',  name: 'SAFETY SWITCH',   stamp: 'S-1',   pins: ['1', '2'] },
+        { id: 'tmr', name: 'TIMER UNIT',      stamp: 'MK.4',  pins: ['IN', 'OUT', 'GND'] },
+        { id: 'det', name: 'DETONATOR BLOCK', stamp: 'DET-2', pins: ['A', 'B'] }
+      ],
+      runs: [
+        { a: 'bat.0', b: 'sw.0',  color: 'red',    role: 'power',   label: 'BATTERY + → SAFETY SW 1' },
+        { a: 'sw.1',  b: 'tmr.0', color: 'red',    role: 'safety',  label: 'SAFETY SW 2 → TIMER IN' },
+        { a: 'tmr.2', b: 'bat.1', color: 'green',  role: 'clock',   label: 'TIMER GND → BATTERY −' },
+        { a: 'tmr.1', b: 'det.0', color: 'yellow', role: 'command', label: 'TIMER OUT → DET LEAD A' },
+        { a: 'det.1', b: 'bat.1', color: 'green',  role: 'return',  label: 'DET LEAD B → BATTERY −' }
+      ],
+      decoys: []
+    },
+    t3: {  // RFP-055/057/060 — a relay carries the fire line. 6 runs.
+      key: 't3',
+      comps: [
+        { id: 'bat', name: 'BATTERY PACK',    stamp: 'DC-9',  pins: ['+', '−'] },
+        { id: 'sw',  name: 'SAFETY SWITCH',   stamp: 'S-1',   pins: ['1', '2'] },
+        { id: 'tmr', name: 'TIMER UNIT',      stamp: 'MK.5',  pins: ['IN', 'OUT'] },
+        { id: 'rly', name: 'RELAY',           stamp: 'K-9',   pins: ['COIL A', 'COIL B', 'SW'] },
+        { id: 'det', name: 'DETONATOR BLOCK', stamp: 'DET-2', pins: ['A', 'B'] }
+      ],
+      runs: [
+        { a: 'bat.0', b: 'sw.0',  color: 'red',    role: 'power',     label: 'BATTERY + → SAFETY SW 1' },
+        { a: 'sw.1',  b: 'tmr.0', color: 'red',    role: 'safety',    label: 'SAFETY SW 2 → TIMER IN' },
+        { a: 'tmr.1', b: 'rly.0', color: 'yellow', role: 'coil',      label: 'TIMER OUT → RELAY COIL A' },
+        { a: 'rly.1', b: 'bat.1', color: 'green',  role: 'coilret',   label: 'RELAY COIL B → BATTERY −' },
+        { a: 'rly.2', b: 'det.0', color: 'yellow', role: 'relaypath', label: 'RELAY SW → DET LEAD A' },
+        { a: 'det.1', b: 'bat.1', color: 'green',  role: 'return',    label: 'DET LEAD B → BATTERY −' }
+      ],
+      decoys: []
+    },
+    t4: {  // RFP-063 — capacitor bank + junction block; one N.C. red-herring pair. 7 runs.
+      key: 't4',
+      comps: [
+        { id: 'bat', name: 'BATTERY PACK',    stamp: 'DC-9',  pins: ['+', '−'] },
+        { id: 'tmr', name: 'TIMER UNIT',      stamp: 'MK.5',  pins: ['IN', 'OUT'] },
+        { id: 'rly', name: 'RELAY',           stamp: 'K-9',   pins: ['COIL A', 'COIL B', 'SW IN', 'SW OUT'] },
+        { id: 'cap', name: 'CAPACITOR BANK',  stamp: 'CB-3',  pins: ['CHG', 'OUT'] },
+        { id: 'jct', name: 'JUNCTION BLOCK',  stamp: 'J-4',   pins: ['1', '2', '3', '4'] },
+        { id: 'det', name: 'DETONATOR BLOCK', stamp: 'DET-2', pins: ['A'] }
+      ],
+      runs: [
+        { a: 'bat.0', b: 'tmr.0', color: 'red',    role: 'power',     label: 'BATTERY + → TIMER IN' },
+        { a: 'tmr.1', b: 'rly.0', color: 'yellow', role: 'coil',      label: 'TIMER OUT → RELAY COIL A' },
+        { a: 'rly.1', b: 'jct.0', color: 'green',  role: 'coilret',   label: 'RELAY COIL B → JUNCTION 1' },
+        { a: 'jct.1', b: 'bat.1', color: 'green',  role: 'return',    label: 'JUNCTION 2 → BATTERY −' },
+        { a: 'bat.0', b: 'cap.0', color: 'red',    role: 'charge',    label: 'BATTERY + → CAP BANK CHG' },
+        { a: 'cap.1', b: 'rly.2', color: 'yellow', role: 'bank',      label: 'CAP BANK OUT → RELAY SW IN' },
+        { a: 'rly.3', b: 'det.0', color: 'yellow', role: 'relaypath', label: 'RELAY SW OUT → DET LEAD A' }
+      ],
+      decoys: ['jct.2', 'jct.3']   // N.C. — printed on the schematic, tempting on the panel
+    }
+  };
+  var CIRCUIT_FOR_CONTRACT = ['t1', 't1', 't2', 't2', 't3', 't3', 't3', 't4'];
+
+  /* run role → failure class + plain narration */
+  var RUN_FAIL = {
+    power:     { type: 'nofire',   what: 'Battery power never left the pack.' },
+    safety:    { type: 'nofire',   what: 'The safety interlock never joined the circuit — the device held itself politely at SAFE.' },
+    clock:     { type: 'nofire',   what: 'The timer never found its return path. It counted, privately, to nothing.' },
+    command:   { type: 'nofire',   what: 'The fire command left the timer and arrived nowhere in particular.' },
+    coil:      { type: 'nofire',   what: 'The relay coil never saw the fire command. The contacts stayed open all the way down the count.' },
+    coilret:   { type: 'misfire',  what: 'With its coil return adrift the relay chattered, and the circuit found its own way home' },
+    'return':  { type: 'misfire',  what: 'With no ground return, the firing circuit found its own way home' },
+    charge:    { type: 'weakfire', what: 'The capacitor bank never took its charge — the detonator fired on leftovers.' },
+    bank:      { type: 'weakfire', what: 'The bank’s charge went to the relay by the scenic route and mostly stayed there.' },
+    relaypath: { type: 'weakfire', what: 'The fire command crossed the wrong relay path — an arc where a contact should be.' }
+  };
+  var FAULT_PRIORITY = ['power', 'safety', 'clock', 'command', 'coil', 'coilret', 'charge', 'bank', 'relaypath', 'return'];
 
   /* ---------- SEEDED RNG (kept from v1) ---------- */
   function xmur3(str) {
@@ -254,17 +354,63 @@ var PG2 = (function () {
     return s;
   }
 
-  /* ---------- PANEL LAYOUT (terminal roles shuffled per seed) ---------- */
-  function panelLayout(seed) {
-    var roles = ['bat', 'tmr', 'gnd'];
-    var r = stream(seed, 'panel');
-    for (var i = roles.length - 1; i > 0; i--) {
-      var j = Math.floor(r() * (i + 1));
-      var t = roles[i]; roles[i] = roles[j]; roles[j] = t;
-    }
-    return { T1: roles[0], T2: roles[1], T3: roles[2] };
+  /* ---------- WIRING SPEC + SEEDED PANEL PLAN ---------- */
+  function wiringSpec(rfp) {
+    rfp = rfp || CONTRACTS[0];
+    var idx = typeof rfp.idx === 'number' ? rfp.idx : 0;
+    return CIRCUITS[CIRCUIT_FOR_CONTRACT[idx] || 't1'];
   }
-  function roleOf(seed, term) { return term ? panelLayout(seed)[term] : null; }
+  function pinIds(rfp) {
+    var spec = wiringSpec(rfp), out = [];
+    spec.comps.forEach(function (c) {
+      c.pins.forEach(function (p, i) { out.push(c.id + '.' + i); });
+    });
+    return out;
+  }
+  function pinLabel(rfp, pin) {
+    var spec = wiringSpec(rfp);
+    var parts = String(pin).split('.');
+    for (var i = 0; i < spec.comps.length; i++) {
+      var c = spec.comps[i];
+      if (c.id === parts[0]) return c.name + ' · ' + (c.pins[+parts[1]] != null ? c.pins[+parts[1]] : '?');
+    }
+    return String(pin);
+  }
+  function shuffled(arr, rng) {
+    var a = arr.slice();
+    for (var i = a.length - 1; i > 0; i--) {
+      var j = Math.floor(rng() * (i + 1));
+      var t = a[i]; a[i] = a[j]; a[j] = t;
+    }
+    return a;
+  }
+  /* stamped screw-terminal numbers — shuffled per series so the schematic must be READ */
+  function termNumbers(seed, rfp) {
+    var ids = pinIds(rfp);
+    var nums = shuffled(ids.map(function (_, i) { return i + 1; }), stream(seed, 'terms:' + wiringSpec(rfp).key));
+    var map = {};
+    ids.forEach(function (id, i) { map[id] = nums[i]; });
+    return map;
+  }
+  /* physical placement of components on the panel — shuffled per series,
+     guaranteed to disagree with the schematic's tidy drawing order */
+  function panelPlan(seed, rfp) {
+    var spec = wiringSpec(rfp);
+    var ids = spec.comps.map(function (c) { return c.id; });
+    var cells = ids.slice();
+    while (cells.length % 2) cells.push(null);        // 2-column board; blanks stay bare metal
+    var plan = shuffled(cells, stream(seed, 'panel:' + spec.key));
+    if (plan.filter(function (x) { return x; }).join(',') === ids.join(',')) {
+      // never hand the drawing order back: swap the first two placed components
+      var fi = -1, si = -1;
+      for (var k = 0; k < plan.length; k++) {
+        if (!plan[k]) continue;
+        if (fi < 0) fi = k; else if (si < 0) { si = k; break; }
+      }
+      var tmp = plan[fi]; plan[fi] = plan[si]; plan[si] = tmp;
+    }
+    return { cols: 2, rows: plan.length / 2, cells: plan };
+  }
 
   /* ---------- ASSEMBLY STATE (what the player physically did) ---------- */
   function makeAssembly() {
@@ -274,8 +420,8 @@ var PG2 = (function () {
       timer: false, battery: false, cap: false, fins: false, panel: false,
       timerSet: null,                    // seconds set on the dial; null = factory 5.0
       refine: { spend: 0, stock: { emberx: 0, emberxs: 0, glaze: 0 } },
-      wires: { red: null, yellow: null, green: null },   // → 'T1'|'T2'|'T3'|null
-      torques: { red: false, yellow: false, green: false },
+      conns: [],                         // installed wires: {a, b, color, torqued} (b null while dangling)
+      verified: {},                      // runIdx → true once the continuity tester confirmed it
       det: { seated: false, slam: 0 },   // slam: normalized worst handling jolt 0..1
       armed: false
     };
@@ -362,18 +508,104 @@ var PG2 = (function () {
     };
   }
 
-  /* ---------- WIRING ANALYSIS ---------- */
-  function wireFaults(a, seed) {
-    var faults = [];
-    WIRES.forEach(function (w) {
-      var term = a.wires[w];
-      if (!term) faults.push({ wire: w, kind: 'unattached' });
-      else if (roleOf(seed, term) !== WIRE_ROLE[w]) faults.push({ wire: w, kind: 'crossed', term: term });
-    });
-    return faults;
+  /* ---------- WIRING ANALYSIS (per-run grading) ---------- */
+  function sameEnds(c, a, b) {
+    return (c.a === a && c.b === b) || (c.a === b && c.b === a);
   }
-  function looseTerminals(a) {
-    return WIRES.filter(function (w) { return a.wires[w] && !a.torques[w]; });
+  function completeConns(a) {
+    return (a.conns || []).filter(function (c) { return c && c.a && c.b; });
+  }
+  /* per-run status: ok | wrong (a stray wire touched one end) | missing */
+  function wireRuns(a, rfp) {
+    rfp = rfp || CONTRACTS[0];
+    var spec = wiringSpec(rfp);
+    var conns = completeConns(a);
+    var used = conns.map(function () { return false; });
+    var out = spec.runs.map(function (run, i) {
+      for (var ci = 0; ci < conns.length; ci++) {
+        if (!used[ci] && sameEnds(conns[ci], run.a, run.b)) {
+          used[ci] = true;
+          return { idx: i, run: run, status: 'ok', conn: conns[ci],
+                   colorOk: conns[ci].color === run.color, torqued: !!conns[ci].torqued };
+        }
+      }
+      return { idx: i, run: run, status: 'missing', conn: null, colorOk: false, torqued: false };
+    });
+    // second pass: attribute stray wires to the run they half-landed
+    out.forEach(function (r) {
+      if (r.status !== 'missing') return;
+      for (var ci = 0; ci < conns.length; ci++) {
+        if (used[ci]) continue;
+        var c = conns[ci];
+        var touchA = (c.a === r.run.a || c.b === r.run.a);
+        var touchB = (c.a === r.run.b || c.b === r.run.b);
+        if (touchA !== touchB) {                 // exactly one end landed fair
+          used[ci] = true;
+          r.status = 'wrong';
+          r.conn = c;
+          r.sharedPin = touchA ? r.run.a : r.run.b;
+          r.intendedPin = touchA ? r.run.b : r.run.a;
+          r.landedPin = (c.a === r.sharedPin) ? c.b : c.a;
+          return;
+        }
+      }
+    });
+    return out;
+  }
+  /* faulty runs, ordered by circuit consequence — the first one names the outcome */
+  function wireFaults(a, seed, rfp) {
+    rfp = rfp || CONTRACTS[0];
+    return wireRuns(a, rfp)
+      .filter(function (r) { return r.status !== 'ok'; })
+      .sort(function (x, y) {
+        var px = FAULT_PRIORITY.indexOf(x.run.role), py = FAULT_PRIORITY.indexOf(y.run.role);
+        return px !== py ? px - py : x.idx - y.idx;
+      });
+  }
+  function looseConns(a) {
+    return completeConns(a).filter(function (c) { return !c.torqued; });
+  }
+  function wiringComplete(a, rfp) {
+    rfp = rfp || CONTRACTS[0];
+    var conns = a.conns || [];
+    return completeConns(a).length === conns.length &&
+           conns.length === wiringSpec(rfp).runs.length;
+  }
+  /* the continuity tester: clip two terminals, learn the truth about that run */
+  function probe(a, rfp, pinA, pinB) {
+    rfp = rfp || CONTRACTS[0];
+    if (!pinA || !pinB || pinA === pinB) return { verdict: 'none', runIdx: -1, colorOk: true };
+    var spec = wiringSpec(rfp);
+    var runIdx = -1;
+    spec.runs.forEach(function (r, i) {
+      if ((r.a === pinA && r.b === pinB) || (r.a === pinB && r.b === pinA)) runIdx = i;
+    });
+    var conn = null;
+    completeConns(a).forEach(function (c) { if (!conn && sameEnds(c, pinA, pinB)) conn = c; });
+    if (conn && runIdx >= 0) return { verdict: 'correct', runIdx: runIdx, colorOk: conn.color === spec.runs[runIdx].color };
+    if (conn) return { verdict: 'wrong', runIdx: -1, colorOk: true };       // wired, but no such run
+    if (runIdx >= 0) return { verdict: 'open', runIdx: runIdx, colorOk: true };  // a run belongs here, nothing landed
+    return { verdict: 'none', runIdx: -1, colorOk: true };
+  }
+  /* runs the tester has confirmed AND that are still wired that way */
+  function verifiedRuns(a, rfp) {
+    rfp = rfp || CONTRACTS[0];
+    var v = a.verified || {};
+    return wireRuns(a, rfp).filter(function (r) { return r.status === 'ok' && v[r.idx]; }).length;
+  }
+  /* electrically fine, stylistically noted: wrong-gauge runs draw an inspector aside */
+  function wireStyle(a, rfp) {
+    rfp = rfp || CONTRACTS[0];
+    return wireRuns(a, rfp).filter(function (r) { return r.status === 'ok' && !r.colorOk; });
+  }
+  /* narration helpers for root causes */
+  function runRef(spec, idx) { return 'run ' + (idx + 1) + ' (' + spec.runs[idx].label + ')'; }
+  function describeFault(f, seed, rfp) {
+    var spec = wiringSpec(rfp);
+    var nums = termNumbers(seed, rfp);
+    if (f.status === 'missing') return runRef(spec, f.idx) + ' was never landed on the panel';
+    return runRef(spec, f.idx) + ' landed on terminal ' + nums[f.landedPin] + ' (' + pinLabel(rfp, f.landedPin) +
+      '), not terminal ' + nums[f.intendedPin] + ' (' + pinLabel(rfp, f.intendedPin) + ')';
   }
 
   function describeLoad(a) {
@@ -478,52 +710,67 @@ var PG2 = (function () {
       return o;
     }
 
-    /* 3 — Wiring faults, checked in circuit order: power, then command, then return. */
-    var faults = wireFaults(a, seed);
-    var f = faults.filter(function (x) { return x.wire === 'red'; })[0] ||
-            faults.filter(function (x) { return x.wire === 'yellow'; })[0];
-    if (f) {
-      o.type = 'nofire';
-      var what = f.wire === 'red' ? 'Battery power never reached the firing circuit.'
-                                  : 'The fire command left the timer and arrived nowhere in particular.';
-      var landed = f.kind === 'unattached'
-        ? WIRE_NAME[f.wire] + ' was never landed on a terminal'
-        : WIRE_NAME[f.wire] + ' landed on Terminal ' + f.term.slice(1) + ' (' + ROLE_LABEL[roleOf(seed, f.term)] + ')';
+    /* 3 — Wiring faults, graded per RUN against the schematic. The first fault
+       (in circuit-consequence order) names the outcome — traceably. */
+    var faults = wireFaults(a, seed, rfp);
+    if (faults.length) {
+      var f = faults[0];
+      var spec = wiringSpec(rfp);
+      var fm = RUN_FAIL[f.run.role] || RUN_FAIL.power;
+      var landed = describeFault(f, seed, rfp);
+      var runN = f.idx + 1;
+      o.faultRun = f.idx;
+      if (fm.type === 'nofire') {
+        o.type = 'nofire';
+        o.rootCause = {
+          title: 'NO-FIRE AT T+' + rfp.tSpec.toFixed(1),
+          cause: fm.what + ' The device held its charge and its opinion. Post-test continuity found the break: ' + landed + '.',
+          receipt: 'Root cause: ' + landed + ' — wiring, Assembly Bay. The schematic was enclosed with the device.',
+          where: 'WIRING'
+        };
+        o.hint = 'It never went off. Read run ' + runN + ' on the schematic (' + spec.runs[f.idx].label +
+          ') and trace it on the panel — the continuity tester knows.';
+        return o;
+      }
+      if (fm.type === 'misfire') {
+        o.type = 'misfire';
+        o.fired = true;
+        var sign = stream(seed, 'misfireSign')() < 0.5 ? -1 : 1;
+        o.detT = sign * (1.2 + stream(seed, 'misfireT')() * 1.8);    // ±1.2 … ±3.0 s off cue
+        o.craterActual = d.craterMean * 0.55 * (1 + craterNoise * CRATER_NOISE);
+        o.quality = 'partial';
+        applyLean(o, seed, d, a);
+        o.rootCause = {
+          title: 'MISFIRE — DETONATION OFF-CUE',
+          cause: fm.what + ' — ' +
+            (o.detT < 0 ? Math.abs(o.detT).toFixed(1) + ' seconds early' : o.detT.toFixed(1) + ' seconds late') +
+            ' and at a fraction of its manners. ' + landed.charAt(0).toUpperCase() + landed.slice(1) + '.',
+          receipt: 'Root cause: ' + landed + ' — wiring, Assembly Bay.',
+          where: 'WIRING'
+        };
+        o.hint = 'It fired off-cue and weak. Check run ' + runN + ' (' + spec.runs[f.idx].label + ') against the schematic.';
+        return o;
+      }
+      /* weak fire: the train functioned through the wrong path, on cue, at a fraction */
+      o.type = 'weakfire';
+      o.fired = true;
+      o.detT = dialErr + timerNoise * 0.10;
+      o.craterActual = d.craterMean * 0.45 * (1 + craterNoise * CRATER_NOISE);
+      o.quality = 'partial';
+      applyLean(o, seed, d, a);
       o.rootCause = {
-        title: 'NO-FIRE AT T+' + rfp.tSpec.toFixed(1),
-        cause: what + ' The device held its charge and its opinion.',
+        title: 'WEAK FIRE — PARTIAL FUNCTION',
+        cause: fm.what + ' A fraction of the contracted energy reached the fill. ' +
+          landed.charAt(0).toUpperCase() + landed.slice(1) + '.',
         receipt: 'Root cause: ' + landed + ' — wiring, Assembly Bay.',
         where: 'WIRING'
       };
-      o.hint = 'It never went off. Check the ' + f.wire + ' wire.';
-      return o;
-    }
-    var g = faults.filter(function (x) { return x.wire === 'green'; })[0];
-    if (g) {
-      o.type = 'misfire';
-      o.fired = true;
-      var sign = stream(seed, 'misfireSign')() < 0.5 ? -1 : 1;
-      o.detT = sign * (1.2 + stream(seed, 'misfireT')() * 1.8);    // ±1.2 … ±3.0 s off cue
-      o.craterActual = d.craterMean * 0.55 * (1 + craterNoise * CRATER_NOISE);
-      o.quality = 'partial';
-      applyLean(o, seed, d, a);
-      var landedG = g.kind === 'unattached'
-        ? WIRE_NAME.green + ' was never landed on a terminal'
-        : WIRE_NAME.green + ' landed on Terminal ' + g.term.slice(1) + ' (' + ROLE_LABEL[roleOf(seed, g.term)] + ')';
-      o.rootCause = {
-        title: 'MISFIRE — DETONATION OFF-CUE',
-        cause: 'With no ground return, the firing circuit found its own way home — ' +
-          (o.detT < 0 ? Math.abs(o.detT).toFixed(1) + ' seconds early' : o.detT.toFixed(1) + ' seconds late') +
-          ' and at a fraction of its manners.',
-        receipt: 'Root cause: ' + landedG + ' — wiring, Assembly Bay.',
-        where: 'WIRING'
-      };
-      o.hint = 'It fired off-cue and weak. Check the green wire.';
+      o.hint = 'It fired on cue but weak. Check run ' + runN + ' (' + spec.runs[f.idx].label + ') — probe it before you truck out.';
       return o;
     }
 
     /* 4 — Loose terminal: intermittent contact starves the train. FIZZLE. */
-    var loose = looseTerminals(a);
+    var loose = looseConns(a);
     if (loose.length > 0) {
       o.type = 'fizzle';
       o.fired = true;
@@ -531,15 +778,16 @@ var PG2 = (function () {
       o.craterActual = d.craterMean * 0.30 * (1 + craterNoise * CRATER_NOISE);
       o.quality = 'low-order';
       applyLean(o, seed, d, a);
-      var w0 = loose[0];
+      var c0 = loose[0];
+      var nums0 = termNumbers(seed, rfp);
       o.rootCause = {
         title: 'LOW-ORDER DETONATION (FIZZLE)',
-        cause: 'Intermittent contact at Terminal ' + a.wires[w0].slice(1) + ' starved the firing train. The fill deflagrated — a long, smoky sigh where a bang was contracted.',
-        receipt: 'Root cause: ' + WIRE_NAME[w0] + ' landed on Terminal ' + a.wires[w0].slice(1) +
-          ' but never torqued — terminal close-out, Assembly Bay. The ratchet was right there.',
+        cause: 'Intermittent contact at terminal ' + nums0[c0.a] + ' starved the firing train. The fill deflagrated — a long, smoky sigh where a bang was contracted.',
+        receipt: 'Root cause: the ' + c0.color + ' wire between terminals ' + nums0[c0.a] + ' and ' + nums0[c0.b] +
+          ' landed fair but never torqued — terminal close-out, Assembly Bay. The ratchet was right there.',
         where: 'CLOSE-OUT'
       };
-      o.hint = 'A smoky fizzle — a terminal was left loose. Twist every terminal down tight.';
+      o.hint = 'A smoky fizzle — a terminal was left loose. Twist every landed terminal down tight.';
       return o;
     }
 
@@ -633,8 +881,9 @@ var PG2 = (function () {
       fired: o.fired,
       detT: o.detT,
       yield01: yield01,
-      bright: o.fired ? (o.type === 'fizzle' ? 0.3 : 0.55 + yield01 * 0.45) : 0,
-      ragged: o.quality === 'ragged' ? clamp(0.35 + d.severity * 0.65, 0, 1) : (o.type === 'misfire' ? 0.5 : 0),
+      bright: o.fired ? (o.type === 'fizzle' ? 0.3 : o.type === 'weakfire' ? 0.42 : 0.55 + yield01 * 0.45) : 0,
+      ragged: o.quality === 'ragged' ? clamp(0.35 + d.severity * 0.65, 0, 1)
+            : (o.type === 'misfire' ? 0.5 : o.type === 'weakfire' ? 0.45 : 0),
       fizzle: o.type === 'fizzle',
       dud: !o.fired,
       dust: o.fired ? clamp((o.craterActual || 8) / ((o.rfp && o.rfp.craterMax) || 24), 0.15, 1.25) : 0.05,
@@ -783,6 +1032,17 @@ var PG2 = (function () {
     var bonus = (win && cleanOk) ? rfp.bonusClean : 0;
     var net = award + bonus - d.cost;
 
+    /* wrong-gauge runs: electrically fine, stylistically immortal */
+    var styleRuns = wireStyle(a, rfp);
+    var inspectorNote = null;
+    if (styleRuns.length) {
+      var s0 = styleRuns[0];
+      inspectorNote = 'Run ' + (s0.idx + 1) + ' (' + s0.run.label + ') pulled in ' + SPOOLS[s0.conn.color].name +
+        ' where the schematic calls for ' + SPOOLS[s0.run.color].name +
+        (styleRuns.length > 1 ? ', and ' + (styleRuns.length - 1) + ' more run' + (styleRuns.length > 2 ? 's' : '') + ' besides' : '') +
+        '. Electrically sound. Noted in the margin anyway — “COLOUR CODE, GENTLEMEN.” No action taken.';
+    }
+
     var hint = o.hint;
     if (win && !cleanOk) hint = 'Contract won — but it blew ugly. ' + (o.hint || '');
     if (rfp.flyoff && specMet && !win) {
@@ -827,23 +1087,25 @@ var PG2 = (function () {
     return {
       outcome: o, visual: vis, stamps: stamps, stampList: stampList,
       win: win, specMet: specMet, stars: stars, hint: hint,
+      inspectorNote: inspectorNote,
+      wiring: { verified: verifiedRuns(a, rfp), total: wiringSpec(rfp).runs.length },
       payout: { award: award, bonus: bonus, cost: d.cost, net: net },
       vantage: v, flyoff: flyoff, incident: incident, seed: seed, rfp: rfp
     };
   }
 
   /* ---------- canned assemblies (harness + tests + validation sweeps) ---------- */
-  function wireCorrect(a, seed) {
-    var lay = panelLayout(seed);
-    var byRole = {};
-    Object.keys(lay).forEach(function (t) { byRole[lay[t]] = t; });
-    a.wires = { red: byRole.bat, yellow: byRole.tmr, green: byRole.gnd };
-    a.torques = { red: true, yellow: true, green: true };
+  function wireCorrect(a, seed, rfp) {
+    rfp = rfp || CONTRACTS[0];
+    a.conns = wiringSpec(rfp).runs.map(function (r) {
+      return { a: r.a, b: r.b, color: r.color, torqued: true };
+    });
+    a.verified = {};
     return a;
   }
-  function finish(a, seed) {
+  function finish(a, seed, rfp) {
     a.timer = a.battery = a.cap = a.panel = a.fins = true;
-    wireCorrect(a, seed);
+    wireCorrect(a, seed, rfp);
     a.det = { seated: true, slam: 0.1 };
     a.armed = true;
     return a;
@@ -891,7 +1153,7 @@ var PG2 = (function () {
         a.timerSet = 6.02;
         break;
     }
-    return finish(a, seed);
+    return finish(a, seed, CONTRACTS[idx]);
   }
   function cannedClean(seed) { return cannedFor(0, seed); }
   function cannedClean2(seed) { return cannedFor(2, seed); }
@@ -900,15 +1162,17 @@ var PG2 = (function () {
     CONTRACTS: CONTRACTS, CONTRACT_BY_ID: CONTRACT_BY_ID,
     RFP: CONTRACTS[0], CAMERA: CAMERA, SOUND_DELAY: SOUND_DELAY,
     SHELLS: SHELLS, COMPOUNDS: COMPOUNDS, PARTS: PARTS, REFINERY: REFINERY,
-    WIRES: WIRES, WIRE_ROLE: WIRE_ROLE, ROLE_LABEL: ROLE_LABEL, WIRE_NAME: WIRE_NAME,
+    SPOOLS: SPOOLS, SPOOL_ORDER: SPOOL_ORDER, RUN_FAIL: RUN_FAIL,
     SLAM_THRESHOLD: SLAM_THRESHOLD,
     GLAZE_SLAM_FORGIVE: GLAZE_SLAM_FORGIVE, GLAZE_COOK_SHIELD: GLAZE_COOK_SHIELD,
     OFFSET_GAIN: OFFSET_GAIN, ELLIPSE_GAIN: ELLIPSE_GAIN,
     stream: stream, gauss: gauss, clamp: clamp, makeSeed: makeSeed,
-    panelLayout: panelLayout, roleOf: roleOf,
+    wiringSpec: wiringSpec, pinIds: pinIds, pinLabel: pinLabel,
+    termNumbers: termNumbers, panelPlan: panelPlan,
     makeAssembly: makeAssembly, derive: derive, describeLoad: describeLoad,
     comOf: comOf, glazeCount: glazeCount, timerSetOf: timerSetOf,
-    wireFaults: wireFaults, looseTerminals: looseTerminals,
+    wireRuns: wireRuns, wireFaults: wireFaults, looseConns: looseConns,
+    wiringComplete: wiringComplete, probe: probe, verifiedRuns: verifiedRuns, wireStyle: wireStyle,
     resolve: resolve, visualFor: visualFor,
     simVantage: simVantage, simVantageFlyoff: simVantageFlyoff, adjudicate: adjudicate,
     wireCorrect: wireCorrect, cannedFor: cannedFor,

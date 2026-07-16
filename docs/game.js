@@ -1,5 +1,5 @@
 /* ============================================================
-   PROVING GROUNDS v2 — game.js
+   REDSKY INC — game.js
    KSP-style 3D assembly bay + hands-on close-out + Station 7
    range day. three.js r149 (global THREE). All science invented.
    ============================================================ */
@@ -901,7 +901,7 @@
   /* ================= HUD ================= */
   function closeoutReady() {
     var a = S.assembly;
-    return a.det.seated && PG2.WIRES.every(function (c) { return a.wires[c]; });
+    return a.det.seated && PG2.wiringComplete(a, rfp());
   }
   function refreshHUD() {
     var d = PG2.derive(S.assembly, rfp());
@@ -1313,7 +1313,7 @@
     var p = canvasPos(e);
     pointers[e.pointerId] = { x: p.x, y: p.y, sx: p.x, sy: p.y, t: performance.now(), moved: false };
     bay.lastTouch = performance.now();
-    if (S.phase === 'wiring') { wiringDown(e, p); return; }
+    if (S.phase === 'wiring') return;   // the wiring station handles its own pointers
     if (S.phase === 'det') { detDown(e, p); return; }
     if (S.phase === 'arm') { armDown(e, p); return; }
     if (S.phase === 'build' && !dragPart && Object.keys(pointers).length === 1) {
@@ -1336,7 +1336,6 @@
   function onCanvasMove(e) {
     var pt = pointers[e.pointerId];
     var p = canvasPos(e);
-    if (S.phase === 'wiring') { wiringMove(e, p); }
     if (S.phase === 'det') { detMove(e, p); }
     if (S.phase === 'arm') { armMove(e, p); }
     if (!pt) return;
@@ -1371,7 +1370,6 @@
   function onCanvasUp(e) {
     var pt = pointers[e.pointerId];
     var p = canvasPos(e);
-    if (S.phase === 'wiring') wiringUp(e, p);
     if (S.phase === 'det') detUp(e, p);
     if (S.phase === 'arm') armUp(e, p);
     if (pt && S.phase === 'build' && !dragPart && Object.keys(pointers).length === 1) {
@@ -1499,7 +1497,10 @@
     S.phase = 'build';
     S.closeoutStep = -1;
     S.result = null;
-    bay.wiring = null;
+    wst = null;
+    $('wire-station').classList.add('hidden');
+    $('schem-tab').classList.add('hidden');
+    $('schem-card').classList.add('hidden');
     bay.detStage = null;
     bay.armStage = null;
     // the tinker loop: a kept build stays EXACTLY as you left it —
@@ -1513,7 +1514,7 @@
     hidePartCard();
     showScreen(null); showUI('ui-bay');
     $('ui-bay').classList.remove('closeout');
-    $('bay-brand-txt').textContent = 'REDLINE ORDNANCE WORKS · ' + rfp().id;
+    $('bay-brand-txt').textContent = 'REDSKY INC · ' + rfp().id;
     $('bay-attempt').textContent = 'TEST #' + (S.attempt + 1);
     buildShelf();
     $('stage-build').classList.remove('hidden');
@@ -1537,98 +1538,465 @@
     bay.clipboard.visible = tests >= 3;
   }
 
-  /* ================= CLOSE-OUT STAGE 1 — WIRING ================= */
-  var WIRE_COLORS = { red: COL.wireR, yellow: COL.wireY, green: COL.wireG };
-  function panelLocal(x, y, z) {
-    // wiring panel local coords → device local (panel centered at (0, .02, r))
-    var d = casingDims(S.assembly.shell);
-    return V3(x, 0.02 + y, d.r + (z || 0));
+  /* ================= CLOSE-OUT STAGE 1 — THE WIRING STATION =================
+     A component board behind the access panel; a printed schematic on paper;
+     three spools on a rack; a continuity tester on a coiled cord. The
+     SCHEMATIC is the puzzle — the panel is seeded out of drawing order, and
+     wrong terminals are accepted in silence. The tester sells certainty,
+     one clip at a time. */
+  var WIRE_HEX = { red: '#c8402e', yellow: '#d9b02e', green: '#3d9e57' };
+  var WIRE_DIM = { red: '#7c2418', yellow: '#87691c', green: '#245c34' };
+  var WIRE_W = { red: 6, yellow: 4.4, green: 5.2 };      // gauge, in pixels of swagger
+  var GAUGE_IDX = { red: 0, green: 1, yellow: 2 };       // clip pitch: heavy → deep
+  var wst = null;
+  var schemPref = 'open';   // remembered across panel visits: 'open' | 'pinned'
+
+  function stationRect() { return $('wire-station').getBoundingClientRect(); }
+  function stPos(e) {
+    var r = stationRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
   }
-  function initWiring() {
-    var w = {
-      posts: {}, terms: {}, wires: {}, drag: null,
-      twist: null, group: new THREE.Group()
-    };
-    var lay = PG2.panelLayout(S.seed);
-    var d = casingDims(S.assembly.shell);
-    // posts (left column): red top, yellow mid, green bottom
-    PG2.WIRES.forEach(function (c, i) {
-      var y = 0.10 - i * 0.10;
-      var post = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.022, 0.07, 8),
-        mat(WIRE_COLORS[c], { emissive: WIRE_COLORS[c], ei: 0.25, shin: 60 }));
-      post.rotation.x = Math.PI / 2;
-      post.position.copy(panelLocal(-0.17, y, -0.005));
-      w.group.add(post);
-      w.posts[c] = { local: panelLocal(-0.17, y, 0.03), mesh: post };
+  function endsAt(pin) {
+    return (S.assembly.conns || []).filter(function (c) { return c.a === pin || c.b === pin; });
+  }
+  function termAt(p, rad) {
+    var best = null, bestD = rad || 26;
+    Object.keys(wst.terms).forEach(function (pin) {
+      var t = wst.terms[pin];
+      var dd = Math.hypot(t.x - p.x, t.y - p.y);
+      if (dd < bestD) { bestD = dd; best = pin; }
     });
-    // terminals (right column): T1,T2,T3 top→bottom, labeled with shuffled roles
-    ['T1', 'T2', 'T3'].forEach(function (t, i) {
-      var y = 0.10 - i * 0.10;
-      var screw = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.028, 0.05, 6),
-        mat(COL.brass, { shin: 80 }));
-      screw.rotation.x = Math.PI / 2;
-      screw.position.copy(panelLocal(0.13, y, 0));
-      w.group.add(screw);
-      var lbl = textPlane(t + '·' + PG2.ROLE_LABEL[lay[t]], 0.16, 0.038, { color: '#f0e6c8', px: 46 });
-      lbl.position.copy(panelLocal(0.13, y - 0.045, 0.012));
-      w.group.add(lbl);
-      w.terms[t] = { local: panelLocal(0.13, y, 0.03), mesh: screw, wire: null };
-    });
-    // wire tube meshes
-    PG2.WIRES.forEach(function (c) {
-      var m = new THREE.Mesh(new THREE.BufferGeometry(),
-        mat(WIRE_COLORS[c], { shin: 40, flat: false }));
-      m.frustumCulled = false;
-      w.group.add(m);
-      w.wires[c] = { mesh: m, end: null };  // end = terminal id or null (dangling)
-    });
-    bay.device.add(w.group);
-    bay.wiring = w;
-    // restore wiring already done — the tinker loop keeps your work
-    PG2.WIRES.forEach(function (c) {
-      var t = S.assembly.wires[c];
-      if (t) {
-        w.wires[c].end = t;
-        w.terms[t].wire = c;
-        if (S.assembly.torques[c]) {
-          w.terms[t].mesh.material.color.setHex(0x8f7331);
-          w.terms[t].mesh.scale.set(1, 0.8, 1);
-        }
+    return best;
+  }
+  function danglePoint(pin) {
+    var t = wst.terms[pin];
+    return { x: t.x + 4, y: t.y + 46 };
+  }
+
+  /* ---------- build the board ---------- */
+  var COMP_SKIN = { bat: 'wc-painted', tmr: 'wc-metal', det: 'wc-bakelite', rly: 'wc-bakelite', sw: 'wc-metal', cap: 'wc-metal', jct: 'wc-bakelite' };
+  function buildCompDiv(comp, x, y, w, h, nums) {
+    var el = document.createElement('div');
+    el.className = 'wcomp ' + (COMP_SKIN[comp.id] || 'wc-metal');
+    el.style.left = x + 'px'; el.style.top = y + 'px';
+    el.style.width = w + 'px'; el.style.height = h + 'px';
+    var art = '';
+    if (comp.id === 'bat') art = '';
+    else if (comp.id === 'tmr') art = '<span class="wtmr-face"></span>';
+    else if (comp.id === 'det') art = '<span class="wdet-dome"></span>';
+    else if (comp.id === 'sw') art = '<span class="wsw-lever"></span>';
+    else if (comp.id === 'jct') art = '<span class="wjct-bus"></span>';
+    else if (comp.id === 'cap') art = '<span class="wcap-cyl" style="left:14%"></span><span class="wcap-cyl" style="left:41%"></span><span class="wcap-cyl" style="left:68%"></span>';
+    else if (comp.id === 'rly') art = '<span class="wrly-div"></span><span class="wrly-lbl" style="left:8%">COIL</span><span class="wrly-lbl" style="right:8%">SW</span>';
+    el.innerHTML =
+      '<div class="wc-name">' + comp.name + '</div>' +
+      '<div class="wc-stamp">' + comp.stamp + ' · LOT ' + S.seed.slice(0, 3) + '</div>' +
+      '<div class="wc-art">' + art + '</div>' +
+      '<div class="wstrip"></div>';
+    // pins along the terminal strip
+    var stripY = h - 18;
+    comp.pins.forEach(function (pname, i) {
+      var px = 12 + (i + 0.5) * (w - 24) / comp.pins.length;
+      var pin = comp.id + '.' + i;
+      var term = document.createElement('div');
+      term.className = 'wterm';
+      term.style.left = px + 'px'; term.style.top = stripY + 'px';
+      term.style.setProperty('--slot', ((PG2.termNumbers(S.seed, rfp())[pin] * 47) % 80 - 40) + 'deg');
+      term.dataset.pin = pin;
+      el.appendChild(term);
+      var num = document.createElement('div');
+      num.className = 'wnum';
+      num.style.left = px + 'px'; num.style.top = (stripY - 26) + 'px';
+      num.textContent = nums[pin];
+      el.appendChild(num);
+      if (comp.id === 'bat') {
+        var pol = document.createElement('div');
+        pol.className = 'wpol';
+        pol.style.left = (px - 4) + 'px'; pol.style.top = (stripY - 44) + 'px';
+        pol.textContent = pname;
+        el.appendChild(pol);
       }
+      wst.pinLocal[pin] = { el: term, px: px, py: stripY };
     });
-    PG2.WIRES.forEach(function (c) { updateWireCurve(c, null); });
-    updateWiringNote();
+    return el;
   }
-  function wireEndLocal(c) {
-    var w = bay.wiring;
-    var wr = w.wires[c];
-    if (w.drag && w.drag.color === c) return w.drag.point;
-    if (wr.end) return w.terms[wr.end].local;
-    var p = w.posts[c].local.clone();
-    p.y -= 0.16; p.z += 0.02;
-    return p;
+  function buildWiringStation() {
+    var R = rfp();
+    var spec = PG2.wiringSpec(R);
+    var plan = PG2.panelPlan(S.seed, R);
+    var nums = PG2.termNumbers(S.seed, R);
+    var stEl = $('wire-station');
+    var boardEl = $('wire-board');
+    Array.prototype.slice.call(boardEl.children).forEach(function (ch) {
+      if (ch.id !== 'wb-lamp') boardEl.removeChild(ch);
+    });
+    wst = {
+      spec: spec, plan: plan, nums: nums,
+      terms: {}, pinLocal: {}, spools: {}, drag: null, twist: null, testing: false,
+      probes: {
+        red: { pin: null, x: 0, y: 0, el: $('probe-red') },
+        blk: { pin: null, x: 0, y: 0, el: $('probe-blk') }
+      }
+    };
+    // geometry: 2-column board above the bench
+    var benchTop = H - 128;
+    var top = 96;
+    var bw = Math.min(W - 20, 396);
+    var rows = plan.rows;
+    // leave a lane above the bench for the PANEL CLOSED button
+    var ch = clamp(Math.floor((benchTop - top - 68) / rows), 100, 150);
+    var bh = ch * rows + 14;
+    var bx = (W - bw) / 2;
+    var by = top + Math.max(0, Math.floor((benchTop - top - 18 - bh) / 3));
+    boardEl.style.left = bx + 'px'; boardEl.style.top = by + 'px';
+    boardEl.style.width = bw + 'px'; boardEl.style.height = bh + 'px';
+    wst.board = { x: bx, y: by, w: bw, h: bh };
+    // corner screws + etched plate
+    [[7, 7], [bw - 18, 7], [7, bh - 18], [bw - 18, bh - 18]].forEach(function (sp) {
+      var sc = document.createElement('div');
+      sc.className = 'wb-screw';
+      sc.style.left = sp[0] + 'px'; sc.style.top = sp[1] + 'px';
+      boardEl.appendChild(sc);
+    });
+    var plate = document.createElement('div');
+    plate.className = 'wb-plate';
+    plate.style.right = '26px'; plate.style.top = '5px';
+    plate.textContent = 'ACCESS PANEL · SERIES ' + S.seed;
+    boardEl.appendChild(plate);
+    // components into their seeded cells
+    var cw = (bw - 3 * 10) / 2;
+    var compH = ch - 10;
+    plan.cells.forEach(function (cid, i) {
+      var col = i % 2, row = Math.floor(i / 2);
+      var cx = 10 + col * (cw + 10);
+      var cy = 10 + row * ch;
+      if (!cid) {   // a bare stretch of panel with a faded stencil
+        var bare = document.createElement('div');
+        bare.className = 'wb-plate';
+        bare.style.left = (cx + cw / 2 - 34) + 'px'; bare.style.top = (cy + compH / 2) + 'px';
+        bare.style.opacity = '.45';
+        bare.textContent = 'SPARE FITMENT';
+        boardEl.appendChild(bare);
+        return;
+      }
+      var comp = null;
+      spec.comps.forEach(function (c) { if (c.id === cid) comp = c; });
+      boardEl.appendChild(buildCompDiv(comp, cx, cy, cw, compH, nums));
+      comp.pins.forEach(function (_, pi) {
+        var pin = comp.id + '.' + pi;
+        var loc = wst.pinLocal[pin];
+        wst.terms[pin] = { x: bx + cx + loc.px, y: by + cy + loc.py, el: loc.el };
+      });
+    });
+    // spool rack
+    var rack = $('spool-rack');
+    rack.innerHTML = '';
+    PG2.SPOOL_ORDER.forEach(function (cid) {
+      var sp = PG2.SPOOLS[cid];
+      var d = document.createElement('div');
+      d.className = 'spool';
+      d.dataset.color = cid;
+      d.innerHTML = '<div class="spool-disc" style="--wire:' + WIRE_HEX[cid] + '"></div>' +
+        '<div class="spool-lbl">' + sp.name + '<br>' + sp.gauge + '</div>';
+      rack.appendChild(d);
+    });
+    // wire svg sizing
+    var svg = $('wire-svg');
+    svg.setAttribute('width', W); svg.setAttribute('height', H);
+    svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+    // meter face
+    buildMeterFace();
+    setNeedle(-58);
+    $('meter-read').textContent = 'CLIP BOTH PROBES';
+    $('meter-read').className = '';
+    // measure benches after layout
+    later(30, function () {
+      if (!wst) return;
+      var r = stationRect();
+      Array.prototype.slice.call(rack.children).forEach(function (d) {
+        var rr = d.getBoundingClientRect();
+        wst.spools[d.dataset.color] = { x: rr.left - r.left + rr.width / 2, y: rr.top - r.top + rr.height / 2 - 6 };
+      });
+      var tb = $('tester-box').getBoundingClientRect();
+      wst.dock = {
+        red: { x: tb.left - r.left + tb.width - 20, y: tb.top - r.top + 4 },
+        blk: { x: tb.left - r.left + tb.width - 42, y: tb.top - r.top + 4 }
+      };
+      dockProbe('red'); dockProbe('blk');
+      renderWires();
+    });
+    refreshTermStates();
+    renderWires();
+    buildSchematic();
   }
-  function updateWireCurve(c, dragPoint) {
-    var w = bay.wiring;
-    var a = w.posts[c].local.clone();
-    var b = dragPoint || wireEndLocal(c);
-    var pts = [];
-    var sag = w.wires[c].end ? 0.05 : 0.025;
-    for (var i = 0; i <= 10; i++) {
-      var t = i / 10;
-      var p = a.clone().lerp(b, t);
-      p.y -= sag * Math.sin(Math.PI * t);       // catenary droop
-      p.z += 0.02 * Math.sin(Math.PI * t);
-      pts.push(p);
+  function dockProbe(id) {
+    var pr = wst.probes[id];
+    pr.pin = null;
+    pr.x = wst.dock ? wst.dock[id].x : 0;
+    pr.y = wst.dock ? wst.dock[id].y : 0;
+    pr.el.classList.remove('clipped');
+    positionProbe(id);
+  }
+  function positionProbe(id) {
+    var pr = wst.probes[id];
+    pr.el.style.left = pr.x + 'px';
+    pr.el.style.top = pr.y + 'px';
+  }
+
+  /* ---------- wires (SVG catenary + shadows + probe cords) ---------- */
+  function wirePathD(p1, p2, sagMul) {
+    var dist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+    var sag = Math.min(14 + dist * 0.24, 62) * (sagMul || 1);
+    var mx = (p1.x + p2.x) / 2, my = Math.max(p1.y, p2.y) * 0.0 + (p1.y + p2.y) / 2 + sag;
+    return 'M' + p1.x.toFixed(1) + ' ' + p1.y.toFixed(1) +
+           ' Q' + mx.toFixed(1) + ' ' + my.toFixed(1) +
+           ' ' + p2.x.toFixed(1) + ' ' + p2.y.toFixed(1);
+  }
+  function connEnds(c) {
+    var p1 = wst.terms[c.a] ? { x: wst.terms[c.a].x, y: wst.terms[c.a].y } : null;
+    var p2 = c.b && wst.terms[c.b] ? { x: wst.terms[c.b].x, y: wst.terms[c.b].y } : (p1 ? danglePoint(c.a) : null);
+    return p1 ? { p1: p1, p2: p2 } : null;
+  }
+  function renderWires() {
+    if (!wst) return;
+    var svg = $('wire-svg');
+    var shadows = [], wires = [];
+    (S.assembly.conns || []).forEach(function (c, i) {
+      var e = connEnds(c);
+      if (!e) return;
+      var p2 = (wst.drag && wst.drag.kind === 'end' && wst.drag.conn === c) ? { x: wst.drag.x, y: wst.drag.y } : e.p2;
+      var d = wirePathD(e.p1, p2);
+      shadows.push('<path d="' + d + '" fill="none" stroke="rgba(0,0,0,.38)" stroke-width="' + (WIRE_W[c.color] + 1.5) + '" stroke-linecap="round"/>');
+      wires.push('<path d="' + d + '" fill="none" stroke="' + WIRE_DIM[c.color] + '" stroke-width="' + (WIRE_W[c.color] + 2) + '" stroke-linecap="round"/>');
+      wires.push('<path d="' + d + '" fill="none" stroke="' + WIRE_HEX[c.color] + '" stroke-width="' + WIRE_W[c.color] + '" stroke-linecap="round"/>');
+      // ferrules
+      wires.push('<circle cx="' + e.p1.x + '" cy="' + e.p1.y + '" r="4" fill="#cfd6dd" stroke="#22303c" stroke-width="1"/>');
+      if (p2) wires.push('<circle cx="' + p2.x + '" cy="' + p2.y + '" r="' + (c.b ? 4 : 5.5) + '" fill="#cfd6dd" stroke="#22303c" stroke-width="1"/>');
+    });
+    // live pull from a spool
+    if (wst.drag && wst.drag.kind === 'new') {
+      var sp = wst.spools[wst.drag.color];
+      if (sp) {
+        var d2 = wirePathD(sp, { x: wst.drag.x, y: wst.drag.y }, 0.7);
+        shadows.push('<path d="' + d2 + '" fill="none" stroke="rgba(0,0,0,.35)" stroke-width="' + (WIRE_W[wst.drag.color] + 1) + '" stroke-linecap="round"/>');
+        wires.push('<path d="' + d2 + '" fill="none" stroke="' + WIRE_HEX[wst.drag.color] + '" stroke-width="' + WIRE_W[wst.drag.color] + '" stroke-linecap="round"/>');
+        wires.push('<circle cx="' + wst.drag.x + '" cy="' + wst.drag.y + '" r="5.5" fill="#cfd6dd" stroke="#22303c" stroke-width="1"/>');
+      }
     }
-    var curve = new THREE.CatmullRomCurve3(pts);
-    var old = w.wires[c].mesh.geometry;
-    w.wires[c].mesh.geometry = new THREE.TubeGeometry(curve, 16, 0.011, 6, false);
-    if (old && old.dispose) old.dispose();
+    // probe cords: coiled (dashed) runs from the tester to each probe tip
+    var cords = '';
+    if (wst.dock) {
+      ['red', 'blk'].forEach(function (id) {
+        var pr = wst.probes[id];
+        var anchor = { x: wst.dock[id].x - 8, y: wst.dock[id].y + 10 };
+        var dd = wirePathD(anchor, { x: pr.x, y: pr.y + 4 }, 1.4);
+        cords += '<path d="' + dd + '" fill="none" stroke="' + (id === 'red' ? '#8f2a1c' : '#1d232a') +
+          '" stroke-width="2.4" stroke-linecap="round" stroke-dasharray="3.5 2.5" opacity=".9"/>';
+      });
+    }
+    svg.innerHTML = '<g transform="translate(3,7)" opacity=".8">' + shadows.join('') + '</g>' + cords + wires.join('');
   }
-  function screenOfLocal(v) {
-    return worldToScreen(bay.device.localToWorld(v.clone()), bay.camera);
+  function refreshTermStates() {
+    if (!wst) return;
+    Object.keys(wst.terms).forEach(function (pin) {
+      var ends = endsAt(pin);
+      var el = wst.terms[pin].el;
+      el.classList.toggle('landed', ends.length > 0);
+      el.classList.toggle('torqued', ends.length > 0 && ends.every(function (c) { return c.b && c.torqued; }));
+    });
   }
+
+  /* ---------- the continuity tester ---------- */
+  function buildMeterFace() {
+    var svg = $('meter-svg');
+    var parts = ['<rect x="2" y="2" width="116" height="54" rx="5" fill="#0d1116" stroke="#2c2620" stroke-width="1.5"/>',
+      '<rect x="6" y="6" width="108" height="46" rx="3" fill="#efe6cb"/>'];
+    // scale arc + zones (needle pivots at 60,50)
+    for (var i = 0; i <= 10; i++) {
+      var a = (-64 + i * 12.8) * Math.PI / 180;
+      var x1 = 60 + Math.sin(a) * 34, y1 = 50 - Math.cos(a) * 34;
+      var x2 = 60 + Math.sin(a) * (i % 5 === 0 ? 28 : 31), y2 = 50 - Math.cos(a) * (i % 5 === 0 ? 28 : 31);
+      parts.push('<line x1="' + x1.toFixed(1) + '" y1="' + y1.toFixed(1) + '" x2="' + x2.toFixed(1) + '" y2="' + y2.toFixed(1) + '" stroke="#3a3226" stroke-width="1"/>');
+    }
+    parts.push('<text x="22" y="18" font-size="6.5" font-family="monospace" fill="#8a2c1e">OPEN</text>');
+    parts.push('<text x="82" y="18" font-size="6.5" font-family="monospace" fill="#25603a">CONT.</text>');
+    parts.push('<g id="meter-needle" transform="rotate(-58 60 50)"><line x1="60" y1="50" x2="60" y2="14" stroke="#8f2418" stroke-width="1.8"/></g>');
+    parts.push('<circle cx="60" cy="50" r="4" fill="#3a3226"/>');
+    svg.innerHTML = parts.join('');
+  }
+  function setNeedle(deg) {
+    var n = document.getElementById('meter-needle');
+    if (n) n.setAttribute('transform', 'rotate(' + deg.toFixed(1) + ' 60 50)');
+  }
+  function runProbeCheck() {
+    if (wst.testing) return;
+    var pa = wst.probes.red.pin, pb = wst.probes.blk.pin;
+    if (!pa || !pb) return;
+    wst.testing = true;
+    var res = PG2.probe(S.assembly, rfp(), pa, pb);
+    var read = $('meter-read');
+    read.textContent = 'MEASURING…';
+    read.className = '';
+    var target = res.verdict === 'correct' ? 52 : res.verdict === 'wrong' ? 6 : res.verdict === 'open' ? -42 : -50;
+    var jitter = res.verdict === 'wrong' ? 5 : 1.2;
+    tween(880, function (t, raw) {
+      setNeedle(lerp(-58, target, t) + Math.sin(raw * 40) * jitter * (1 - t));
+    });
+    later(620, function () {
+      if (res.verdict === 'correct') {
+        PGAudio.needleTone('good');
+        S.assembly.verified[res.runIdx] = true;
+        read.textContent = '✓ RUN ' + (res.runIdx + 1) + ' — AS DRAWN' + (res.colorOk ? '' : ' *COLOUR');
+        read.className = 'good';
+      } else if (res.verdict === 'wrong') {
+        PGAudio.needleTone('bad');
+        read.textContent = '✗ NOT ON THE SCHEMATIC';
+        read.className = 'bad';
+      } else if (res.verdict === 'open') {
+        PGAudio.needleTone('open');
+        read.textContent = 'OPEN — DRAWING WANTS A RUN HERE';
+        read.className = 'bad';
+      } else {
+        PGAudio.needleTone('open');
+        read.textContent = 'NO CONNECTION';
+        read.className = '';
+      }
+      updateWiringNote();
+    });
+    later(1500, function () { if (wst) wst.testing = false; });
+  }
+
+  /* ---------- the schematic card ---------- */
+  var SCHEM_LAYOUTS = {
+    t1: { h: 158, comps: { bat: [58, 104], tmr: [160, 52], det: [258, 104] } },
+    t2: { h: 190, comps: { bat: [50, 128], sw: [132, 46], tmr: [222, 46], det: [262, 138] } },
+    t3: { h: 212, comps: { bat: [44, 152], sw: [118, 42], tmr: [204, 42], rly: [268, 108], det: [168, 168] } },
+    t4: { h: 236, comps: { bat: [42, 148], tmr: [122, 40], rly: [208, 92], cap: [106, 192], jct: [226, 196], det: [288, 40] } }
+  };
+  function schemSymbol(comp, cx, cy, nums, rfpRef) {
+    var ink = '#33291a';
+    var s = '', pinPos = [];
+    var n = comp.pins.length;
+    function pinRow(y, span) {
+      var out = [];
+      for (var i = 0; i < n; i++) out.push({ x: cx - span / 2 + (n === 1 ? span / 2 : span * i / (n - 1)), y: cy + y });
+      return out;
+    }
+    if (comp.id === 'bat') {
+      s += '<rect x="' + (cx - 26) + '" y="' + (cy - 14) + '" width="52" height="28" rx="2" fill="none" stroke="' + ink + '" stroke-width="1.6"/>';
+      s += '<line x1="' + (cx - 8) + '" y1="' + (cy - 8) + '" x2="' + (cx - 8) + '" y2="' + (cy + 8) + '" stroke="' + ink + '" stroke-width="2.2"/>';
+      s += '<line x1="' + (cx + 8) + '" y1="' + (cy - 4) + '" x2="' + (cx + 8) + '" y2="' + (cy + 4) + '" stroke="' + ink + '" stroke-width="1.2"/>';
+      pinPos = pinRow(-22, 36);
+    } else if (comp.id === 'tmr') {
+      s += '<circle cx="' + cx + '" cy="' + cy + '" r="15" fill="none" stroke="' + ink + '" stroke-width="1.6"/>';
+      s += '<line x1="' + cx + '" y1="' + cy + '" x2="' + cx + '" y2="' + (cy - 9) + '" stroke="' + ink + '" stroke-width="1.4"/>';
+      s += '<line x1="' + cx + '" y1="' + cy + '" x2="' + (cx + 6) + '" y2="' + (cy + 4) + '" stroke="' + ink + '" stroke-width="1.2"/>';
+      pinPos = n === 3 ? [{ x: cx - 22, y: cy }, { x: cx + 22, y: cy }, { x: cx, y: cy + 23 }]
+                       : [{ x: cx - 22, y: cy }, { x: cx + 22, y: cy }];
+    } else if (comp.id === 'sw') {
+      s += '<line x1="' + (cx - 16) + '" y1="' + cy + '" x2="' + (cx + 12) + '" y2="' + (cy - 12) + '" stroke="' + ink + '" stroke-width="1.8"/>';
+      s += '<circle cx="' + (cx - 16) + '" cy="' + cy + '" r="2.4" fill="' + ink + '"/>';
+      s += '<circle cx="' + (cx + 16) + '" cy="' + cy + '" r="2.4" fill="' + ink + '"/>';
+      pinPos = [{ x: cx - 22, y: cy }, { x: cx + 22, y: cy }];
+    } else if (comp.id === 'rly') {
+      s += '<rect x="' + (cx - 30) + '" y="' + (cy - 17) + '" width="60" height="34" rx="2" fill="none" stroke="' + ink + '" stroke-width="1.6"/>';
+      s += '<line x1="' + cx + '" y1="' + (cy - 17) + '" x2="' + cx + '" y2="' + (cy + 17) + '" stroke="' + ink + '" stroke-width="1" stroke-dasharray="3 2"/>';
+      for (var li = 0; li < 3; li++) {
+        s += '<path d="M' + (cx - 24 + li * 8) + ' ' + cy + ' a4 4 0 0 1 8 0" fill="none" stroke="' + ink + '" stroke-width="1.4"/>';
+      }
+      s += '<line x1="' + (cx + 8) + '" y1="' + (cy + 6) + '" x2="' + (cx + 24) + '" y2="' + (cy - 6) + '" stroke="' + ink + '" stroke-width="1.6"/>';
+      s += '<text x="' + (cx - 24) + '" y="' + (cy - 20) + '" font-size="6" font-family="monospace" fill="' + ink + '">COIL</text>';
+      s += '<text x="' + (cx + 12) + '" y="' + (cy - 20) + '" font-size="6" font-family="monospace" fill="' + ink + '">SW</text>';
+      pinPos = n === 4
+        ? [{ x: cx - 24, y: cy + 25 }, { x: cx - 8, y: cy + 25 }, { x: cx + 8, y: cy + 25 }, { x: cx + 24, y: cy + 25 }]
+        : [{ x: cx - 24, y: cy + 25 }, { x: cx - 8, y: cy + 25 }, { x: cx + 18, y: cy + 25 }];
+    } else if (comp.id === 'cap') {
+      for (var ci = 0; ci < 3; ci++) {
+        var ox = cx - 12 + ci * 12;
+        s += '<line x1="' + (ox - 3) + '" y1="' + (cy - 8) + '" x2="' + (ox - 3) + '" y2="' + (cy + 8) + '" stroke="' + ink + '" stroke-width="1.8"/>';
+        s += '<line x1="' + (ox + 3) + '" y1="' + (cy - 8) + '" x2="' + (ox + 3) + '" y2="' + (cy + 8) + '" stroke="' + ink + '" stroke-width="1.8"/>';
+      }
+      pinPos = [{ x: cx - 24, y: cy }, { x: cx + 24, y: cy }];
+    } else if (comp.id === 'jct') {
+      s += '<rect x="' + (cx - 32) + '" y="' + (cy - 7) + '" width="64" height="14" rx="2" fill="none" stroke="' + ink + '" stroke-width="1.6"/>';
+      pinPos = pinRow(-15, 48);
+      s += '<text x="' + (cx + 8) + '" y="' + (cy + 22) + '" font-size="6" font-family="monospace" fill="#8a2c1e">3·4 N.C.</text>';
+    } else {  // det
+      s += '<rect x="' + (cx - 17) + '" y="' + (cy - 13) + '" width="34" height="26" rx="2" fill="none" stroke="' + ink + '" stroke-width="1.6"/>';
+      s += '<path d="M' + cx + ' ' + (cy - 7) + ' l3 5 5 0 -4 4 2 6 -6 -4 -6 4 2 -6 -4 -4 5 0 z" fill="' + ink + '"/>';
+      pinPos = pinRow(-21, n === 1 ? 0 : 24);
+    }
+    var label = '<text x="' + cx + '" y="' + (cy + (comp.id === 'jct' ? 30 : comp.id === 'rly' ? 38 : 30)) +
+      '" font-size="6.6" font-weight="700" font-family="monospace" text-anchor="middle" fill="' + ink + '">' + comp.name + '</text>';
+    var pins = '';
+    comp.pins.forEach(function (pname, i) {
+      var pp = pinPos[i];
+      pins += '<circle cx="' + pp.x + '" cy="' + pp.y + '" r="2.6" fill="#f4ecd6" stroke="' + ink + '" stroke-width="1.3"/>';
+      pins += '<text x="' + pp.x + '" y="' + (pp.y - 5) + '" font-size="6.4" font-weight="800" font-family="monospace" text-anchor="middle" fill="#8a2c1e">' +
+        nums[comp.id + '.' + i] + '</text>';
+      pins += '<text x="' + (pp.x + 5) + '" y="' + (pp.y + 7.5) + '" font-size="5" font-family="monospace" fill="' + ink + '" opacity=".75">' + pname + '</text>';
+    });
+    return { svg: s + label + pins, pins: pinPos };
+  }
+  function buildSchematic() {
+    var R = rfp();
+    var spec = wst.spec;
+    var LAY = SCHEM_LAYOUTS[spec.key];
+    var nums = wst.nums;
+    $('schem-title').textContent = 'WIRING SCHEMATIC · ' + R.id;
+    var svg = $('schem-svg');
+    svg.setAttribute('viewBox', '0 0 320 ' + LAY.h);
+    var pinXY = {};
+    var body = '';
+    spec.comps.forEach(function (comp) {
+      var pos = LAY.comps[comp.id];
+      var sym = schemSymbol(comp, pos[0], pos[1], nums, R);
+      comp.pins.forEach(function (_, i) { pinXY[comp.id + '.' + i] = sym.pins[i]; });
+      body += sym.svg;
+    });
+    // routed wire runs (drawn under the symbols' pins, over paper)
+    var runsSvg = '';
+    spec.runs.forEach(function (run, i) {
+      var p1 = pinXY[run.a], p2 = pinXY[run.b];
+      var mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2;
+      var dx = p2.x - p1.x, dy = p2.y - p1.y;
+      var len = Math.max(Math.hypot(dx, dy), 1);
+      var bow = 10 + (i % 3) * 7;
+      var cxp = mx - dy / len * bow, cyp = my + dx / len * bow;
+      runsSvg += '<path d="M' + p1.x + ' ' + p1.y + ' Q' + cxp.toFixed(1) + ' ' + cyp.toFixed(1) + ' ' + p2.x + ' ' + p2.y +
+        '" fill="none" stroke="' + WIRE_HEX[run.color] + '" stroke-width="2.2" opacity=".85"/>';
+      var bx2 = (p1.x + cxp * 2 + p2.x) / 4, by2 = (p1.y + cyp * 2 + p2.y) / 4;   // on-curve midpoint
+      runsSvg += '<circle cx="' + bx2.toFixed(1) + '" cy="' + by2.toFixed(1) + '" r="5.6" fill="#f4ecd6" stroke="' + WIRE_HEX[run.color] + '" stroke-width="1.6"/>' +
+        '<text x="' + bx2.toFixed(1) + '" y="' + (by2 + 2.6).toFixed(1) + '" font-size="7" font-weight="800" font-family="monospace" text-anchor="middle" fill="#33291a">' + (i + 1) + '</text>';
+    });
+    svg.innerHTML = runsSvg + body;
+    // the run list — the reading half of the puzzle
+    var list = '';
+    spec.runs.forEach(function (run, i) {
+      var partsA = run.a.split('.'), partsB = run.b.split('.');
+      list += '<div class="sr-row"><span class="sr-num">RUN ' + (i + 1) + '</span>' +
+        '<span class="sr-chip" style="background:' + WIRE_HEX[run.color] + '"></span>' +
+        '<span>' + run.label + ' — <b>T' + nums[run.a] + ' → T' + nums[run.b] + '</b></span></div>';
+    });
+    if (spec.decoys.length) {
+      list += '<div class="sr-row"><span class="sr-num">N.C.</span><span class="sr-chip" style="background:transparent"></span>' +
+        '<span>terminals T' + spec.decoys.map(function (p) { return nums[p]; }).join(' & T') + ' — NOT CONNECTED. Leave them be.</span></div>';
+    }
+    $('schem-runs').innerHTML = list;
+  }
+  function setSchem(state, silent) {
+    if (!wst) return;
+    var was = wst.schem;
+    wst.schem = state;
+    var card = $('schem-card');
+    card.classList.toggle('hidden', state === 'closed');
+    card.classList.toggle('pinned', state === 'pinned');
+    $('schem-tab').textContent = state === 'open' ? '⚡ FOLD IT AWAY' : '⚡ SCHEMATIC';
+    if (!silent && state !== was) PGAudio.paperFold(state === 'open');
+    if (state !== 'closed') schemPref = state;
+  }
+
+  /* ---------- flow ---------- */
   function enterWiring() {
     S.phase = 'wiring';
     S.closeoutStep = 0;
@@ -1641,154 +2009,290 @@
     $('wiring-ui').classList.remove('hidden');
     $('bay-hint').style.opacity = 0;
     refreshNodes(null);
-    // straighten the device & swing camera to the panel
+    // straighten the device & swing camera to the panel; the door opens on arrival
     var d = casingDims(S.assembly.shell);
     tweenOrbitTo(V3(0.08, 1.44, d.r + 1.72), V3(0, 1.31, d.r - 0.05), 1100, function () {
-      if (!bay.wiring) initWiring();
       tween(600, function (t) { bay.casingMesh.userData.doorPivot.rotation.x = -2.0 * t; });
       PGAudio.coverFlick();
+      later(380, showWireStation);
     });
     var startRotY = bay.device.rotation.y % (Math.PI * 2);
     if (startRotY > Math.PI) startRotY -= Math.PI * 2;
     tween(700, function (t) { bay.device.rotation.y = lerp(startRotY, 0, t); });
     updateWiringNote();
   }
-  function updateWiringNote() {
-    var a = S.assembly;
-    var attached = PG2.WIRES.filter(function (c) { return a.wires[c]; }).length;
-    var torqued = PG2.WIRES.filter(function (c) { return a.torques[c]; }).length;
-    var note = $('wiring-note');
-    if (attached < 3) note.innerHTML = 'Drag each <b>wire</b> from its post to a terminal. Read the labels — the panel doesn’t.';
-    else note.innerHTML = 'Wires landed. <b>Twist</b> each terminal in circles to torque it down. Or don’t. It’s your name on the form.' + (torqued ? ' (' + torqued + '/3 torqued)' : '');
-    $('btn-panel-done').classList.toggle('hidden', attached < 3);
-  }
-  function wiringDown(e, p) {
-    var w = bay.wiring;
-    if (!w) return;
-    // 1) a terminal that already holds an untorqued wire → circular twist to torque
-    var bt = null, btD = 58;
-    Object.keys(w.terms).forEach(function (t) {
-      if (!w.terms[t].wire) return;
-      if (S.assembly.torques[w.terms[t].wire]) return;
-      var sp = screenOfLocal(w.terms[t].local);
-      var dd = Math.hypot(sp.x - p.x, sp.y - p.y);
-      if (dd < btD) { btD = dd; bt = t; }
-    });
-    if (bt) {
-      var color = w.terms[bt].wire;
-      var sp2 = screenOfLocal(w.terms[bt].local);
-      w.twist = { term: bt, color: color, pid: e.pointerId, cx: sp2.x, cy: sp2.y, angle: null, acc: 0 };
-      var ring = $('torque-ring');
-      ring.classList.remove('hidden');
-      ring.style.left = sp2.x + 'px';
-      ring.style.top = sp2.y + 'px';
-      return;
-    }
-    // 2) a post (or a dangling wire end) → drag that wire; grabbing the post of
-    //    an attached wire pulls it back off its terminal
-    var best = null, bestD = 55;
-    PG2.WIRES.forEach(function (c) {
-      var pts = [w.posts[c].local];
-      if (!w.wires[c].end) pts.push(wireEndLocal(c));
-      pts.forEach(function (lp) {
-        var sp = screenOfLocal(lp);
-        var dd = Math.hypot(sp.x - p.x, sp.y - p.y);
-        if (dd < bestD) { bestD = dd; best = c; }
-      });
-    });
-    if (best) {
-      if (w.wires[best].end) {
-        w.terms[w.wires[best].end].wire = null;
-        w.wires[best].end = null;
-        S.assembly.wires[best] = null;
-        S.assembly.torques[best] = false;
-        updateWiringNote();
-      }
-      w.drag = { color: best, pid: e.pointerId, point: w.posts[best].local.clone() };
-      PGAudio.pickup();
-    }
-  }
-  function wiringMove(e, p) {
-    var w = bay.wiring;
-    if (!w) return;
-    if (w.drag && e.pointerId === w.drag.pid) {
-      // project pointer onto the panel plane (device-local z = r+0.03)
-      var d = casingDims(S.assembly.shell);
-      var ndc = new THREE.Vector2((p.x / W) * 2 - 1, -(p.y / H) * 2 + 1);
-      raycaster.setFromCamera(ndc, bay.camera);
-      var planePt = bay.device.localToWorld(V3(0, 0, d.r + 0.03));
-      var planeN = V3(0, 0, 1).applyQuaternion(bay.device.quaternion);
-      var plane = new THREE.Plane().setFromNormalAndCoplanarPoint(planeN, planePt);
-      var hit = new THREE.Vector3();
-      if (raycaster.ray.intersectPlane(plane, hit)) {
-        w.drag.point = bay.device.worldToLocal(hit.clone());
-        updateWireCurve(w.drag.color, w.drag.point);
-      }
-    }
-    if (w.twist && e.pointerId === w.twist.pid) {
-      var ang = Math.atan2(p.y - w.twist.cy, p.x - w.twist.cx);
-      if (w.twist.angle != null) {
-        var delta = ang - w.twist.angle;
-        while (delta > Math.PI) delta -= Math.PI * 2;
-        while (delta < -Math.PI) delta += Math.PI * 2;
-        var prev = w.twist.acc;
-        w.twist.acc += Math.abs(delta);
-        if (Math.floor(w.twist.acc / 0.7) > Math.floor(prev / 0.7)) PGAudio.ratchet();
-        var frac = clamp(w.twist.acc / (Math.PI * 2), 0, 1);
-        $('torque-ring-fill').style.setProperty('--p', frac * 100);
-        w.terms[w.twist.term].mesh.rotation.y += delta;
-        if (frac >= 1) { finishTorque(); return; }   // twist is done and cleared
-      }
-      w.twist.angle = ang;
-    }
-  }
-  function finishTorque() {
-    var w = bay.wiring;
-    var tw = w.twist;
-    if (!tw) return;
-    S.assembly.torques[tw.color] = true;
-    w.terms[tw.term].mesh.material.color.setHex(0x8f7331);
-    w.terms[tw.term].mesh.scale.set(1, 0.8, 1);
-    PGAudio.torqueDone();
-    toast('Terminal ' + tw.term.slice(1) + ' torqued.');
-    w.twist = null;
-    $('torque-ring').classList.add('hidden');
+  function showWireStation() {
+    if (S.phase !== 'wiring') return;
+    buildWiringStation();
+    var stEl = $('wire-station');
+    stEl.classList.remove('hidden');
+    stEl.style.opacity = 0;
+    tween(420, function (t) { stEl.style.opacity = t; });
+    $('schem-tab').classList.remove('hidden');
+    // the schematic presents itself — you LOOK, then you wire
+    setSchem((S.assembly.conns || []).length ? (schemPref === 'pinned' ? 'pinned' : 'open') : 'open', true);
+    PGAudio.paperFold(true);
     updateWiringNote();
   }
-  function wiringUp(e, p) {
-    var w = bay.wiring;
-    if (!w) return;
-    if (w.drag && e.pointerId === w.drag.pid) {
-      var c = w.drag.color;
-      // nearest free terminal within 60px
-      var best = null, bestD = 60;
-      Object.keys(w.terms).forEach(function (t) {
-        if (w.terms[t].wire) return;
-        var sp = screenOfLocal(w.terms[t].local);
-        var dd = Math.hypot(sp.x - p.x, sp.y - p.y);
-        if (dd < bestD) { bestD = dd; best = t; }
-      });
-      w.drag = null;
-      if (best) {
-        w.wires[c].end = best;
-        w.terms[best].wire = c;
-        S.assembly.wires[c] = best;
-        PGAudio.wireSnap();
-      } else {
-        w.wires[c].end = null;
-        S.assembly.wires[c] = null;
-        PGAudio.wireDrop();
-      }
-      updateWireCurve(c, null);
-      updateWiringNote();
+  function updateWiringNote() {
+    var note = $('wiring-note');
+    if (!wst) {
+      note.innerHTML = 'The access panel comes off. Somebody wired a shed once and now there’s a <b>procedure</b>.';
+      $('btn-panel-done').classList.add('hidden');
+      return;
     }
-    if (w.twist && e.pointerId === w.twist.pid) {
-      w.twist = null;
-      $('torque-ring').classList.add('hidden');
+    var conns = S.assembly.conns || [];
+    var N = wst.spec.runs.length;
+    var complete = conns.filter(function (c) { return c.a && c.b; }).length;
+    var dangling = conns.length - complete;
+    var torqued = conns.filter(function (c) { return c.b && c.torqued; }).length;
+    var v = PG2.verifiedRuns(S.assembly, rfp());
+    if (conns.length === 0) {
+      note.innerHTML = 'The <b>schematic</b> says which numbered terminals meet — the panel is not in drawing order. Pull wire from a <b>spool</b>, clip both ends.';
+    } else if (complete < N) {
+      note.innerHTML = complete + ' of <b>' + N + ' runs</b> landed' + (dangling ? ' · ' + dangling + ' dangling' : '') +
+        '. The panel accepts whatever you clip. Quietly.';
+    } else if (torqued < N) {
+      note.innerHTML = 'All ' + N + ' runs landed. <b>Twist</b> each bright screw to torque it down (' + torqued + '/' + N + ').';
+    } else {
+      note.innerHTML = 'Wired and torqued. <b>Probes</b> verify a run against the drawing (' + v + '/' + N +
+        ' verified) — certainty costs a minute. The range costs a morning.';
+    }
+    $('btn-panel-done').classList.toggle('hidden', !PG2.wiringComplete(S.assembly, rfp()));
+  }
+
+  /* ---------- station input ---------- */
+  function grabLandedEnd(pin, conn) {
+    // pull a wire end off this terminal and drag it (most recent unless told which)
+    var ends = endsAt(pin);
+    if (!ends.length) return false;
+    var c = (conn && ends.indexOf(conn) >= 0) ? conn : ends[ends.length - 1];
+    if (!c.b) {   // only end A landed: the wire comes back off in the hand
+      S.assembly.conns.splice(S.assembly.conns.indexOf(c), 1);
+      wst.drag = { kind: 'new', color: c.color, x: wst.terms[pin].x, y: wst.terms[pin].y };
+    } else {
+      if (c.a === pin) { c.a = c.b; }
+      c.b = null;
+      c.torqued = false;
+      wst.drag = { kind: 'end', conn: c, x: wst.terms[pin].x, y: wst.terms[pin].y };
+    }
+    PGAudio.unsnap();
+    refreshTermStates();
+    renderWires();
+    updateWiringNote();
+    return true;
+  }
+  function wstDown(e) {
+    if (S.phase !== 'wiring' || !wst) return;
+    PGAudio.init();
+    e.preventDefault();
+    var stEl = $('wire-station');
+    try { stEl.setPointerCapture(e.pointerId); } catch (err) {}
+    var p = stPos(e);
+    // 1) probes
+    var pk = null;
+    ['red', 'blk'].forEach(function (id) {
+      var pr = wst.probes[id];
+      if (Math.hypot(pr.x - p.x, pr.y - p.y) < 32) pk = id;
+    });
+    if (pk) {
+      wst.drag = { kind: 'probe', id: pk, pid: e.pointerId };
+      wst.probes[pk].pin = null;
+      wst.probes[pk].el.classList.remove('clipped');
+      PGAudio.pickup();
+      return;
+    }
+    // 2) spools
+    var spool = null;
+    Object.keys(wst.spools).forEach(function (cid) {
+      var sp = wst.spools[cid];
+      if (Math.hypot(sp.x - p.x, sp.y - p.y) < 34) spool = cid;
+    });
+    if (spool) {
+      if ((S.assembly.conns || []).length >= wst.spec.runs.length) {
+        PGAudio.buzz();
+        toast('The schematic calls for ' + wst.spec.runs.length + ' runs. Pull a landed wire to re-route it.');
+        return;
+      }
+      wst.drag = { kind: 'new', color: spool, x: p.x, y: p.y, pid: e.pointerId };
+      PGAudio.spoolPull();
+      renderWires();
+      return;
+    }
+    // 3) dangling wire ends
+    var dangler = null;
+    (S.assembly.conns || []).forEach(function (c) {
+      if (c.b) return;
+      var dp = danglePoint(c.a);
+      if (Math.hypot(dp.x - p.x, dp.y - p.y) < 26) dangler = c;
+    });
+    if (dangler) {
+      wst.drag = { kind: 'end', conn: dangler, x: p.x, y: p.y, pid: e.pointerId };
+      PGAudio.pickup();
+      return;
+    }
+    // 4) terminals: twist an untorqued landed screw, or pull an end to re-route
+    var pin = termAt(p, 25);
+    if (pin) {
+      var ends = endsAt(pin);
+      var unt = null;
+      ends.forEach(function (c) { if (!unt && c.b && !c.torqued) unt = c; });
+      if (unt) {
+        var t = wst.terms[pin];
+        wst.twist = { pin: pin, conn: unt, pid: e.pointerId, cx: t.x, cy: t.y, angle: null, acc: 0 };
+        var ring = $('torque-ring');
+        ring.classList.remove('hidden');
+        ring.style.left = t.x + 'px';
+        ring.style.top = t.y + 'px';
+        $('torque-ring-fill').style.setProperty('--p', 0);
+        return;
+      }
+      if (ends.length) { grabLandedEnd(pin); wst.drag && (wst.drag.pid = e.pointerId); return; }
+      return;
+    }
+    // 5) grab a wire mid-span → detach its nearest end
+    var bestC = null, bestEnd = null, bestD = 15;
+    (S.assembly.conns || []).forEach(function (c) {
+      if (!c.b) return;
+      var e2 = connEnds(c);
+      for (var i = 0; i <= 12; i++) {
+        var t = i / 12;
+        var sag = Math.min(14 + Math.hypot(e2.p2.x - e2.p1.x, e2.p2.y - e2.p1.y) * 0.24, 62);
+        var mx = (e2.p1.x + e2.p2.x) / 2, my = (e2.p1.y + e2.p2.y) / 2 + sag;
+        var qx = (1 - t) * (1 - t) * e2.p1.x + 2 * (1 - t) * t * mx + t * t * e2.p2.x;
+        var qy = (1 - t) * (1 - t) * e2.p1.y + 2 * (1 - t) * t * my + t * t * e2.p2.y;
+        var dd = Math.hypot(qx - p.x, qy - p.y);
+        if (dd < bestD) { bestD = dd; bestC = c; bestEnd = t < 0.5 ? 'a' : 'b'; }
+      }
+    });
+    if (bestC) {
+      grabLandedEnd(bestEnd === 'a' ? bestC.a : bestC.b, bestC);
+      if (wst.drag) wst.drag.pid = e.pointerId;
     }
   }
+  function wstMove(e) {
+    if (!wst) return;
+    var p = stPos(e);
+    if (wst.drag && e.pointerId === wst.drag.pid) {
+      wst.drag.x = p.x; wst.drag.y = p.y;
+      if (wst.drag.kind === 'probe') {
+        var pr = wst.probes[wst.drag.id];
+        pr.x = p.x; pr.y = p.y;
+        positionProbe(wst.drag.id);
+      }
+      renderWires();
+      return;
+    }
+    if (wst.twist && e.pointerId === wst.twist.pid) {
+      var tw = wst.twist;
+      var radial = Math.hypot(p.x - tw.cx, p.y - tw.cy);
+      if (radial > 46 && tw.acc < 0.6) {
+        // pulled straight off: convert the twist into a re-route drag
+        $('torque-ring').classList.add('hidden');
+        wst.twist = null;
+        grabLandedEnd(tw.pin);
+        if (wst.drag) { wst.drag.pid = e.pointerId; wst.drag.x = p.x; wst.drag.y = p.y; renderWires(); }
+        return;
+      }
+      var ang = Math.atan2(p.y - tw.cy, p.x - tw.cx);
+      if (tw.angle != null) {
+        var delta = ang - tw.angle;
+        while (delta > Math.PI) delta -= Math.PI * 2;
+        while (delta < -Math.PI) delta += Math.PI * 2;
+        var prev = tw.acc;
+        tw.acc += Math.abs(delta);
+        if (Math.floor(tw.acc / 0.7) > Math.floor(prev / 0.7)) PGAudio.ratchet();
+        var frac = clamp(tw.acc / (Math.PI * 2), 0, 1);
+        $('torque-ring-fill').style.setProperty('--p', frac * 100);
+        if (frac >= 1) {
+          tw.conn.torqued = true;
+          wst.twist = null;
+          $('torque-ring').classList.add('hidden');
+          PGAudio.torqueDone();
+          refreshTermStates();
+          updateWiringNote();
+          return;
+        }
+      }
+      tw.angle = ang;
+    }
+  }
+  function wstUp(e) {
+    if (!wst) return;
+    var p = stPos(e);
+    if (wst.twist && e.pointerId === wst.twist.pid) {
+      wst.twist = null;
+      $('torque-ring').classList.add('hidden');
+    }
+    if (!wst.drag || e.pointerId !== wst.drag.pid) return;
+    var drag = wst.drag;
+    wst.drag = null;
+    if (drag.kind === 'probe') {
+      var pin = termAt(p, 30);
+      var pr = wst.probes[drag.id];
+      if (pin) {
+        pr.pin = pin;
+        pr.x = wst.terms[pin].x + (drag.id === 'red' ? -3 : 3);
+        pr.y = wst.terms[pin].y - 4;
+        pr.el.classList.add('clipped');
+        positionProbe(drag.id);
+        PGAudio.probeClip();
+        runProbeCheck();
+      } else {
+        dockProbe(drag.id);
+        $('meter-read').textContent = 'CLIP BOTH PROBES';
+        $('meter-read').className = '';
+        setNeedle(-58);
+      }
+      renderWires();
+      return;
+    }
+    var pin2 = termAt(p, 30);
+    if (drag.kind === 'new') {
+      if (pin2 && endsAt(pin2).length < 2) {
+        S.assembly.conns.push({ a: pin2, b: null, color: drag.color, torqued: false });
+        PGAudio.wireClip(GAUGE_IDX[drag.color]);
+      } else {
+        if (pin2) toast('That terminal already holds two ends.');
+        PGAudio.wireDrop();
+      }
+    } else if (drag.kind === 'end') {
+      var c = drag.conn;
+      if (pin2 && pin2 !== c.a && endsAt(pin2).length < 2) {
+        c.b = pin2;
+        PGAudio.wireClip(GAUGE_IDX[c.color]);
+      } else {
+        if (pin2 === c.a) toast('Both ends on one terminal is a loop, not a run.');
+        else if (pin2) toast('That terminal already holds two ends.');
+        c.b = null;
+        PGAudio.wireDrop();
+      }
+    }
+    refreshTermStates();
+    renderWires();
+    updateWiringNote();
+  }
+  (function () {
+    var stEl = $('wire-station');
+    stEl.addEventListener('pointerdown', wstDown);
+    stEl.addEventListener('pointermove', wstMove);
+    stEl.addEventListener('pointerup', wstUp);
+    stEl.addEventListener('pointercancel', wstUp);
+  })();
+  $('schem-tab').addEventListener('click', function () {
+    PGAudio.tap();
+    setSchem(wst && wst.schem === 'open' ? 'closed' : 'open');
+  });
+  $('schem-pin').addEventListener('click', function (e) {
+    e.stopPropagation();
+    PGAudio.tap();
+    setSchem('pinned');
+  });
   function exitWiring() {
-    // close the door over whatever you did
+    // fold the bench away, close the door over whatever you did
+    $('wire-station').classList.add('hidden');
+    $('schem-tab').classList.add('hidden');
+    setSchem('closed', true);
     tween(500, function (t) { bay.casingMesh.userData.doorPivot.rotation.x = -2.0 * (1 - t); });
     PGAudio.thunk(false);
     later(420, rfp().dial ? enterDial : enterDet);
@@ -2079,10 +2583,14 @@
   }
   function stampChecklist() {
     var a = S.assembly;
+    var N = PG2.wiringSpec(rfp()).runs.length;
+    var v = PG2.verifiedRuns(a, rfp());
+    var conns = a.conns || [];
     var lines = [
-      { id: 'ck-wiring', ok: PG2.WIRES.every(function (c) { return a.wires[c]; }),
-        okTxt: '✓ ROUTED', sub: 'three conductors landed' },
-      { id: 'ck-torque', ok: PG2.WIRES.every(function (c) { return a.torques[c]; }),
+      { id: 'ck-wiring', ok: PG2.wiringComplete(a, rfp()),
+        okTxt: '✓ VERIFIED ' + v + '/' + N + ' RUNS',
+        sub: N + ' runs landed' + (v >= N ? ' — the tester agrees' : v > 0 ? ' — the rest ride on faith' : ' — verified by optimism') },
+      { id: 'ck-torque', ok: conns.length > 0 && conns.every(function (c) { return c.b && c.torqued; }),
         okTxt: '✓ TORQUED', sub: 'all terminals to spec' },
       { id: 'ck-det', ok: a.det.seated,
         okTxt: a.det.slam > PG2.SLAM_THRESHOLD ? '✓ SEATED*' : '✓ SEATED',
@@ -3562,14 +4070,14 @@
         '<div class="flyoff-table-wrap">' +
           '<div class="ft-head">LINE-BY-LINE ADJUDICATION · TWO PADS, ONE CONTRACT</div>' +
           '<table class="flyoff-table">' +
-            '<tr class="ft-cols"><th></th><th>REDLINE</th><th>VANTAGE</th></tr>' +
+            '<tr class="ft-cols"><th></th><th>REDSKY</th><th>VANTAGE</th></tr>' +
             fRow('CRATER', r.stamps.size.value, r.stamps.size.ok, vf.stamps.size.value, vf.stamps.size.ok) +
             fRow('TIMING', r.stamps.timing.value, r.stamps.timing.ok, vf.stamps.timing.value, vf.stamps.timing.ok) +
             fRow('CLEAN', r.stamps.clean.value, r.stamps.clean.ok, vf.stamps.clean.value, vf.stamps.clean.ok) +
             '<tr class="ft-score"><td>STAMPS</td><td>' + r.flyoff.yourScore + ' / 3</td><td>' + r.flyoff.theirScore + ' / 3</td></tr>' +
           '</table>' +
           '<div class="ft-verdict">' + (r.flyoff.beat
-            ? 'VERDICT: REDLINE. ' + (r.flyoff.yourScore === r.flyoff.theirScore ? 'Tie on stamps — your crater sat closer to the number.' : 'More lines met. The board shakes the correct hand.')
+            ? 'VERDICT: REDSKY. ' + (r.flyoff.yourScore === r.flyoff.theirScore ? 'Tie on stamps — your crater sat closer to the number.' : 'More lines met. The board shakes the correct hand.')
             : 'VERDICT: VANTAGE. ' + (r.flyoff.theirScore === r.flyoff.yourScore ? 'Tie on stamps — their crater sat closer to the number.' : 'More lines met. Their VP is already dictating a press release.')) + '</div>' +
         '</div>';
     }
@@ -3582,9 +4090,11 @@
         flyTable +
         (r.hint ? '<div class="hint-callout"><span class="hc-kicker">TEST #' + S.attempt +
           (r.win ? ' — VERDICT' : ' — WHAT TO TWEAK') + '</span>' + r.hint + '</div>' : '') +
+        (r.inspectorNote ? '<div class="inspector-aside"><span class="ia-kicker">INSPECTOR’S ASIDE · WIRE COLOUR CODE</span>' +
+          r.inspectorNote + '</div>' : '') +
         '<div class="award-banner ' + (r.win ? 'win' : 'lose') + '">' +
           '<div class="ab-kicker">' + (r.win ? 'CONTRACT AWARDED' : 'CONTRACT NOT AWARDED') + '</div>' +
-          '<div class="ab-title">' + (r.win ? 'REDLINE ORDNANCE WORKS' : (r.vantage.ok ? 'VANTAGE DYNAMICS' : 'NO AWARD MADE')) + '</div>' +
+          '<div class="ab-title">' + (r.win ? 'REDSKY INC' : (r.vantage.ok ? 'VANTAGE DYNAMICS' : 'NO AWARD MADE')) + '</div>' +
           '<div class="ab-stars">' + stars + '</div>' +
         '</div>' +
         (actComplete ? '<div class="act-banner"><div class="ab-kicker">★ ACT I COMPLETE ★</div>' +
@@ -3594,7 +4104,7 @@
           '<tr><td>DEVELOPMENT AWARD</td><td>' + (r.payout.award ? fmt$(r.payout.award) : '—') + '</td></tr>' +
           '<tr><td>CLEAN-DETONATION BONUS</td><td>' + (r.payout.bonus ? '+' + fmt$(r.payout.bonus) : '—') + '</td></tr>' +
           '<tr><td>PARTS &amp; REFINING (AS BUILT)</td><td>−' + fmt$(r.payout.cost) + '</td></tr>' +
-          '<tr class="net"><td>NET TO REDLINE</td><td class="' + (r.payout.net >= 0 ? 'pos' : 'neg') + '">' +
+          '<tr class="net"><td>NET TO REDSKY</td><td class="' + (r.payout.net >= 0 ? 'pos' : 'neg') + '">' +
             (r.payout.net >= 0 ? '' : '−') + fmt$(Math.abs(r.payout.net)) + '</td></tr>' +
         '</table>' +
         '<div class="clipping">' +
@@ -3646,16 +4156,16 @@
     doc.innerHTML =
       '<div class="fp-mast"><span class="fp-price">ONE SHILLING</span><b>ORDNANCE WEEKLY</b><span class="fp-date">TRADE PAPER OF RECORD · SPECIAL</span></div>' +
       '<hr class="doc-rule">' +
-      '<div class="fp-headline">REDLINE TAKES THE FLY-OFF</div>' +
+      '<div class="fp-headline">REDSKY TAKES THE FLY-OFF</div>' +
       '<div class="fp-sub">VANTAGE VP DEMANDS “RECOUNT OF THE PHYSICS”; PHYSICS DECLINES</div>' +
       '<hr class="doc-rule thin">' +
       '<div class="fp-cols">' +
-        '<p>SECTOR 9 — In a side-by-side demonstration witnessed by the full review board, a lunch tent, and one unaffiliated jackrabbit, REDLINE ORDNANCE WORKS took contract ' + r.rfp.id +
+        '<p>SECTOR 9 — In a side-by-side demonstration witnessed by the full review board, a lunch tent, and one unaffiliated jackrabbit, REDSKY INC took contract ' + r.rfp.id +
         ' from Vantage Dynamics by ' + (r.flyoff.yourScore > r.flyoff.theirScore ? 'a margin of ' + (r.flyoff.yourScore - r.flyoff.theirScore) + ' stamp' + (r.flyoff.yourScore - r.flyoff.theirScore > 1 ? 's' : '') : 'the width of a tape measure') + '.</p>' +
         '<p>The winning article posted <b>' + r.stamps.size.value + '</b> at <b>' + r.stamps.timing.value + '</b>' +
         (r.stamps.clean.ok ? ', in one bang, as contracted' : '') + ' — on test #' + S.attempt + ' of the series' +
         (rec.tests > S.attempt ? ', after ' + rec.tests + ' range days of what the contractor calls “convergence” and the caterer calls “job security”' : '') + '.</p>' +
-        '<p>Asked for comment, the founder of Redline reportedly pointed at the crater and signed something.</p>' +
+        '<p>Asked for comment, the founder of Redsky reportedly pointed at the crater and signed something.</p>' +
         '<p class="fp-quote">“We consider this outcome an anomaly of catering.” — R. Cavendish Vane, VP of Client Triumph, Vantage Dynamics</p>' +
         '<p>The Authority confirms ACT I of the proving programme is CLOSED, and that a larger, meaner set of folders is being stamped for the works. The trade paper of record will be watching.</p>' +
       '</div>' +
@@ -3679,7 +4189,7 @@
       '<div class="ir-title">INCIDENT REPORT</div>' +
       '<div class="ir-row">' +
         '<div class="ir-field"><div class="ir-lbl">SERIES</div><div class="ir-val">' + inc.series + '</div></div>' +
-        '<div class="ir-field"><div class="ir-lbl">CONTRACTOR</div><div class="ir-val">REDLINE ORDNANCE WORKS</div></div>' +
+        '<div class="ir-field"><div class="ir-lbl">CONTRACTOR</div><div class="ir-val">REDSKY INC</div></div>' +
       '</div>' +
       '<div class="ir-row">' +
         '<div class="ir-field"><div class="ir-lbl">OUTCOME</div><div class="ir-val" id="ir-outcome"></div></div>' +
@@ -3973,7 +4483,7 @@
     showUI(null);
     var M = SAVE.museum;
     var el = $('museum-scroll');
-    var html = '<div class="mu-head">REDLINE ORDNANCE WORKS</div>' +
+    var html = '<div class="mu-head">REDSKY INC</div>' +
       '<div class="mu-title">THE INCIDENT REPORT MUSEUM</div>' +
       '<div class="mu-sub">EVERY DISASTER FRAMED · EVERY FIRST IN BRASS · ADMISSION FREE, DIGNITY OPTIONAL</div>';
     // wall of firsts
@@ -4416,13 +4926,33 @@
       });
       return out;
     },
-    wireAnchors: function () {
-      if (!bay.wiring) return null;
-      var out = { posts: {}, terms: {} };
-      PG2.WIRES.forEach(function (c) { out.posts[c] = screenOfLocal(bay.wiring.posts[c].local); });
-      Object.keys(bay.wiring.terms).forEach(function (t) { out.terms[t] = screenOfLocal(bay.wiring.terms[t].local); });
-      out.layout = PG2.panelLayout(S.seed);
-      return out;
+    wiring: function () {
+      if (!wst || $('wire-station').classList.contains('hidden')) return null;
+      var r = stationRect();
+      var terms = {};
+      Object.keys(wst.terms).forEach(function (pin) {
+        terms[pin] = { x: r.left + wst.terms[pin].x, y: r.top + wst.terms[pin].y, n: wst.nums[pin] };
+      });
+      var spools = {};
+      Object.keys(wst.spools).forEach(function (c) {
+        spools[c] = { x: r.left + wst.spools[c].x, y: r.top + wst.spools[c].y };
+      });
+      var probes = {};
+      ['red', 'blk'].forEach(function (id) {
+        probes[id] = { x: r.left + wst.probes[id].x, y: r.top + wst.probes[id].y, pin: wst.probes[id].pin };
+      });
+      return {
+        runs: JSON.parse(JSON.stringify(wst.spec.runs)),
+        decoys: wst.spec.decoys.slice(),
+        numbers: JSON.parse(JSON.stringify(wst.nums)),
+        plan: JSON.parse(JSON.stringify(wst.plan)),
+        terms: terms, spools: spools, probes: probes,
+        conns: JSON.parse(JSON.stringify(S.assembly.conns)),
+        verified: PG2.verifiedRuns(S.assembly, rfp()),
+        complete: PG2.wiringComplete(S.assembly, rfp()),
+        schem: wst.schem, testing: wst.testing,
+        meter: $('meter-read').textContent
+      };
     },
     detAnchors: function () {
       if (!bay.detStage) return null;

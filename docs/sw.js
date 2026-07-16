@@ -1,10 +1,10 @@
-/* PROVING GROUNDS — service worker.
+/* REDSKY INC — service worker.
    Precaches same-directory assets for full offline play.
    Strategy: network-first with cache fallback, so local dev always sees
    fresh files and ?seed=/?c= URLs resolve to the cached shell offline. */
 'use strict';
 
-var CACHE_VERSION = 'pg-m2-v1';
+var CACHE_VERSION = 'pg-m3-v1';
 var PRECACHE = [
   './',
   './index.html',
@@ -15,7 +15,10 @@ var PRECACHE = [
   './manifest.webmanifest',
   './icon-192.png',
   './icon-512.png',
-  './vendor/three.min.js'
+  './vendor/three.min.js',
+  './assets/tex-metal.jpg',
+  './assets/tex-paper.jpg',
+  './assets/tex-bakelite.jpg'
 ];
 
 self.addEventListener('install', function (e) {

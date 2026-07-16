@@ -10,7 +10,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='6.4' fill='none' stroke='%23e5a13d' stroke-width='1.4'/%3E%3Cpath d='M8 0v5M8 11v5M0 8h5M11 8h5' stroke='%239cc8ea' stroke-width='1.4'/%3E%3C/svg%3E">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon-192.png">
-<title>PROVING GROUNDS — Build it right. The graph doesn't lie.</title>
+<title>REDSKY INC — Build it right. The graph doesn't lie.</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -33,7 +33,7 @@
         <circle cx="60" cy="60" r="3" fill="currentColor"/>
       </svg>
       <div class="title-form">FORM RD-1147-A · REPUBLIC PROVING AUTHORITY</div>
-      <h1>PROVING<br>GROUNDS</h1>
+      <h1>REDSKY<br>INC</h1>
       <p class="tagline">Build it right. The graph doesn’t lie.</p>
       <ol class="howto">
         <li><b>Build it</b> — snap a shell and parts together on the stand, then wire it up by hand.</li>
@@ -46,7 +46,7 @@
         <button id="btn-title-board" type="button">📋 CONTRACT BOARD</button>
         <button id="btn-title-museum" type="button">🏛 THE MUSEUM</button>
       </div>
-      <p class="title-foot">REDLINE ORDNANCE WORKS · ALL SCIENCE WITHIN IS INVENTED</p>
+      <p class="title-foot">REDSKY INC · ALL SCIENCE WITHIN IS INVENTED</p>
     </div>
     <button id="btn-settings" type="button" aria-label="Settings">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 8.4A3.6 3.6 0 1 0 12 15.6 3.6 3.6 0 0 0 12 8.4zm8.9 3.6c0-.5-.05-1-.14-1.47l2.06-1.6-2-3.46-2.43.98a7.9 7.9 0 0 0-2.54-1.47L15.5 2.4h-4l-.35 2.58c-.92.32-1.78.82-2.54 1.47l-2.43-.98-2 3.46 2.06 1.6a8.2 8.2 0 0 0 0 2.94l-2.06 1.6 2 3.46 2.43-.98c.76.65 1.62 1.15 2.54 1.47l.35 2.58h4l.35-2.58a7.9 7.9 0 0 0 2.54-1.47l2.43.98 2-3.46-2.06-1.6c.09-.48.14-.97.14-1.47z"/></svg>
@@ -108,7 +108,7 @@
   <!-- ================= ASSEMBLY BAY UI ================= -->
   <div id="ui-bay" class="ui hidden">
     <header class="bay-head">
-      <div class="bay-brand"><span id="bay-brand-txt">REDLINE ORDNANCE WORKS · BAY 2</span><span class="bay-attempt" id="bay-attempt"></span></div>
+      <div class="bay-brand"><span id="bay-brand-txt">REDSKY INC · BAY 2</span><span class="bay-attempt" id="bay-attempt"></span></div>
       <div class="bay-meters">
         <div class="meter" id="m-crater">
           <div class="m-lbl">PREDICTED CRATER <b id="m-crater-val">—</b></div>
@@ -154,7 +154,32 @@
     <div id="stage-bar" class="hidden"></div>
 
     <div id="wiring-ui" class="stage-ui hidden">
-      <div class="stage-note" id="wiring-note">Drag each wire from its post to a terminal. Read the labels.</div>
+      <div class="stage-note" id="wiring-note">Read the schematic. Wire the panel.</div>
+      <div id="wire-station" class="hidden">
+        <div id="wire-board">
+          <div id="wb-lamp"></div>
+        </div>
+        <div id="wire-bench">
+          <div id="spool-rack"></div>
+          <div id="tester-box">
+            <div class="tb-head">CONTINUITY TESTER · RD-77</div>
+            <svg id="meter-svg" viewBox="0 0 120 58" aria-hidden="true"></svg>
+            <div id="meter-read">CLIP BOTH PROBES</div>
+          </div>
+        </div>
+        <svg id="wire-svg" aria-hidden="true"></svg>
+        <div id="probe-red" class="probe"><span class="probe-tip"></span></div>
+        <div id="probe-blk" class="probe blk"><span class="probe-tip"></span></div>
+      </div>
+      <button id="schem-tab" type="button" class="hidden">⚡ SCHEMATIC</button>
+      <div id="schem-card" class="hidden">
+        <div class="schem-paper">
+          <div class="schem-head"><span id="schem-title">WIRING SCHEMATIC</span><button id="schem-pin" type="button">📌 PIN IT</button></div>
+          <svg id="schem-svg"></svg>
+          <div id="schem-runs"></div>
+          <div class="schem-foot">PANEL LAYOUT MAY DIFFER FROM DRAWING. THE NUMBERS DO NOT. · DWG RD-1147/W</div>
+        </div>
+      </div>
       <div id="torque-ring" class="hidden"><div id="torque-ring-fill"></div></div>
       <button id="btn-panel-done" type="button" class="bay-cta hidden">PANEL CLOSED →</button>
     </div>

@@ -131,6 +131,53 @@ var PGAudio = (function () {
     noise(t, 0.05, 0.12, 600, 1500, 'bandpass');
     osc('sine', 180, t, 0.06, 0.09, 120);
   }
+  /* ---- THE WIRING STATION (M3) ---- */
+  function spoolPull() { // wire unwinding off the rack — a ratchety zip
+    if (!ok()) return;
+    var t = now();
+    for (var i = 0; i < 6; i++) {
+      noise(t + i * 0.028, 0.02, 0.06 + i * 0.008, 1400 + i * 260, 2400 + i * 380, 'bandpass');
+    }
+    osc('triangle', 190, t, 0.16, 0.05, 260);
+  }
+  function wireClip(gauge) { // wire lands on a terminal — pitch per gauge (0 heavy … 2 light)
+    if (!ok()) return;
+    var g = gauge == null ? 1 : gauge;
+    var f = 300 + g * 140;                       // heavier wire clips deeper
+    var t = now();
+    osc('square', f * 4.4, t, 0.02, 0.08);
+    osc('sine', f, t + 0.012, 0.07, 0.15, f * 0.68);
+    noise(t, 0.02, 0.06, 3200, 5000, 'highpass');
+  }
+  function probeClip() { // tester probe bites a terminal
+    if (!ok()) return;
+    var t = now();
+    osc('square', 1900, t, 0.015, 0.07);
+    osc('sine', 420, t + 0.012, 0.05, 0.10, 300);
+  }
+  function needleTone(kind) { // the tester speaks: warm dyad / flat buzz / open blip
+    if (!ok()) return;
+    var t = now();
+    if (kind === 'good') {
+      osc('triangle', 523, t + 0.05, 0.4, 0.10);
+      osc('triangle', 659, t + 0.10, 0.45, 0.11);
+      osc('sine', 1046, t + 0.16, 0.3, 0.04);
+    } else if (kind === 'open') {
+      osc('sine', 300, t + 0.05, 0.12, 0.09, 290);
+      osc('sine', 240, t + 0.24, 0.16, 0.09, 230);
+    } else {
+      osc('sawtooth', 138, t + 0.05, 0.34, 0.11, 126);
+      osc('sawtooth', 92, t + 0.07, 0.3, 0.07, 88);
+    }
+  }
+  function paperFold(open) { // the schematic unfolds / folds away
+    if (!ok()) return;
+    var t = now();
+    noise(t, 0.09, 0.12, 1200, open ? 3200 : 2200, 'bandpass');
+    noise(t + 0.11, 0.07, 0.09, 1800, 3600, 'bandpass');
+    for (var i = 0; i < 4; i++) noise(t + 0.05 + i * 0.045, 0.012, 0.05, 3600, 5600, 'highpass');
+  }
+
   var lastRatchet = 0;
   function ratchet() { // torque wrench click
     if (!ok()) return;
@@ -371,6 +418,8 @@ var PGAudio = (function () {
     stampThud: stampThud, buzz: buzz,
     thunk: thunk, pickup: pickup, unsnap: unsnap, ghostHum: ghostHum,
     wireSnap: wireSnap, wireDrop: wireDrop, ratchet: ratchet, torqueDone: torqueDone,
+    spoolPull: spoolPull, wireClip: wireClip, probeClip: probeClip,
+    needleTone: needleTone, paperFold: paperFold,
     slide: slide, seatClick: seatClick, slam: slam,
     coverFlick: coverFlick, switchClack: switchClack,
     engineStart: engineStart, engineStop: engineStop, enginePitch: enginePitch,
