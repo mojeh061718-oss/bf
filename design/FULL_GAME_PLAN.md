@@ -40,6 +40,27 @@ New part categories arrive **one contract at a time**, each introducing one new 
 - **Instrument packages** (accelerometers, cameras) — optional paid sub-specs on RFPs ("Authority requests onboard footage: +$800").
 - **Aesthetics bay:** paint, stencils, fin styles — zero mechanical effect, pure ownership. ("Government Grey No. 2 or nearest available regret.")
 
+### 3.2a The Parts Drawer (founder directive: no bottom scroll — KSP's grammar)
+The bottom scroll strip is retired. Parts live in a **KSP-style side drawer**: a slide-out panel on the left edge with **category tabs down its spine** (Shells · Payload · Fuzing · Power · Guidance · Trim), each tab opening a **2-column grid of part tiles** (3D-rendered icons, name, cost) that scrolls vertically. One-handed reach: the drawer opens from a thumb-edge tab, collapses when a part is grabbed (the build zone gets the whole screen back during the drag), and remembers your last category. Locked parts show as silhouettes with their unlock contract number — the catalog *is* the progression brochure.
+
+### 3.2b The Parts Catalog (founder directive: "tons of new parts" — realistic-feeling, fully invented)
+Target: **40+ parts by Act II's end**, every one earning its place with a legible effect, arriving one or two per contract so the drawer grows with the player. All fictional under authentic-feeling names and looks (the realism is industrial-design realism — stampings, decals, hex bolts — never real-weapons data). Categories:
+- **Shells & structure:** compact/standard/heavy casings, thin-wall (light, fragile), hardened penetrator nose, segmented casing (frag pattern), demolition slab frame.
+- **Payload:** EMBER / FROST / EMBER-X / GLAZE canisters (existing), quarter-size trim cells, dense-pack cells (heavy, potent), inert ballast (weight/CoM trim).
+- **Fuzing & timing:** the timer dial family (clockwork → precision), impact fuze nose, proximity ring (unlocks airburst RFPs), delay relay, redundant dual-fuze block.
+- **Power & wiring:** battery packs (S/L), capacitor bank, junction block, safety switch, relay, shielded harness (widens wrong-color tolerance).
+- **Guidance & stabilization (Act II→III):** fin sets (drag vs. stability trade), spin band, gyro unit, seeker/beacon terminal packages, booster stage (the Long Shot stack).
+- **Instrumentation & trim:** accelerometer pack, camera pod (footage sub-specs), paint/stencils/decals (pure ownership).
+Every part states three plain numbers max on its tile (cost, weight, one effect) — depth from combinatorics, never from stat sheets.
+
+### 3.2c Build Phases (founder directive: multiple phases, each with direct impact)
+Assembly formalizes into **four phases with a visible phase rail** at the top of the bay — each phase's choices land on a different axis of the test result, so impact is direct and legible:
+1. **STRUCTURE** — shell, nose, frame: sets crater *shape language*, weight class, and what the later phases can mount.
+2. **PAYLOAD** — cells and arrangement: sets yield and center-of-mass (crater size and placement).
+3. **SYSTEMS** — fuzing, power, guidance mounts: sets *when and whether* it works (timing spec, reliability paths).
+4. **CLOSE-OUT** — wiring, detonator, arm (the hands-on trilogy): sets *whether your intent survives your workmanship*.
+Phases are freely revisitable before the truck rolls (the rail is navigation, not a lock), but the scorecard attributes outcomes to phases ("PLACEMENT — Payload phase"), teaching the map from decision to consequence.
+
 ### 3.3 The close-out grows a spine
 Wiring/detonator/arm remains the trilogy, deepened by device class: more terminals with a printed wiring diagram to *read* (the diagram is the difficulty), dual-detonator devices needing two clean seats, cold-weather contracts where gloves widen your steadiness tolerance but slow you down. One new wrinkle per act — the verbs never change, the stakes do.
 
@@ -79,6 +100,27 @@ Long Shot RFPs score on **CEP at range** (miss distance rings), time-on-target w
 ### Feasibility note (engineering sign-off)
 All of it is squarely buildable in the existing stack: the wall map and ocean plot are three.js/canvas 2D work, the flight sim is a few hundred lines of deterministic invented physics, camera cuts reuse the Station-N grammar, and real-time mode is a timestamp + one push notification — no server flight simulation needed (the outcome is sealed deterministically at launch; the drama is revelation, not computation).
 
+## 5.6 R&D → Certification → Production (founder directive: the Weapons Assembly economy)
+
+The game's structure reorganizes around a **company HQ menu** with two front doors, making R&D a first-class mode rather than a per-contract errand. (All of it fiction, demonstration-framed as ever — the "products" only ever meet test ranges and instrumented targets.)
+
+### The HQ (new main menu)
+A single establishing shot of the Redline compound with doors, replacing the bare title flow:
+- **CONTRACT OFFICE** — the corkboard: authored RFPs and the Weekly, as today.
+- **WEAPONS ASSEMBLY** — the free R&D workshop: build anything from your unlocked catalog on your own dime, no spec sheet over your shoulder.
+- **THE RANGE** (from Weapons Assembly) — test R&D builds **against varied test objects**, not just open desert: derelict trucks, concrete wall sections, a decommissioned bunker, glass instrumentation arrays, stacked container targets. Each object measures differently (penetration, wall breach %, overpressure at distance) and each gives its own gorgeous long-lens payoff.
+- **THE STILL / MUSEUM / ORDNANCE WEEKLY** — side doors, as built.
+
+### The certification-and-production loop (the new money game)
+1. **Prototype** in Weapons Assembly — iterate on the range against the objects that match your design's intent. This is pure tinker loop, self-directed.
+2. **Certify** — when a design performs, submit it to the Authority's **Type Certification**: a standards series (three consecutive range tests: one performance, one consistency repeat, one abuse test like the hot-soak or the washboard transport) with the design *frozen* — no tweaks mid-series. Passing stamps it **PRODUCTION READY** with a type plate (RED-7 "Sledge") and a certified spec card generated from its *measured* results.
+3. **The Auction** — certified types go to a **production bid board**: buyers (the Authority, allied programs, the Navy's test directorate — all fictional) post orders ("48 units of a Type II breach charge, delivery in 30 days") and *bid on your certified types*; multiple interested buyers push the price up in a short, tense, watchable auction beat. Better measured specs, cleaner incident history, and reputation pull bigger bids.
+4. **Production run** — accepting an order books your workshop for its duration (real-ish time drip like batch curing) and pays out on delivery, with a small chance of a **field QA callback** (an incident report from the customer's acceptance testing — root-caused to your certified design's actual weak point, feeding the next design generation).
+This gives money three sources with three feels: contract prizes (sprints), production royalties (investments), and the Weekly (competition) — and makes "landing the big order" the mid-game fantasy, exactly per the founder's note.
+
+### Difficulty posture (founder directive: challenging, never focus-losing)
+The certification series is where difficulty concentrates — repeatability punishes lucky builds, which is fair and legible. Everywhere else the tinker-loop guarantees (2–5 test convergence, plain-language causes, zero retry friction) hold. Rule of thumb across all modes: **the player should always know what to try next**; if a playtest note ever reads "I don't know what to do," that's a defect, not difficulty.
+
 ## 6. The Rival & The World
 
 - **Vantage Dynamics** bids on your contracts with era-appropriate results (statistically simulated in Act I, genuinely design-resolved by Act III — their failures obey the same physics). They adapt to your track record: undercut your costs, poach a supplier (a part gets pricier for a while), and occasionally suffer a public disaster that shifts the next RFP's paranoia ("interlock clauses doubled this season").
@@ -114,9 +156,11 @@ All of it is squarely buildable in the existing stack: the wall map and ocean pl
 |---|---|---|
 | **M1 — The Amazing Bay** *(starts now)* | Assembly feel upgrades (3.1), convoy sequence, desert range v2, PWA manifest + offline, save/persistence, settings (audio/skip/handedness) | A stranger hands back the phone saying "the building part feels great"; presentation beats screenshot-worthy |
 | **M2 — Act I complete** | 8 contracts + refinery system v1 + timer dial + payload arrangement + detonation fidelity pass + Incident Museum | Act I playtests at 2–4 hour completion with <5% quit-on-frustration; sweep suite green |
-| **M3 — The Living Game** | Weekly RFP + backend + sandbox + replay links + Ordnance Weekly + season 1 | 100 external testers; D7 retention >25% of D1 |
-| **M4 — Act II** | Precision era content, staff, weather, fly-offs, Vantage adaptation | Full act ships; Weekly RFP participation >40% of actives |
-| **M5 — Act III + 1.0** | Program-scale devices, delivery stacks, Centennial finale, prestige | 1.0 launch |
+| **M2.5 — The Wiring Bench** *(in flight)* | Schematic-card wiring puzzle, component board, continuity tester, CC0 texture pass | Wiring reads as "thinking, not guessing" in playtest |
+| **M3 — The Workshop** | HQ menu, KSP-style parts drawer, catalog expansion toward 40+ parts, four build phases with phase rail, Weapons Assembly + target-object range, Type Certification + production bid board | A playtester lands a production order and calls it the best moment in the game |
+| **M4 — The Living Game** | Weekly RFP + backend + sandbox replay links + season 1 | 100 external testers; D7 retention >25% of D1 |
+| **M5 — Act II** | Precision era content, staff, weather, airburst/proximity RFPs, Vantage adaptation | Full act ships; Weekly RFP participation >40% of actives |
+| **M6 — Act III + 1.0** | Long Shot program, delivery stacks, Centennial finale, prestige | 1.0 launch |
 
 ## 11. Open Questions (founder's desk)
 
@@ -125,4 +169,4 @@ All of it is squarely buildable in the existing stack: the wall map and ocean pl
 3. **A second interactive biome** (coastal barge tests? arctic range?) — M4 stretch or 1.1?
 
 ---
-*Next action: M1 and M2 have shipped — Act I is complete (eight contracts, refinery v1 with GLAZE blending, timer dial, payload arrangement, the fly-off, Incident Museum, contract board, dusk palette, detonation/weather/scarring pass). M3 — The Living Game — is next.*
+*Next action: M2.5 (wiring bench) is in flight; M3 — The Workshop — follows immediately: HQ menu, KSP parts drawer, catalog expansion, build phases, Weapons Assembly R&D, target-object range, certification and the production bid board.*
