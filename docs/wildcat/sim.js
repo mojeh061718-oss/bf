@@ -345,6 +345,11 @@
     d.grind = false;
     d.brokenPipe = false;
     d.born = g.t;
+    // new spud takes the wheel: straighten other drills so they don't
+    // curve unattended
+    for (var k = 0; k < g.derricks.length; k++) {
+      if (k !== idx && g.derricks[k].state === 'drilling') g.derricks[k].steer = 0;
+    }
     g.focus = idx;
     g.events.push({ type: 'spud', d: idx, x: x });
     return { ok: true, d: idx };

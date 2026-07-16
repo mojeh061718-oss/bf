@@ -150,7 +150,7 @@
       fogCtx.fillRect(rng() * WCC.W, rng() * WCC.DEPTH, 3 + rng() * 4, 3 + rng() * 4);
     }
     var gr = fogCtx.createLinearGradient(0, 0, 0, WCC.DEPTH);
-    gr.addColorStop(0, 'rgba(30,26,50,0.35)');
+    gr.addColorStop(0, 'rgba(30,26,50,0.16)');
     gr.addColorStop(0.4, 'rgba(10,12,24,0)');
     fogCtx.fillStyle = gr;
     fogCtx.fillRect(0, 0, WCC.W, WCC.DEPTH);
@@ -980,6 +980,13 @@
       }
     }
     G.events.length = 0;
+    // if the focused drill finished (strike/blowout/dry), hand steering to
+    // any rig still drilling
+    if (G.focus >= 0 && G.derricks[G.focus] && G.derricks[G.focus].state !== 'drilling') {
+      for (var fd = 0; fd < G.derricks.length; fd++) {
+        if (G.derricks[fd].state === 'drilling') { G.focus = fd; break; }
+      }
+    }
   }
   function flashCash() {
     var el = $('cash');
@@ -1114,7 +1121,7 @@
   }
 
   /* ---------------- hint system ---------------- */
-  var shopEverOpened = false;
+  var shopEverOpened = false;   // set true on first shop open
   function updateHint() {
     var el = $('hint');
     var msg = null;
