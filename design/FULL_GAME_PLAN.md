@@ -61,6 +61,20 @@ Assembly formalizes into **four phases with a visible phase rail** at the top of
 4. **CLOSE-OUT** — wiring, detonator, arm (the hands-on trilogy): sets *whether your intent survives your workmanship*.
 Phases are freely revisitable before the truck rolls (the rail is navigation, not a lock), but the scorecard attributes outcomes to phases ("PLACEMENT — Payload phase"), teaching the map from decision to consequence.
 
+### 3.2d Nomenclature (founder directive: real-feeling designations, fictional substance)
+Whimsical names (EMBER/FROST) retire in favor of **stockroom mil-spec designations** — the fiction of a real supply chain, with zero real-world referents. House rules:
+- **Fills:** `FILLER 1A` (`F-1A` on the canister stencil) = the workhorse; `F-2S` = the stabilized fill; `F-1X` = the refined high-output grade; `ADDITIVE G-3` = the stabilizing glaze. Lot numbers on every canister (`LOT 214-C`) purely for flavor.
+- **Propellants (missile era):** `PROPELLANT 1A / 1B / 2A` — grades trade thrust curve vs. burn stability vs. temperature sensitivity, all invented.
+- **Designation grammar:** family word + number + letter suffix (variant), stenciled type plates, Authority paperwork referring to everything by its full designation while the crew abbreviates ("run the one-alpha"). Color-coding on canisters/spools stays (amber/blue/violet bands) so accessibility never depends on reading a stencil.
+- **Hard rule preserved:** no real compound, designation, or recipe — collision-checked against real nomenclature; when in doubt, invent harder. The names *feel* like a warehouse, the science stays ours.
+
+### 3.2e Precision doctrine (founder directive: finely-tuned, make-or-break — "builds that work and stay true")
+The game's skill ceiling is **fine tuning with legible consequences**. Placement isn't just snapping — it's *adjustment*:
+- **Micro-adjust after snap:** placed parts (fins especially) accept nudge handles — position along the body, cant angle in fractional degrees — with a machinist's readout appearing during adjustment. A fin set 2° off-cant flies; it just *spirals* — and the tracking footage shows it.
+- **Make-or-break, fairly:** high-performance envelopes are narrow (the missile that flies true is a genuinely tuned artifact), but every miss diagnoses itself in flight footage + incident language ("roll developed at T+2.1 — check fin cant, port side"). The tinker loop is the safety net that makes razor-edge tuning fun rather than cruel: converging on true flight IS the game.
+- **Propellant as recipe:** grade choice + load mass + (later) nozzle pairing set the thrust profile; the wrong pairing doesn't refuse to fly — it flies *wrong*, visibly and diagnosably.
+- **"Stays true" as a stat:** certified types carry a measured CONSISTENCY grade from their certification series — the number production buyers pay premiums for. Precision work literally converts to money.
+
 ### 3.3 The close-out grows a spine
 Wiring/detonator/arm remains the trilogy, deepened by device class: more terminals with a printed wiring diagram to *read* (the diagram is the difficulty), dual-detonator devices needing two clean seats, cold-weather contracts where gloves widen your steadiness tolerance but slow you down. One new wrinkle per act — the verbs never change, the stakes do.
 
