@@ -1,7 +1,7 @@
-# PROVING GROUNDS
+# REDSKY INC
 ### Build it right. The graph doesn't lie.
 
-A defense-contractor engineering game for iPhone (PWA). You run **Redline Ordnance Works**, a scrappy outfit bidding against the industry giant **Vantage Dynamics** for government test contracts. Snap the device together KSP-style in a 3D assembly bay, wire it by hand, seat the detonator with a steady thumb, and take it to the range — where a long-lens camera 1.6 km out tells the truth. Tweak one thing. Refire. Converge.
+A defense-contractor engineering game for iPhone (PWA). You run **Redsky Inc**, a scrappy outfit bidding against the industry giant **Vantage Dynamics** for government test contracts. Snap the device together KSP-style in a 3D assembly bay, wire it by hand, seat the detonator with a steady thumb, and take it to the range — where a long-lens camera 1.6 km out tells the truth. Tweak one thing. Refire. Converge.
 
 **All science within is invented.** Fictional compounds, fictional physics. The realism is the engineering *process* — and the incident reports.
 

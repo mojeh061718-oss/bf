@@ -1,4 +1,5 @@
-# PROVING GROUNDS — Full Game Plan
+# REDSKY INC — Full Game Plan
+*(game title: REDSKY INC; formerly working-titled Proving Grounds — the proving ground remains the fiction's stage, Redsky Inc is the company you build)*
 ### The design of record for taking the winning demo to a complete, retention-grade iPhone PWA
 
 *Status: approved direction. The demo (v2) is the seed; this plan is the tree.*
@@ -19,7 +20,7 @@ The player is a hands-on engineer building a company. Every device is assembled 
 
 - **Ring 1 — The Test (minutes):** Assembly Bay → close-out → Range Day → scorecard/incident → tweak & refire. *The demo already proves this ring.*
 - **Ring 2 — The Contract (sessions):** read RFP → bid → converge through tests within budget → adjudication vs. a rival bid → payout, reputation, and unlocks.
-- **Ring 3 — The Company (weeks):** grow Redline from a shed to a program office: facilities, staff, refinery capacity, part catalog, regions, and the season ladder against Vantage Dynamics.
+- **Ring 3 — The Company (weeks):** grow Redsky Inc from a shed to a program office: facilities, staff, refinery capacity, part catalog, regions, and the season ladder against Vantage Dynamics.
 
 ## 3. The Assembly Bay — "refine it to make it amazing" (founder directive)
 
@@ -127,7 +128,7 @@ A single establishing shot of the Redline compound with doors, replacing the bar
 
 ### The certification-and-production loop (the new money game)
 1. **Prototype** in Weapons Assembly — iterate on the range against the objects that match your design's intent. This is pure tinker loop, self-directed.
-2. **Certify** — when a design performs, submit it to the Authority's **Type Certification**: a standards series (three consecutive range tests: one performance, one consistency repeat, one abuse test like the hot-soak or the washboard transport) with the design *frozen* — no tweaks mid-series. Passing stamps it **PRODUCTION READY** with a type plate (RED-7 "Sledge") and a certified spec card generated from its *measured* results.
+2. **Certify** — when a design performs, submit it to the Authority's **Type Certification**: a standards series (three consecutive range tests: one performance, one consistency repeat, one abuse test like the hot-soak or the washboard transport) with the design *frozen* — no tweaks mid-series. Passing stamps it **PRODUCTION READY** with a type plate (RSK-7 "Sledge") and a certified spec card generated from its *measured* results.
 3. **The Auction** — certified types go to a **production bid board**: buyers (the Authority, allied programs, the Navy's test directorate — all fictional) post orders ("48 units of a Type II breach charge, delivery in 30 days") and *bid on your certified types*; multiple interested buyers push the price up in a short, tense, watchable auction beat. Better measured specs, cleaner incident history, and reputation pull bigger bids.
 4. **Production run** — accepting an order books your workshop for its duration (real-ish time drip like batch curing) and pays out on delivery, with a small chance of a **field QA callback** (an incident report from the customer's acceptance testing — root-caused to your certified design's actual weak point, feeding the next design generation).
 This gives money three sources with three feels: contract prizes (sprints), production royalties (investments), and the Weekly (competition) — and makes "landing the big order" the mid-game fantasy, exactly per the founder's note.
