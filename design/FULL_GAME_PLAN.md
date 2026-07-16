@@ -120,7 +120,7 @@ All of it is squarely buildable in the existing stack: the wall map and ocean pl
 The game's structure reorganizes around a **company HQ menu** with two front doors, making R&D a first-class mode rather than a per-contract errand. (All of it fiction, demonstration-framed as ever — the "products" only ever meet test ranges and instrumented targets.)
 
 ### The HQ (new main menu)
-A single establishing shot of the Redline compound with doors, replacing the bare title flow:
+A single establishing shot of the Redsky compound with doors, replacing the bare title flow:
 - **CONTRACT OFFICE** — the corkboard: authored RFPs and the Weekly, as today.
 - **WEAPONS ASSEMBLY** — the free R&D workshop: build anything from your unlocked catalog on your own dime, no spec sheet over your shoulder.
 - **THE RANGE** (from Weapons Assembly) — test R&D builds **against varied test objects**, not just open desert: derelict trucks, concrete wall sections, a decommissioned bunker, glass instrumentation arrays, stacked container targets. Each object measures differently (penetration, wall breach %, overpressure at distance) and each gives its own gorgeous long-lens payoff.
