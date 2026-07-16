@@ -29,8 +29,9 @@
   var dispCash = 300;
   var priceHist = [], priceTimer = 0;
   var consumedReveals = 0, pipeRevIdx = [];
-  var steer = { active: false, startX: 0, val: 0, id: -1 };
+  var steer = { active: false, startX: 0, val: 0, decay: 0, id: -1 };
   var keySteer = { l: false, r: false };
+  var confusedToastAt = -99;
   var coinTimer = 0, coinK = 0;
   var fullToastAt = -99;
   var wobT = 0, lastTs = 0;
@@ -203,7 +204,7 @@
     dispCash = G.cash;
     priceHist = []; priceTimer = 0;
     consumedReveals = 0; pipeRevIdx = [];
-    steer.active = false; steer.val = 0;
+    steer.active = false; steer.val = 0; steer.decay = 0;
     coinTimer = 0; coinK = 0; fullToastAt = -99;
     resultsTimer = -1;
     mode = null;
@@ -284,7 +285,7 @@
       var p = particles[i];
       p.t += dt;
       if (p.t >= p.life) { particles.splice(i, 1); continue; }
-      if (p.type !== 'barrel') {
+      if (p.type !== 'barrel' && p.type !== 'ring') {
         p.vy += (p.g || 0) * dt;
         p.x += p.vx * dt; p.y += p.vy * dt;
       }
@@ -307,6 +308,12 @@
         ctx.fillStyle = '#c8934f';
         ctx.fillRect(-4, -2.5, 8, 1.6); ctx.fillRect(-4, 1, 8, 1.6);
         ctx.restore();
+      } else if (p.type === 'ring') {
+        ctx.globalAlpha = a;
+        ctx.strokeStyle = '#ffb03b';
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(p.x, p.y, 6 + u * 30, Math.PI, 0, true); ctx.stroke();
+        ctx.globalAlpha = 1;
       } else if (p.type === 'smoke') {
         ctx.globalAlpha = a * 0.5;
         ctx.fillStyle = p.color;
@@ -618,20 +625,23 @@
       if (d.state === 'drilling' && d.bit) {
         var bx = w2sx(d.bit.x), by = w2sy(d.bit.y);
         var dia = !!G.upg.diamond;
+        // predicted-path preview for the focused bit: dots showing where the
+        // current steer input is taking the pipe
+        if (G.focus === i) drawSteerPreview(d);
         ctx.save();
         ctx.translate(bx, by);
         ctx.rotate(d.bit.ang);
         ctx.shadowColor = dia ? 'rgba(110,240,255,0.9)' : 'rgba(255,176,59,0.9)';
-        ctx.shadowBlur = 9;
+        ctx.shadowBlur = 11;
         ctx.fillStyle = dia ? '#6ff0ff' : '#ffb03b';
         ctx.beginPath();
-        ctx.moveTo(-4, -2); ctx.lineTo(4, -2); ctx.lineTo(0, 6);
+        ctx.moveTo(-5.5, -3); ctx.lineTo(5.5, -3); ctx.lineTo(0, 8);
         ctx.closePath(); ctx.fill();
         ctx.shadowBlur = 0;
         if (dia) {
           ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = 1;
           var sa = t * 10;
-          ctx.beginPath(); ctx.moveTo(Math.cos(sa) * 7, Math.sin(sa) * 7); ctx.lineTo(Math.cos(sa) * 10, Math.sin(sa) * 10); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(Math.cos(sa) * 8, Math.sin(sa) * 8); ctx.lineTo(Math.cos(sa) * 11, Math.sin(sa) * 11); ctx.stroke();
         }
         ctx.restore();
         if (d.grind) sparkAt(bx, by);
@@ -639,17 +649,56 @@
         if (d.wear > 20) {
           ctx.strokeStyle = d.wear > 70 ? 'rgba(255,93,106,0.95)' : 'rgba(255,176,59,0.8)';
           ctx.lineWidth = 2;
-          ctx.beginPath(); ctx.arc(bx, by, 10, -Math.PI / 2, -Math.PI / 2 + (d.wear / 100) * 6.2832); ctx.stroke();
+          ctx.beginPath(); ctx.arc(bx, by, 11, -Math.PI / 2, -Math.PI / 2 + (d.wear / 100) * 6.2832); ctx.stroke();
         }
-        // focused halo + steer arrow
-        if (G.focus === i) {
-          ctx.strokeStyle = 'rgba(255,176,59,0.35)';
-          ctx.lineWidth = 1.2;
-          ctx.beginPath(); ctx.arc(bx, by, 14 + Math.sin(t * 4) * 2, 0, 6.2832); ctx.stroke();
+        // halo: every drilling bit pulses; the focused one glows brighter
+        var foc = G.focus === i;
+        ctx.strokeStyle = 'rgba(255,176,59,' + (foc ? 0.45 : 0.18) + ')';
+        ctx.lineWidth = foc ? 1.6 : 1;
+        ctx.beginPath(); ctx.arc(bx, by, 15 + Math.sin(t * 4) * 2, 0, 6.2832); ctx.stroke();
+        // live steer chevrons hugging the bit — your drag, visualized where
+        // your eye already is
+        var sv = d.steer;
+        if (foc && Math.abs(sv) > 0.04) {
+          var sdir = sv > 0 ? 1 : -1;
+          var smag = Math.abs(sv);
+          ctx.lineCap = 'round';
+          for (var chv = 0; chv < 3; chv++) {
+            ctx.globalAlpha = chv / 3 < smag ? 0.95 : 0.2;
+            ctx.strokeStyle = '#ffd08a';
+            ctx.lineWidth = 2.6;
+            var chx = bx + sdir * (22 + chv * 11);
+            ctx.beginPath();
+            ctx.moveTo(chx - 4 * sdir, by - 6);
+            ctx.lineTo(chx + 3 * sdir, by);
+            ctx.lineTo(chx - 4 * sdir, by + 6);
+            ctx.stroke();
+          }
+          ctx.globalAlpha = 1;
         }
       }
     }
   }
+  function drawSteerPreview(d) {
+    var ang = d.bit.ang, x = d.bit.x, y = d.bit.y;
+    var tr = G.upg.horiz ? WCC.TURN_RATE_H : WCC.TURN_RATE;
+    var mx = G.upg.horiz ? WCC.MAX_ANG_H : WCC.MAX_ANG;
+    var spd = WCC.BIT_SPEED * (G.upg.bit ? WCC.BIT_FAST_MULT : 1);
+    var radPerUnit = tr / spd;      // curvature per unit travelled at full steer
+    ctx.fillStyle = '#ffd08a';
+    for (var k = 1; k <= 8; k++) {
+      ang = clamp(ang + d.steer * radPerUnit * 11, -mx, mx);
+      x += Math.sin(ang) * 11;
+      y += Math.cos(ang) * 11;
+      if (y >= WCC.DEPTH || x < 24 || x > WCC.W - 24) break;
+      ctx.globalAlpha = 0.75 * (1 - k / 9);
+      ctx.beginPath();
+      ctx.arc(w2sx(x), w2sy(y), 1.7, 0, 6.2832);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
   function pipePath(d, n) {
     ctx.beginPath();
     ctx.moveTo(w2sx(d.pipe[0].x), view.surfY);
@@ -904,7 +953,10 @@
     for (var i = 0; i < G.events.length; i++) {
       var ev = G.events[i];
       switch (ev.type) {
-        case 'spud': AU.spud(); break;
+        case 'spud':
+          AU.spud();
+          particles.push({ type: 'ring', x: w2sx(ev.x), y: view.surfY, t: 0, life: 0.6 });
+          break;
         case 'strike':
           AU.strike();
           shakeAmt = Math.max(shakeAmt, 5);
@@ -1342,6 +1394,10 @@
   cvs.addEventListener('pointerdown', function (e) {
     AU.unlock();
     if (!running || G.phase !== 'play') return;
+    // HARD gesture disambiguation: while a steering drag is live, every other
+    // touch on the canvas is ignored (a resting second finger must never
+    // steal or cancel steering)
+    if (steer.active) return;
     if (shopIsOpen()) { closeShop(); return; }
     var px = e.clientX, py = e.clientY;
     parX = (px / view.w - 0.5) * 2;
@@ -1365,10 +1421,11 @@
       return;
     }
     // tap near a drilling bit to focus it
-    var bestD = -1, bestDist = 46;
+    var bestD = -1, bestDist = 46, anyDrilling = false;
     for (var i = 0; i < G.derricks.length; i++) {
       var d = G.derricks[i];
       if (d.state !== 'drilling' || !d.bit) continue;
+      anyDrilling = true;
       var dx = w2sx(d.bit.x) - px, dy = w2sy(d.bit.y) - py;
       var dist = Math.sqrt(dx * dx + dy * dy);
       if (dist < bestDist) { bestDist = dist; bestD = i; }
@@ -1377,26 +1434,47 @@
       if (dist < bestDist) { bestDist = dist; bestD = i; }
     }
     if (bestD >= 0) G.focus = bestD;
+    if (!anyDrilling) {
+      // confused bare tap on the land: nudge toward the real flow
+      if (wobT - confusedToastAt > 4 && py > 110) {
+        confusedToastAt = wobT;
+        toast('ARM SONAR OR RIG FIRST');
+      }
+      return;
+    }
     // steering drag
     steer.active = true;
     steer.startX = px;
+    steer.decay = 0;
     steer.id = e.pointerId;
-    cvs.setPointerCapture(e.pointerId);
+    try { cvs.setPointerCapture(e.pointerId); } catch (err) {}
   });
   cvs.addEventListener('pointermove', function (e) {
     if (steer.active && e.pointerId === steer.id) {
-      steer.val = clamp((e.clientX - steer.startX) / 55, -1, 1);
+      steer.val = clamp((e.clientX - steer.startX) / 48, -1, 1);
       if (G && G.phase === 'play') WC.setSteer(G, steer.val);
     }
   });
   function steerEnd(e) {
     if (steer.active && e.pointerId === steer.id) {
-      steer.active = false; steer.val = 0;
+      steer.active = false;
+      // flick momentum: released steer eases out instead of dying instantly,
+      // so short jabby swipes still visibly curve the pipe
+      steer.decay = steer.val;
+      steer.val = 0;
+    }
+  }
+  function steerCancel(e) {
+    // pointercancel (iOS gesture takeover) — stop cleanly, no momentum
+    if (steer.active && e.pointerId === steer.id) {
+      steer.active = false; steer.val = 0; steer.decay = 0;
       if (G) WC.setSteer(G, 0);
     }
   }
   cvs.addEventListener('pointerup', steerEnd);
-  cvs.addEventListener('pointercancel', steerEnd);
+  cvs.addEventListener('pointercancel', steerCancel);
+  cvs.addEventListener('lostpointercapture', steerCancel);
+  window.addEventListener('contextmenu', function (e) { e.preventDefault(); });
 
   window.addEventListener('keydown', function (e) {
     if (!G) return;
@@ -1442,10 +1520,19 @@
     var t = wobT;
 
     if (running && G.phase === 'play') {
-      // keyboard steering
+      // keyboard steering / touch flick decay
       if (!steer.active) {
         var ks = (keySteer.r ? 1 : 0) - (keySteer.l ? 1 : 0);
-        WC.setSteer(G, ks);
+        if (ks !== 0) {
+          steer.decay = 0;
+          WC.setSteer(G, ks);
+        } else if (Math.abs(steer.decay) > 0.02) {
+          steer.decay *= Math.exp(-dt * 5.5);
+          WC.setSteer(G, steer.decay);
+        } else {
+          steer.decay = 0;
+          WC.setSteer(G, 0);
+        }
       }
       WC.step(G, dt);
       // gas fades
@@ -1541,24 +1628,18 @@
     drawParticles();
     drawFloats();
 
-    // steering indicator
-    if (steer.active && Math.abs(steer.val) > 0.03) {
-      var cy = view.h - 130;
+    // armed-mode surface guide: pulsing dashed strip inviting the tap
+    if (mode && running && G.phase === 'play') {
       ctx.save();
-      ctx.globalAlpha = 0.85;
-      ctx.fillStyle = '#ffb03b';
-      var dir = steer.val > 0 ? 1 : -1;
-      var mag = Math.abs(steer.val);
-      for (var ch = 0; ch < 3; ch++) {
-        ctx.globalAlpha = (ch / 3 < mag ? 0.9 : 0.2);
-        var cxp = view.w / 2 + dir * (26 + ch * 16);
-        ctx.beginPath();
-        ctx.moveTo(cxp - 4 * dir, cy - 7);
-        ctx.lineTo(cxp + 4 * dir, cy);
-        ctx.lineTo(cxp - 4 * dir, cy + 7);
-        ctx.lineWidth = 3; ctx.strokeStyle = '#ffb03b'; ctx.lineCap = 'round';
-        ctx.stroke();
-      }
+      ctx.strokeStyle = mode === 'sonar' ? 'rgba(120,220,255,' + (0.5 + 0.25 * Math.sin(t * 5)) + ')'
+                                         : 'rgba(255,176,59,' + (0.5 + 0.25 * Math.sin(t * 5)) + ')';
+      ctx.lineWidth = 2.5;
+      ctx.setLineDash([9, 8]);
+      ctx.lineDashOffset = -t * 26;
+      ctx.beginPath();
+      ctx.moveTo(view.ox + 4, view.surfY + 3);
+      ctx.lineTo(view.ox + view.worldW - 4, view.surfY + 3);
+      ctx.stroke();
       ctx.restore();
     }
 
