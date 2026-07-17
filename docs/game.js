@@ -718,16 +718,21 @@
   }
 
   /* ================= BAY SCENE ================= */
+  // Not a pedestal in a void any more: the bay is the company's one-room
+  // workshop at 2am — a sealed concrete slab with a painted work-circle,
+  // a pegboard over the bench, steel stores racks, a roll-up door somebody
+  // chained shut years ago, and two tungsten cage lamps nobody switches off.
   function initBay() {
     var scene = new THREE.Scene();
-    scene.background = gradientTexture([[0, '#152c44'], [0.55, '#0d1f33'], [1, '#091421']], true);
-    scene.fog = new THREE.Fog(0x0b1c2e, 12, 30);
+    scene.background = gradientTexture([[0, '#0d1a29'], [0.6, '#0a1420'], [1, '#070e17']], true);
+    scene.fog = new THREE.Fog(0x0a1420, 10, 24);
 
     var camera = new THREE.PerspectiveCamera(42, W / H, 0.05, 60);
 
-    var hemi = new THREE.HemisphereLight(0xbcd6ee, 0x2a2118, 0.75);
+    /* ---- lights: cool moonlit shell, warm tungsten heart ---- */
+    var hemi = new THREE.HemisphereLight(0x9db8d6, 0x2c231a, 0.26);
     scene.add(hemi);
-    var key = new THREE.DirectionalLight(0xfff1dc, 0.95);
+    var key = new THREE.DirectionalLight(0xfff1dc, 0.62);
     key.position.set(4, 7, 5);
     key.castShadow = true;
     key.shadow.mapSize.set(1024, 1024);
@@ -736,42 +741,230 @@
     key.shadow.camera.far = 22;
     key.shadow.radius = 4;
     scene.add(key);
-    var rim = new THREE.DirectionalLight(0x9cc8ea, 0.3);
+    var rim = new THREE.DirectionalLight(0x9cc8ea, 0.22);
     rim.position.set(-5, 3, -4);
     scene.add(rim);
+    var fill = new THREE.DirectionalLight(0x7d9cc4, 0.07);   // the night leaking in under the door
+    fill.position.set(-3, 2, 6);
+    scene.add(fill);
 
-    // floor: radial glow + grid, canvas texture — also the chalk diary of your attempts
+    /* ---- the set plan: one set of prop marks shared by floor AO + meshes ---- */
+    var ROOM_R = 9.6, WALL_H = 6.2;
+    function azPos(az, d) { return { x: Math.sin(az) * d, z: Math.cos(az) * d }; }
+    var P_BENCH = azPos(4.15, 6.6);    // workbench, back-left of the default view
+    var P_RACK = azPos(3.0, 6.4);      // stores rack, back-right
+    var P_DRUM = azPos(5.2, 4.8);      // waste drum + crates, viewer's left
+    var P_STACK = azPos(0.95, 5.3);    // spare crates behind the default camera
+    var AZ_DOOR = 3.55;                // the roll-up door, painted on the far wall
+
+    /* ---- floor: 2048px painted slab — still the chalk diary of your attempts ---- */
+    var FSZ = 2048, K = FSZ / 512, PXM = FSZ / 22;   // 22 m of world across the canvas
+    function w2cx(wx) { return FSZ / 2 + wx * PXM; }
+    function w2cy(wz) { return FSZ / 2 + wz * PXM; }
     var fc = document.createElement('canvas');
-    fc.width = fc.height = 512;
+    fc.width = fc.height = FSZ;
     var fx = fc.getContext('2d');
-    function drawFloorBase() {
-      fx.fillStyle = '#0a1826';
-      fx.fillRect(0, 0, 512, 512);
-      var fg2 = fx.createRadialGradient(256, 256, 30, 256, 256, 250);
-      fg2.addColorStop(0, '#22405e');
-      fg2.addColorStop(1, '#0a1826');
-      fx.fillStyle = fg2;
-      fx.fillRect(0, 0, 512, 512);
-      fx.strokeStyle = 'rgba(140,190,235,.16)';
-      fx.lineWidth = 1;
-      for (var i = 0; i <= 16; i++) {
-        fx.beginPath(); fx.moveTo(i * 32, 0); fx.lineTo(i * 32, 512); fx.stroke();
-        fx.beginPath(); fx.moveTo(0, i * 32); fx.lineTo(512, i * 32); fx.stroke();
+    var fbase = document.createElement('canvas');    // the slab itself, painted once
+    fbase.width = fbase.height = FSZ;
+    (function paintSlab() {
+      var b = fbase.getContext('2d');
+      var pr = PG2.stream('BAY', 'slab');
+      var i, o, g;
+      b.fillStyle = '#0c1521';
+      b.fillRect(0, 0, FSZ, FSZ);
+      // cool pool of light on sealed concrete
+      g = b.createRadialGradient(FSZ / 2, FSZ / 2, 90, FSZ / 2, FSZ / 2, FSZ * 0.46);
+      g.addColorStop(0, '#1a2b3e');
+      g.addColorStop(0.55, '#101c2a');
+      g.addColorStop(1, '#0a121d');
+      b.fillStyle = g;
+      b.fillRect(0, 0, FSZ, FSZ);
+      // warm breath under the worklight
+      g = b.createRadialGradient(FSZ / 2, FSZ / 2, 20, FSZ / 2, FSZ / 2, 300);
+      g.addColorStop(0, 'rgba(255,213,150,0.12)');
+      g.addColorStop(1, 'rgba(255,213,150,0)');
+      b.fillStyle = g;
+      b.fillRect(FSZ / 2 - 320, FSZ / 2 - 320, 640, 640);
+      // mottle: soft tone patches so the slab isn't one flat pour
+      for (i = 0; i < 26; i++) {
+        var mx = pr() * FSZ, my = pr() * FSZ, mr = 90 + pr() * 260;
+        var mg = b.createRadialGradient(mx, my, 0, mx, my, mr);
+        mg.addColorStop(0, pr() > 0.5 ? 'rgba(150,180,205,0.045)' : 'rgba(0,0,0,0.06)');
+        mg.addColorStop(1, 'rgba(0,0,0,0)');
+        b.fillStyle = mg;
+        b.fillRect(mx - mr, my - mr, mr * 2, mr * 2);
       }
-    }
+      // aggregate speckle
+      for (i = 0; i < 3200; i++) {
+        b.fillStyle = pr() > 0.6 ? 'rgba(160,190,215,0.06)' : 'rgba(0,0,0,0.08)';
+        b.fillRect(pr() * FSZ, pr() * FSZ, 1 + pr() * 2, 1 + pr() * 2);
+      }
+      // saw-cut expansion joints every 3 m, with a ghost highlight lip
+      var JOINT = 3 * PXM;
+      b.strokeStyle = 'rgba(0,0,0,0.30)';
+      b.lineWidth = 3;
+      for (i = -3; i <= 3; i++) {
+        o = FSZ / 2 + i * JOINT;
+        b.beginPath(); b.moveTo(o, 0); b.lineTo(o, FSZ); b.stroke();
+        b.beginPath(); b.moveTo(0, o); b.lineTo(FSZ, o); b.stroke();
+      }
+      b.strokeStyle = 'rgba(170,200,230,0.05)';
+      b.lineWidth = 1;
+      for (i = -3; i <= 3; i++) {
+        o = FSZ / 2 + i * JOINT + 2.5;
+        b.beginPath(); b.moveTo(o, 0); b.lineTo(o, FSZ); b.stroke();
+        b.beginPath(); b.moveTo(0, o); b.lineTo(FSZ, o); b.stroke();
+      }
+      // hairline cracks wandering off the joints
+      b.strokeStyle = 'rgba(0,0,0,0.20)';
+      b.lineWidth = 1.4;
+      for (i = 0; i < 7; i++) {
+        var cx0 = pr() * FSZ, cy0 = pr() * FSZ;
+        b.beginPath(); b.moveTo(cx0, cy0);
+        for (var s = 0; s < 6; s++) { cx0 += (pr() - 0.5) * 120; cy0 += (pr() - 0.5) * 120; b.lineTo(cx0, cy0); }
+        b.stroke();
+      }
+      // the painted work-circle — amber, worn where boots and casters live
+      b.save();
+      b.translate(FSZ / 2, FSZ / 2);
+      b.strokeStyle = 'rgba(206,132,42,0.8)';
+      b.lineWidth = 9;
+      b.setLineDash([74, 16]);
+      b.beginPath(); b.arc(0, 0, 1.78 * PXM, 0.12, Math.PI * 2 + 0.12); b.stroke();
+      b.setLineDash([]);
+      b.strokeStyle = 'rgba(206,132,42,0.34)';
+      b.lineWidth = 3;
+      b.beginPath(); b.arc(0, 0, 1.62 * PXM, 0, Math.PI * 2); b.stroke();
+      b.strokeStyle = 'rgba(206,132,42,0.65)';
+      b.lineWidth = 5;
+      for (i = 0; i < 4; i++) {
+        b.save(); b.rotate(i * Math.PI / 2);
+        b.beginPath(); b.moveTo(1.68 * PXM, 0); b.lineTo(1.9 * PXM, 0); b.stroke();
+        b.restore();
+      }
+      // stencil in front of the circle, squared to the default camera
+      b.rotate(-0.7);
+      b.fillStyle = 'rgba(210,224,238,0.34)';
+      b.font = '700 34px Menlo, monospace';
+      b.textAlign = 'center'; b.textBaseline = 'middle';
+      b.fillText('ASSEMBLY ZERO', 0, 2.28 * PXM);
+      b.font = '700 22px Menlo, monospace';
+      b.fillStyle = 'rgba(210,224,238,0.22)';
+      b.fillText('KEEP CIRCLE CLEAR', 0, 2.28 * PXM + 34);
+      b.rotate(0.7);
+      b.restore();
+      // caster scuffs orbiting the circle
+      b.strokeStyle = 'rgba(0,0,0,0.14)';
+      for (i = 0; i < 9; i++) {
+        b.lineWidth = 3 + pr() * 4;
+        var sr = (1.9 + pr() * 1.1) * PXM, a0 = pr() * Math.PI * 2;
+        b.beginPath();
+        b.arc(FSZ / 2 + (pr() - 0.5) * 40, FSZ / 2 + (pr() - 0.5) * 40, sr, a0, a0 + 0.5 + pr());
+        b.stroke();
+      }
+      // hazard threshold + faded walk lane at the roll-up door
+      (function () {
+        var p = azPos(AZ_DOOR, 8.45);
+        var ang = Math.atan2(p.z, p.x);
+        b.save();
+        b.translate(w2cx(p.x), w2cy(p.z));
+        b.rotate(ang + Math.PI / 2);
+        var hw = 4.2 * PXM / 2, hh = 0.55 * PXM / 2;
+        b.beginPath(); b.rect(-hw, -hh, hw * 2, hh * 2); b.clip();
+        for (var sx2 = -hw - hh * 2, k2 = 0; sx2 < hw + hh * 2; sx2 += 44, k2++) {
+          b.fillStyle = (k2 % 2 === 0) ? 'rgba(213,176,52,0.62)' : 'rgba(16,18,22,0.72)';
+          b.beginPath();
+          b.moveTo(sx2, -hh); b.lineTo(sx2 + 44, -hh);
+          b.lineTo(sx2 + 44 - hh * 2, hh); b.lineTo(sx2 - hh * 2, hh);
+          b.closePath(); b.fill();
+        }
+        b.restore();
+        b.strokeStyle = 'rgba(205,220,235,0.10)';
+        b.lineWidth = 4;
+        b.setLineDash([40, 30]);
+        var q1 = azPos(AZ_DOOR, 7.9), q2 = azPos(AZ_DOOR, 2.6);
+        var lx = Math.cos(AZ_DOOR), lz = -Math.sin(AZ_DOOR);
+        [-1, 1].forEach(function (sgn) {
+          b.beginPath();
+          b.moveTo(w2cx(q1.x + lx * sgn * 1.1), w2cy(q1.z + lz * sgn * 1.1));
+          b.lineTo(w2cx(q2.x + lx * sgn * 1.1), w2cy(q2.z + lz * sgn * 1.1));
+          b.stroke();
+        });
+        b.setLineDash([]);
+      })();
+      // oil stains: the slab remembers every leak
+      function stain(wx, wz, r, a) {
+        var n = 5 + Math.floor(pr() * 4);
+        for (var j = 0; j < n; j++) {
+          var ox = w2cx(wx) + (pr() - 0.5) * r * 1.1, oy = w2cy(wz) + (pr() - 0.5) * r * 1.1;
+          var rr = r * (0.35 + pr() * 0.55);
+          var sg = b.createRadialGradient(ox, oy, 0, ox, oy, rr);
+          sg.addColorStop(0, 'rgba(6,8,10,' + a + ')');
+          sg.addColorStop(0.7, 'rgba(6,8,10,' + (a * 0.55).toFixed(2) + ')');
+          sg.addColorStop(1, 'rgba(6,8,10,0)');
+          b.fillStyle = sg;
+          b.fillRect(ox - rr, oy - rr, rr * 2, rr * 2);
+        }
+      }
+      stain(P_DRUM.x + 0.5, P_DRUM.z + 0.4, 42, 0.5);
+      stain(P_BENCH.x + 0.9, P_BENCH.z + 0.9, 30, 0.35);
+      stain(1.9, 2.6, 26, 0.22);
+      stain(-2.6, -1.4, 20, 0.18);
+      stain(2.4, 1.9, 24, 0.14);
+      // painted contact shadows: everything standing on the slab is glued to it
+      function contactAO(wx, wz, rx, rz, rot, a) {
+        b.save();
+        b.translate(w2cx(wx), w2cy(wz));
+        b.rotate(rot || 0);
+        b.scale(1, rz / rx);
+        var agr = b.createRadialGradient(0, 0, rx * 0.2, 0, 0, rx);
+        agr.addColorStop(0, 'rgba(0,0,0,' + a + ')');
+        agr.addColorStop(1, 'rgba(0,0,0,0)');
+        b.fillStyle = agr;
+        b.fillRect(-rx, -rx, rx * 2, rx * 2);
+        b.restore();
+      }
+      function aoFor(p, LX, LZ, a) {
+        contactAO(p.x, p.z, LX * PXM / 2, LZ * PXM / 2, Math.atan2(p.z, p.x) + Math.PI / 2, a);
+      }
+      aoFor(P_BENCH, 2.9, 1.3, 0.5);
+      aoFor(P_RACK, 2.4, 1.0, 0.5);
+      contactAO(P_DRUM.x, P_DRUM.z, 0.55 * PXM, 0.55 * PXM, 0, 0.5);
+      contactAO(P_DRUM.x + 0.85, P_DRUM.z - 0.4, 0.6 * PXM, 0.6 * PXM, 0, 0.45);
+      aoFor(P_STACK, 1.5, 1.3, 0.45);
+      contactAO(0, 0, 1.4 * PXM, 1.4 * PXM, 0, 0.22);
+      // a chalked job number by the circle — the crew talks to itself
+      b.fillStyle = 'rgba(222,232,242,0.38)';
+      b.font = '400 26px Menlo, monospace';
+      b.save(); b.translate(w2cx(-1.15), w2cy(2.35)); b.rotate(-0.45); b.fillText('R-01', 0, 0); b.restore();
+      b.save(); b.translate(w2cx(2.5), w2cy(0.9)); b.rotate(0.9);
+      b.fillStyle = 'rgba(222,232,242,0.2)'; b.fillText('ø 1.78', 0, 0); b.restore();
+      // the slab dies into the walls
+      var eg = b.createRadialGradient(FSZ / 2, FSZ / 2, (ROOM_R - 2.2) * PXM, FSZ / 2, FSZ / 2, ROOM_R * PXM);
+      eg.addColorStop(0, 'rgba(4,7,11,0)');
+      eg.addColorStop(0.8, 'rgba(4,7,11,0.5)');
+      eg.addColorStop(1, 'rgba(4,7,11,0.85)');
+      b.fillStyle = eg;
+      b.fillRect(0, 0, FSZ, FSZ);
+    })();
+    function drawFloorBase() { fx.drawImage(fbase, 0, 0); }
     drawFloorBase();
     var ftx = new THREE.CanvasTexture(fc);
     ftx.encoding = THREE.sRGBEncoding;
-    var floor = new THREE.Mesh(new THREE.CircleGeometry(11, 40),
-      new THREE.MeshPhongMaterial({ map: ftx, shininess: 8 }));
+    ftx.anisotropy = 4;
+    var floor = new THREE.Mesh(new THREE.CircleGeometry(11, 48),
+      new THREE.MeshPhongMaterial({ map: ftx, shininess: 12, specular: 0x16222e }));
     floor.rotation.x = -Math.PI / 2;
     floor.receiveShadow = true;
     scene.add(floor);
-    // chalk tallies + (after test #3) a coffee ring — the bay keeps score
+    // chalk tallies + (after test #3) a coffee ring — the bay keeps score.
+    // Drawn in the legacy 512 coordinate frame, scaled up to the new slab.
     function repaintFloor(tests) {
       drawFloorBase();
       var n = Math.min(tests || 0, 40);
       var jr = PG2.stream('BAY', 'chalk');
+      fx.save();
+      fx.scale(K, K);
       fx.lineCap = 'round';
       for (var i = 0; i < n; i++) {
         var group = Math.floor(i / 5), inGroup = i % 5;
@@ -807,9 +1000,565 @@
         fx.arc(181, 326, 14, 1.2, Math.PI * 1.7);
         fx.stroke();
       }
+      fx.restore();
       ftx.needsUpdate = true;
     }
-    // clipboard by the stand (appears after test #3, with the coffee)
+
+    /* ---- the shell of the room: one painted steel wall, wrapped around ---- */
+    var wc = document.createElement('canvas');
+    wc.width = 2048; wc.height = 512;
+    (function paintWall() {
+      var x = wc.getContext('2d');
+      var pr = PG2.stream('BAY', 'wall');
+      var PXV = 512 / WALL_H, PXH = 2048 / (Math.PI * 2 * ROOM_R);
+      function wy(h) { return 512 - h * PXV; }
+      var i, g;
+      g = x.createLinearGradient(0, 0, 0, 512);
+      g.addColorStop(0, '#0b1420');
+      g.addColorStop(0.5, '#1b2c3d');
+      g.addColorStop(0.9, '#131f2d');
+      g.addColorStop(1, '#0b121b');
+      x.fillStyle = g;
+      x.fillRect(0, 0, 2048, 512);
+      // panel seams
+      for (i = 0; i < 2048; i += 96) {
+        x.fillStyle = 'rgba(0,0,0,0.32)';
+        x.fillRect(i, 0, 2, 512);
+        x.fillStyle = 'rgba(160,200,240,0.08)';
+        x.fillRect(i + 2, 0, 1, 512);
+      }
+      // girts + rivets
+      [2.3, 4.4].forEach(function (h) {
+        var yy = wy(h);
+        x.fillStyle = 'rgba(0,0,0,0.35)';
+        x.fillRect(0, yy, 2048, 5);
+        x.fillStyle = 'rgba(160,200,240,0.06)';
+        x.fillRect(0, yy + 5, 2048, 1);
+        x.fillStyle = 'rgba(0,0,0,0.4)';
+        for (var rx = 24; rx < 2048; rx += 48) x.fillRect(rx, yy - 4, 3, 3);
+      });
+      // datum band at 1.35 m — the Authority paints its paperwork onto the world
+      var dy = wy(1.35);
+      x.fillStyle = 'rgba(226,158,62,0.35)';
+      x.fillRect(0, dy, 2048, 4);
+      x.fillStyle = 'rgba(220,232,244,0.14)';
+      x.fillRect(0, dy - 3, 2048, 1);
+      x.fillStyle = 'rgba(200,215,230,0.2)';
+      x.font = '700 12px Menlo, monospace';
+      x.textAlign = 'left';
+      for (i = 60; i < 2048; i += 640) x.fillText('DATUM 1.35 M', i, dy - 7);
+      // ghost sign, high on the wall
+      x.fillStyle = 'rgba(190,210,230,0.1)';
+      x.font = '700 46px Menlo, monospace';
+      x.textAlign = 'center';
+      x.fillText('R E D S K Y   I N C', 480, wy(4.9));
+      x.font = '700 22px Menlo, monospace';
+      x.fillText('ASSEMBLY BAY 02', 480, wy(4.9) + 30);
+      // ---- roll-up door, centre of the canvas ----
+      (function () {
+        var cx = 1024, dw2 = 4.4 * PXH / 2, top = wy(3.3);
+        x.fillStyle = 'rgba(0,0,0,0.5)';                       // recess
+        x.fillRect(cx - dw2 - 8, top - 10, dw2 * 2 + 16, 512 - top + 10);
+        x.fillStyle = '#1d2c3b';                               // curtain
+        x.fillRect(cx - dw2, top, dw2 * 2, 512 - top);
+        for (var yy2 = top + 8; yy2 < 512; yy2 += 12) {        // slats
+          x.fillStyle = 'rgba(0,0,0,0.3)';
+          x.fillRect(cx - dw2, yy2, dw2 * 2, 2);
+          x.fillStyle = 'rgba(170,205,240,0.06)';
+          x.fillRect(cx - dw2, yy2 + 2, dw2 * 2, 1);
+        }
+        x.fillStyle = '#243444';                               // rails + header
+        x.fillRect(cx - dw2 - 10, top - 4, 10, 512 - top + 4);
+        x.fillRect(cx + dw2, top - 4, 10, 512 - top + 4);
+        x.fillRect(cx - dw2 - 14, top - 16, dw2 * 2 + 28, 14);
+        // grime kicked up the curtain, weather strip
+        var dg = x.createLinearGradient(0, 512 - 60, 0, 512);
+        dg.addColorStop(0, 'rgba(0,0,0,0)');
+        dg.addColorStop(1, 'rgba(0,0,0,0.55)');
+        x.fillStyle = dg;
+        x.fillRect(cx - dw2 - 10, 512 - 60, dw2 * 2 + 20, 60);
+        x.fillStyle = 'rgba(213,176,52,0.5)';                  // hazard nibs on the rails
+        for (var hy = 512 - 12; hy > wy(1.1); hy -= 24) {
+          x.fillRect(cx - dw2 - 10, hy, 10, 12);
+          x.fillRect(cx + dw2, hy - 12, 10, 12);
+        }
+        x.fillStyle = 'rgba(200,215,230,0.4)';
+        x.font = '700 17px Menlo, monospace';
+        x.textAlign = 'center';
+        x.fillText('DOOR 2 — KEEP CLEAR', cx, top - 26);
+        // the chain and padlock: this door hasn't opened since the lease
+        x.strokeStyle = 'rgba(120,135,150,0.55)';
+        x.lineWidth = 3;
+        x.beginPath();
+        x.moveTo(cx - 16, 500);
+        x.quadraticCurveTo(cx, 480, cx + 18, 500);
+        x.stroke();
+      })();
+      // fire point, stage left
+      (function () {
+        var ex = 640, ey = wy(1.75);
+        x.fillStyle = 'rgba(200,60,40,0.5)';
+        x.fillRect(ex - 8, ey - 22, 16, 16);            // sign
+        x.fillStyle = 'rgba(240,240,240,0.5)';
+        x.font = '700 7px Menlo, monospace';
+        x.textAlign = 'center';
+        x.fillText('FIRE', ex, ey - 13);
+        x.fillStyle = '#7d2a20';                        // the extinguisher itself
+        x.fillRect(ex - 9, ey + 6, 18, 46);
+        x.fillStyle = '#1c242c';
+        x.fillRect(ex - 4, ey - 2, 8, 10);
+        x.fillStyle = 'rgba(0,0,0,0.4)';                // its shadow
+        x.fillRect(ex + 9, ey + 10, 6, 44);
+      })();
+      // stencil warnings between the landmarks
+      x.fillStyle = 'rgba(200,120,90,0.22)';
+      x.font = '700 18px Menlo, monospace';
+      x.textAlign = 'center';
+      x.fillText('NO OPEN FLAME', 260, wy(2.0));
+      x.fillStyle = 'rgba(200,215,230,0.2)';
+      x.fillText('LOT STORAGE →', 1800, wy(1.9));
+      // splashback grime at the slab line
+      for (i = 0; i < 60; i++) {
+        var gx2 = pr() * 2048, gw2 = 5 + pr() * 18, gh2 = 25 + pr() * 70;
+        var gg = x.createLinearGradient(0, 512 - gh2, 0, 512);
+        gg.addColorStop(0, 'rgba(0,0,0,0)');
+        gg.addColorStop(1, 'rgba(0,0,0,0.28)');
+        x.fillStyle = gg;
+        x.fillRect(gx2, 512 - gh2, gw2, gh2);
+      }
+      // and the whole base of the wall settles into shadow
+      var bg2 = x.createLinearGradient(0, 512 - 36, 0, 512);
+      bg2.addColorStop(0, 'rgba(0,0,0,0)');
+      bg2.addColorStop(1, 'rgba(0,0,0,0.6)');
+      x.fillStyle = bg2;
+      x.fillRect(0, 512 - 36, 2048, 36);
+    })();
+    var wtx = new THREE.CanvasTexture(wc);
+    wtx.encoding = THREE.sRGBEncoding;
+    wtx.wrapS = THREE.RepeatWrapping;
+    wtx.repeat.x = -1;                    // authored to read correctly from inside
+    var wall = new THREE.Mesh(new THREE.CylinderGeometry(ROOM_R, ROOM_R, WALL_H, 64, 1, true),
+      new THREE.MeshPhongMaterial({ map: wtx, side: THREE.BackSide, shininess: 5 }));
+    wall.position.y = WALL_H / 2;
+    wall.rotation.y = AZ_DOOR - Math.PI;  // park the painted door on its floor threshold
+    scene.add(wall);
+    // ceiling: darkness with the bones of the building in it
+    var cc = document.createElement('canvas');
+    cc.width = cc.height = 512;
+    (function paintCeil() {
+      var x = cc.getContext('2d');
+      x.fillStyle = '#04070b';
+      x.fillRect(0, 0, 512, 512);
+      [[180, 205], [330, 300]].forEach(function (p) {
+        var g = x.createRadialGradient(p[0], p[1], 0, p[0], p[1], 95);
+        g.addColorStop(0, 'rgba(130,160,200,0.09)');
+        g.addColorStop(1, 'rgba(130,160,200,0)');
+        x.fillStyle = g;
+        x.fillRect(p[0] - 95, p[1] - 95, 190, 190);
+      });
+      x.strokeStyle = 'rgba(0,0,0,0.55)';
+      x.lineWidth = 9;
+      for (var i = 1; i < 5; i++) {
+        x.beginPath(); x.moveTo(0, i * 102); x.lineTo(512, i * 102); x.stroke();
+      }
+      x.strokeStyle = 'rgba(70,90,115,0.12)';
+      x.lineWidth = 2;
+      for (i = 1; i < 5; i++) {
+        x.beginPath(); x.moveTo(0, i * 102 + 6); x.lineTo(512, i * 102 + 6); x.stroke();
+      }
+    })();
+    var ctex = new THREE.CanvasTexture(cc);
+    ctex.encoding = THREE.sRGBEncoding;
+    var ceil = new THREE.Mesh(new THREE.CircleGeometry(ROOM_R + 0.05, 48),
+      new THREE.MeshBasicMaterial({ map: ctex }));
+    ceil.rotation.x = Math.PI / 2;
+    ceil.position.y = WALL_H;
+    scene.add(ceil);
+
+    /* ---- shared soft-dot texture: dust motes + bulb halos ---- */
+    var soft = document.createElement('canvas');
+    soft.width = soft.height = 32;
+    (function () {
+      var x = soft.getContext('2d');
+      var g = x.createRadialGradient(16, 16, 1, 16, 16, 15);
+      g.addColorStop(0, 'rgba(255,235,205,1)');
+      g.addColorStop(0.5, 'rgba(255,235,205,0.35)');
+      g.addColorStop(1, 'rgba(255,235,205,0)');
+      x.fillStyle = g;
+      x.fillRect(0, 0, 32, 32);
+    })();
+    var softTex = new THREE.CanvasTexture(soft);
+
+    /* ---- crate skin, shared by every box the company owns ---- */
+    var crateTex = (function () {
+      var c = document.createElement('canvas');
+      c.width = c.height = 256;
+      var x = c.getContext('2d');
+      var pr = PG2.stream('BAY', 'crate');
+      x.fillStyle = '#57452c';
+      x.fillRect(0, 0, 256, 256);
+      for (var i = 0; i < 4; i++) {                   // planks
+        x.fillStyle = 'rgba(0,0,0,' + (0.1 + pr() * 0.12).toFixed(2) + ')';
+        x.fillRect(0, i * 64, 256, 3);
+        x.strokeStyle = 'rgba(0,0,0,0.12)';
+        x.lineWidth = 1.5;
+        for (var s = 0; s < 3; s++) {
+          var gy = i * 64 + 12 + pr() * 44;
+          x.beginPath(); x.moveTo(0, gy);
+          x.bezierCurveTo(80, gy + (pr() - 0.5) * 8, 170, gy + (pr() - 0.5) * 8, 256, gy);
+          x.stroke();
+        }
+      }
+      x.strokeStyle = 'rgba(0,0,0,0.5)';              // edge AO — the chamfer lie
+      x.lineWidth = 14;
+      x.strokeRect(0, 0, 256, 256);
+      x.strokeStyle = 'rgba(224,200,150,0.10)';
+      x.lineWidth = 3;
+      x.strokeRect(8, 8, 240, 240);
+      x.fillStyle = 'rgba(20,14,8,0.5)';              // corner battens
+      x.fillRect(0, 0, 26, 256); x.fillRect(230, 0, 26, 256);
+      x.fillStyle = 'rgba(224,214,190,0.5)';
+      x.font = '700 30px Menlo, monospace';
+      x.textAlign = 'center';
+      x.save(); x.translate(128, 140); x.fillText('REDSKY', 0, 0);
+      x.font = '700 18px Menlo, monospace';
+      x.fillText('LOT 7 · THIS WAY UP', 0, 28); x.restore();
+      var t = new THREE.CanvasTexture(c);
+      t.encoding = THREE.sRGBEncoding;
+      return t;
+    })();
+    var crateMat = new THREE.MeshPhongMaterial({ map: crateTex, shininess: 6 });
+    function crate(w, h, d) {
+      var m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), crateMat);
+      m.castShadow = false;
+      return m;
+    }
+    function paintCan(r, h) {
+      var g = new THREE.Group();
+      var tin = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, 12), mat(0x6f7a82, { shin: 45 }));
+      g.add(tin);
+      var lid = new THREE.Mesh(new THREE.CylinderGeometry(r * 1.04, r * 1.04, h * 0.08, 12), mat(0x8d979e, { shin: 65 }));
+      lid.position.y = h / 2;
+      g.add(lid);
+      return g;
+    }
+
+    /* ---- the workbench: scarred ply top, steel legs, pegboard behind ---- */
+    (function buildBench() {
+      var g = new THREE.Group();
+      var topC = document.createElement('canvas');
+      topC.width = 512; topC.height = 256;
+      (function () {
+        var x = topC.getContext('2d');
+        var pr = PG2.stream('BAY', 'bench');
+        x.fillStyle = '#5f4c31';
+        x.fillRect(0, 0, 512, 256);
+        for (var i = 0; i < 4; i++) {                 // ply planks + grain
+          x.fillStyle = 'rgba(0,0,0,0.18)';
+          x.fillRect(0, i * 64, 512, 2);
+          x.strokeStyle = 'rgba(0,0,0,0.14)';
+          x.lineWidth = 1.4;
+          for (var s = 0; s < 5; s++) {
+            var gy = i * 64 + 8 + pr() * 50;
+            x.beginPath(); x.moveTo(0, gy);
+            x.bezierCurveTo(150, gy + (pr() - 0.5) * 10, 360, gy + (pr() - 0.5) * 10, 512, gy);
+            x.stroke();
+          }
+        }
+        for (i = 0; i < 3; i++) {                     // ring stains from the mug
+          x.strokeStyle = 'rgba(30,20,10,' + (0.2 + pr() * 0.2).toFixed(2) + ')';
+          x.lineWidth = 4;
+          x.beginPath();
+          x.arc(60 + pr() * 400, 40 + pr() * 170, 14 + pr() * 8, 0.3, Math.PI * 2);
+          x.stroke();
+        }
+        for (i = 0; i < 14; i++) {                    // scratches and saw scars
+          x.strokeStyle = pr() > 0.5 ? 'rgba(230,215,185,0.16)' : 'rgba(0,0,0,0.2)';
+          x.lineWidth = 1 + pr() * 2;
+          var sx3 = pr() * 512, sy3 = pr() * 256;
+          x.beginPath(); x.moveTo(sx3, sy3);
+          x.lineTo(sx3 + (pr() - 0.5) * 160, sy3 + (pr() - 0.5) * 60);
+          x.stroke();
+        }
+        var burn = x.createRadialGradient(400, 190, 4, 400, 190, 46);   // soldering burn
+        burn.addColorStop(0, 'rgba(10,6,4,0.6)');
+        burn.addColorStop(1, 'rgba(10,6,4,0)');
+        x.fillStyle = burn;
+        x.fillRect(350, 140, 100, 100);
+        x.strokeStyle = 'rgba(0,0,0,0.55)';           // painted edge AO
+        x.lineWidth = 18;
+        x.strokeRect(0, 0, 512, 256);
+        x.fillStyle = 'rgba(228,238,248,0.35)';       // chalked cut list
+        x.font = '400 20px Menlo, monospace';
+        x.save(); x.translate(120, 200); x.rotate(-0.06);
+        x.fillText('2100 × ø420', 0, 0);
+        x.fillText('cut 2', 0, 24);
+        x.restore();
+      })();
+      var topT = new THREE.CanvasTexture(topC);
+      topT.encoding = THREE.sRGBEncoding;
+      var top = new THREE.Mesh(new THREE.BoxGeometry(2.3, 0.09, 0.78),
+        new THREE.MeshPhongMaterial({ map: topT, shininess: 9 }));
+      top.position.y = 0.9;
+      g.add(top);
+      [[-1.05, -0.3], [1.05, -0.3], [-1.05, 0.3], [1.05, 0.3]].forEach(function (p) {
+        var leg = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.86, 0.08), mat(0x27333f, { shin: 20 }));
+        leg.position.set(p[0], 0.43, p[1]);
+        g.add(leg);
+      });
+      var shelf = new THREE.Mesh(new THREE.BoxGeometry(2.14, 0.05, 0.6), mat(0x2c3844, { shin: 12 }));
+      shelf.position.y = 0.3;
+      g.add(shelf);
+      var can1 = paintCan(0.09, 0.2); can1.position.set(-0.7, 0.42, 0.05); g.add(can1);
+      var can2 = paintCan(0.07, 0.16); can2.position.set(-0.44, 0.4, -0.1); g.add(can2);
+      var uBox = crate(0.44, 0.2, 0.34); uBox.position.set(0.6, 0.43, 0); g.add(uBox);
+      // vise at the end — cast iron, not negotiable
+      var vise = new THREE.Group();
+      vise.position.set(0.95, 0.98, 0.12);
+      var vBody = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.12, 0.14), mat(0x39424c, { shin: 30 }));
+      vise.add(vBody);
+      var vJaw = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.1, 0.14), mat(0x2c343c, { shin: 40 }));
+      vJaw.position.x = -0.14;
+      vise.add(vJaw);
+      var vScrew = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.24, 8), mat(0x9aa5ad, { shin: 80 }));
+      vScrew.rotation.z = Math.PI / 2;
+      vScrew.position.set(-0.16, -0.02, 0);
+      vise.add(vScrew);
+      var vBar = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.16, 6), mat(0x9aa5ad, { shin: 80 }));
+      vBar.position.set(-0.27, -0.02, 0);
+      vise.add(vBar);
+      g.add(vise);
+      // toolbox, mug, rag — the still life
+      var tbox = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.16, 0.2), mat(0x64231a, { shin: 45 }));
+      tbox.position.set(-0.55, 1.03, -0.14);
+      tbox.rotation.y = 0.12;
+      g.add(tbox);
+      var thandle = new THREE.Mesh(new THREE.TorusGeometry(0.07, 0.011, 6, 12, Math.PI), mat(0x39424c, { shin: 60 }));
+      thandle.position.set(-0.55, 1.11, -0.14);
+      thandle.rotation.y = 0.12;
+      g.add(thandle);
+      var mug = new THREE.Mesh(new THREE.CylinderGeometry(0.042, 0.038, 0.09, 10), mat(0xd9cfb8, { shin: 55 }));
+      mug.position.set(-0.05, 0.99, 0.2);
+      g.add(mug);
+      var rag = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.014, 0.15), mat(0x8a4a34, { shin: 4 }));
+      rag.position.set(0.28, 0.95, 0.24);
+      rag.rotation.y = 0.5;
+      g.add(rag);
+      // pegboard: near enough to actually read, tools painted where they belong
+      var pbC = document.createElement('canvas');
+      pbC.width = 512; pbC.height = 160;
+      (function () {
+        var x = pbC.getContext('2d');
+        x.fillStyle = '#4a4632';
+        x.fillRect(0, 0, 512, 160);
+        x.strokeStyle = 'rgba(0,0,0,0.5)';
+        x.lineWidth = 10;
+        x.strokeRect(0, 0, 512, 160);
+        x.fillStyle = 'rgba(0,0,0,0.32)';
+        for (var px2 = 12; px2 < 512; px2 += 13)
+          for (var py2 = 12; py2 < 160; py2 += 13)
+            x.fillRect(px2, py2, 2, 2);
+        x.fillStyle = 'rgba(12,16,20,0.75)';
+        x.strokeStyle = 'rgba(228,238,248,0.28)';
+        x.lineWidth = 2;
+        // wrench, up close and personal
+        x.save(); x.translate(80, 80); x.rotate(0.45);
+        x.fillRect(-5, -34, 10, 68);
+        x.beginPath(); x.arc(0, -38, 13, 0, Math.PI * 2); x.fill();
+        x.beginPath(); x.arc(0, 38, 13, 0, Math.PI * 2); x.fill();
+        x.strokeRect(-9, -52, 18, 104);
+        x.restore();
+        // spanner set, one gone
+        for (var sp2 = 0; sp2 < 4; sp2++) {
+          if (sp2 === 1) { x.strokeRect(150 + sp2 * 40 - 5, 30, 10, 74); continue; }
+          x.fillRect(150 + sp2 * 40 - 4, 32, 8, 70);
+          x.beginPath(); x.arc(150 + sp2 * 40, 28, 8, 0, Math.PI * 2); x.fill();
+        }
+        // mallet
+        x.save(); x.translate(360, 78); x.rotate(-0.1);
+        x.fillRect(-4, -20, 8, 58);
+        x.fillRect(-24, -34, 48, 18);
+        x.strokeRect(-28, -38, 56, 84);
+        x.restore();
+        // tape roll
+        x.beginPath(); x.arc(452, 70, 22, 0, Math.PI * 2); x.fill();
+        x.fillStyle = '#4a4632';
+        x.beginPath(); x.arc(452, 70, 9, 0, Math.PI * 2); x.fill();
+      })();
+      var pbT = new THREE.CanvasTexture(pbC);
+      pbT.encoding = THREE.sRGBEncoding;
+      var pb = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 0.66),
+        new THREE.MeshPhongMaterial({ map: pbT, shininess: 4 }));
+      pb.position.set(0, 1.26, -0.36);
+      g.add(pb);
+      g.position.set(P_BENCH.x, 0, P_BENCH.z);
+      g.lookAt(0, 0, 0);
+      scene.add(g);
+    })();
+
+    /* ---- stores rack: slotted angle, crates, canister stock ---- */
+    (function buildRack() {
+      var g = new THREE.Group();
+      var steel = mat(0x2c3844, { shin: 25 });
+      [[-0.95, -0.26], [0.95, -0.26], [-0.95, 0.26], [0.95, 0.26]].forEach(function (p) {
+        var up = new THREE.Mesh(new THREE.BoxGeometry(0.06, 1.55, 0.06), steel);
+        up.position.set(p[0], 0.775, p[1]);
+        g.add(up);
+      });
+      [0.16, 0.72, 1.28].forEach(function (y) {
+        var sh = new THREE.Mesh(new THREE.BoxGeometry(1.96, 0.045, 0.56), mat(0x394856, { shin: 18 }));
+        sh.position.y = y;
+        g.add(sh);
+        var lip = new THREE.Mesh(new THREE.BoxGeometry(1.96, 0.02, 0.03), mat(0x51637a, { shin: 40 }));
+        lip.position.set(0, y + 0.01, 0.29);
+        g.add(lip);
+      });
+      [-1, 1].forEach(function (s) {                  // cross brace on the back
+        var br = new THREE.Mesh(new THREE.BoxGeometry(2.1, 0.04, 0.02), steel);
+        br.position.set(0, 0.75, -0.28);
+        br.rotation.z = s * 0.55;
+        g.add(br);
+      });
+      // bottom: canister stock, racked like wine
+      for (var i = 0; i < 5; i++) {
+        var cyl = new THREE.Mesh(new THREE.CylinderGeometry(0.105, 0.105, 0.52, 12),
+          mat(i === 2 ? 0x8a6b32 : 0x6f7d8a, { shin: 50 }));
+        cyl.rotation.z = Math.PI / 2;
+        cyl.position.set(-0.7 + i * 0.35, 0.29, 0.02);
+        g.add(cyl);
+      }
+      // middle: crates and a can
+      var c1 = crate(0.52, 0.36, 0.44); c1.position.set(-0.6, 0.925, 0); g.add(c1);
+      var c2 = crate(0.42, 0.3, 0.4); c2.position.set(0.1, 0.895, -0.02); c2.rotation.y = -0.08; g.add(c2);
+      var rcan = paintCan(0.1, 0.22); rcan.position.set(0.62, 0.855, 0.06); g.add(rcan);
+      // top: one crate, a coil of rope, a small drum
+      var c3 = crate(0.46, 0.3, 0.4); c3.position.set(0.55, 1.455, 0); c3.rotation.y = 0.1; g.add(c3);
+      var rope = new THREE.Mesh(new THREE.TorusGeometry(0.13, 0.045, 8, 16), mat(0x6b5a3c, { shin: 8 }));
+      rope.rotation.x = Math.PI / 2;
+      rope.position.set(-0.35, 1.35, 0.05);
+      g.add(rope);
+      var placard = textPlane('RACK B · STORES', 0.7, 0.11, { color: '#9cb4c8', px: 44 });
+      placard.position.set(0, 1.62, 0.1);
+      g.add(placard);
+      g.position.set(P_RACK.x, 0, P_RACK.z);
+      g.lookAt(0, 0, 0);
+      scene.add(g);
+    })();
+
+    /* ---- the drum corner + the spare stack ---- */
+    (function buildCorners() {
+      var g = new THREE.Group();
+      var drum = new THREE.Mesh(new THREE.CylinderGeometry(0.29, 0.29, 0.86, 14), mat(0x2b3a44, { shin: 30 }));
+      drum.position.y = 0.43;
+      g.add(drum);
+      [-0.16, 0.16].forEach(function (y) {
+        var rib = new THREE.Mesh(new THREE.TorusGeometry(0.295, 0.014, 6, 16), mat(0x2c3d49, { shin: 40 }));
+        rib.rotation.x = Math.PI / 2;
+        rib.position.y = 0.43 + y;
+        g.add(rib);
+      });
+      var lid = new THREE.Mesh(new THREE.CylinderGeometry(0.27, 0.27, 0.03, 14), mat(0x27343e, { shin: 45 }));
+      lid.position.y = 0.875;
+      g.add(lid);
+      var funnel = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.12, 10), mat(0x8d979e, { shin: 60 }));
+      funnel.rotation.x = Math.PI;
+      funnel.position.set(0.08, 0.95, 0.04);
+      g.add(funnel);
+      var dl = textPlane('WASTE OIL', 0.4, 0.09, { color: '#c8b98a', px: 40 });
+      dl.position.set(0, 0.52, 0.3);
+      g.add(dl);
+      var dc1 = crate(0.56, 0.4, 0.46); dc1.position.set(0.85, 0.2, -0.4); dc1.rotation.y = 0.35; g.add(dc1);
+      var dc2 = crate(0.44, 0.32, 0.4); dc2.position.set(0.92, 0.56, -0.44); dc2.rotation.y = 0.2; g.add(dc2);
+      var lean = new THREE.Mesh(new THREE.BoxGeometry(0.3, 1.5, 0.03), mat(0x4c3e28, { shin: 6 }));
+      lean.position.set(-0.55, 0.72, -0.1);
+      lean.rotation.z = 0.16;
+      g.add(lean);
+      g.position.set(P_DRUM.x, 0, P_DRUM.z);
+      g.lookAt(0, 0, 0);
+      scene.add(g);
+      // spare crates behind the default camera — a reward for orbiting
+      var st = new THREE.Group();
+      var s1 = crate(0.6, 0.42, 0.5); s1.position.y = 0.21; st.add(s1);
+      var s2 = crate(0.5, 0.36, 0.44); s2.position.set(0.06, 0.6, -0.02); s2.rotation.y = 0.3; st.add(s2);
+      var coil = new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.05, 8, 16), mat(0x10161c, { shin: 6 }));
+      coil.rotation.x = Math.PI / 2;
+      coil.position.set(0.62, 0.06, 0.3);
+      st.add(coil);
+      st.position.set(P_STACK.x, 0, P_STACK.z);
+      st.lookAt(0, 0, 0);
+      scene.add(st);
+      // two cones minding the door threshold
+      [[0.35, 7.4], [-0.5, 7.15]].forEach(function (cp) {
+        var p = azPos(AZ_DOOR + cp[0] * 0.14, cp[1]);
+        var cone = new THREE.Mesh(new THREE.ConeGeometry(0.15, 0.4, 10), mat(0x5f2513, { shin: 25 }));
+        cone.position.set(p.x, 0.2, p.z);
+        scene.add(cone);
+        var cbase = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.03, 0.26), mat(0x63301c, { shin: 20 }));
+        cbase.position.set(p.x, 0.015, p.z);
+        scene.add(cbase);
+      });
+    })();
+
+    /* ---- the practicals: two cage lamps, burning since the lease was signed ---- */
+    var lamps = [];
+    function cageLamp(px, pz, drop, phase) {
+      var g = new THREE.Group();
+      g.position.set(px, WALL_H, pz);
+      var cable = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, drop, 6), mat(0x11151a, { shin: 30 }));
+      cable.position.y = -drop / 2;
+      g.add(cable);
+      var shade = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.13, 0.11, 12), mat(0x182d24, { shin: 40 }));
+      shade.position.y = -drop - 0.05;
+      g.add(shade);
+      var bulb = new THREE.Mesh(new THREE.SphereGeometry(0.042, 10, 8),
+        new THREE.MeshBasicMaterial({ color: 0xffd9a4 }));
+      bulb.position.y = -drop - 0.16;
+      g.add(bulb);
+      var cageH = new THREE.Mesh(new THREE.TorusGeometry(0.085, 0.006, 5, 14), mat(0x22303c, { shin: 50 }));
+      cageH.rotation.x = Math.PI / 2;
+      cageH.position.y = -drop - 0.16;
+      g.add(cageH);
+      [0, Math.PI / 2].forEach(function (ry) {
+        var cageV = new THREE.Mesh(new THREE.TorusGeometry(0.085, 0.006, 5, 14, Math.PI), mat(0x22303c, { shin: 50 }));
+        cageV.rotation.set(0, ry, Math.PI);
+        cageV.position.y = -drop - 0.16;
+        g.add(cageV);
+      });
+      var halo = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: softTex, color: 0xffb877, transparent: true, opacity: 0.22,
+        blending: THREE.AdditiveBlending, depthWrite: false
+      }));
+      halo.material.opacity = 0.13;
+      halo.scale.set(0.38, 0.38, 0.38);
+      halo.position.y = -drop - 0.16;
+      g.add(halo);
+      var pt = new THREE.PointLight(0xffb066, 0.4, 7.5, 2);
+      pt.position.y = -drop - 0.18;
+      g.add(pt);
+      scene.add(g);
+      lamps.push({ g: g, light: pt, base: 0.4, p: phase, bulb: bulb });
+    }
+    cageLamp(1.65, -1.81, 3.3, 0);
+    cageLamp(-1.97, 1.62, 3.0, 2.1);
+
+    /* ---- dust in the key light: the air in here is old and knows it ---- */
+    var dustMat = new THREE.SpriteMaterial({
+      map: softTex, color: 0xffe2b8, transparent: true, opacity: 0.14,
+      blending: THREE.AdditiveBlending, depthWrite: false
+    });
+    var dust = [];
+    var dr = PG2.stream('BAY', 'dust');
+    for (var di = 0; di < 38; di++) {
+      var dsp = new THREE.Sprite(dustMat);
+      dsp.position.set((dr() - 0.5) * 3.2, 0.8 + dr() * 2.7, (dr() - 0.5) * 3.2);
+      var dsc = 0.01 + dr() * 0.014;
+      dsp.scale.set(dsc, dsc, dsc);
+      dsp.userData = { vy: 0.05 + dr() * 0.1, p: dr() * Math.PI * 2 };
+      scene.add(dsp);
+      dust.push(dsp);
+    }
+
+    // chalk tallies + clipboard by the stand (appears after test #3, with the coffee)
     var clip = new THREE.Group();
     var board = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.016, 0.46), mat(0x6b4a2a, { shin: 6 }));
     board.position.y = 0.01;
@@ -824,21 +1573,25 @@
     scrawl.rotation.x = -Math.PI / 2;
     scrawl.position.set(0, 0.028, 0.02);
     clip.add(scrawl);
+    var pencil = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.16, 6), mat(0xc9a23a, { shin: 30 }));
+    pencil.rotation.set(Math.PI / 2, 0, 0.5);
+    pencil.position.set(0.1, 0.032, 0.16);
+    clip.add(pencil);
     clip.position.set(-1.55, 0.02, 1.62);
     clip.rotation.y = 0.7;
     clip.visible = false;
     scene.add(clip);
     // work-light rig — quietly scoots around to look over your shoulder
     var rig = new THREE.Group();
-    var tripod = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.05, 2.15, 8), mat(0x2f3b46));
+    var tripod = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.05, 2.15, 8), mat(0x1f2830));
     tripod.position.y = 1.07;
     rig.add(tripod);
-    var feet = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.34, 0.05, 10), mat(0x22303c));
+    var feet = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.34, 0.05, 10), mat(0x161d24));
     feet.position.y = 0.03;
     rig.add(feet);
     var head = new THREE.Group();
     head.position.y = 2.12;
-    var hood = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.23, 0.26, 10), mat(0x3a4c5d));
+    var hood = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.23, 0.26, 10), mat(0x25303c));
     hood.rotation.x = Math.PI / 2;
     head.add(hood);
     var lens = new THREE.Mesh(new THREE.CircleGeometry(0.14, 12),
@@ -846,7 +1599,7 @@
     lens.position.z = 0.14;
     head.add(lens);
     rig.add(head);
-    var wspot = new THREE.SpotLight(0xffe9c4, 0.55, 11, 0.55, 0.6, 1.2);
+    var wspot = new THREE.SpotLight(0xffe9c4, 0.22, 11, 0.55, 0.6, 1.2);
     wspot.position.set(0, 2.12, 0.1);
     rig.add(wspot);
     var wtarget = new THREE.Object3D();
@@ -857,30 +1610,115 @@
     rig.userData.head = head;
     scene.add(rig);
 
-    // work stand
+    /* ---- the work stand: hydraulic column, rubber cradle, pendant control ---- */
     var stand = new THREE.Group();
-    var base = new THREE.Mesh(new THREE.CylinderGeometry(0.95, 1.1, 0.16, 24), mat(0x2c3b49));
+    var base = new THREE.Mesh(new THREE.CylinderGeometry(0.92, 1.08, 0.16, 24), mat(0x161d25));
     base.position.y = 0.08; base.castShadow = true; base.receiveShadow = true;
     stand.add(base);
-    var ring = new THREE.Mesh(new THREE.TorusGeometry(1.0, 0.02, 8, 40), mat(COL.amber, { emissive: COL.amber, ei: 0.35 }));
+    // painted top plate: wear rings, bolt circle, the shop's own stencil
+    var plateC = document.createElement('canvas');
+    plateC.width = plateC.height = 256;
+    (function paintPlate() {
+      var x = plateC.getContext('2d');
+      var pr = PG2.stream('BAY', 'plate');
+      var g = x.createRadialGradient(128, 128, 8, 128, 128, 128);
+      g.addColorStop(0, '#26333e');
+      g.addColorStop(0.7, '#1b2530');
+      g.addColorStop(1, '#121a22');
+      x.fillStyle = g;
+      x.fillRect(0, 0, 256, 256);
+      x.strokeStyle = 'rgba(0,0,0,0.25)';             // machining rings
+      for (var r = 18; r < 126; r += 9) {
+        x.lineWidth = 1 + (r % 27 === 0 ? 1.5 : 0);
+        x.beginPath(); x.arc(128, 128, r, 0, Math.PI * 2); x.stroke();
+      }
+      for (var i = 0; i < 20; i++) {                  // wear scratches
+        x.strokeStyle = 'rgba(210,225,240,' + (0.05 + pr() * 0.08).toFixed(2) + ')';
+        x.lineWidth = 1;
+        var a = pr() * Math.PI * 2, rr = 30 + pr() * 90;
+        x.beginPath(); x.arc(128, 128, rr, a, a + 0.3 + pr() * 0.9); x.stroke();
+      }
+      for (i = 0; i < 8; i++) {                       // bolt circle
+        var ba = i * Math.PI / 4 + 0.4;
+        var bx2 = 128 + Math.cos(ba) * 104, by2 = 128 + Math.sin(ba) * 104;
+        x.fillStyle = 'rgba(0,0,0,0.55)';
+        x.beginPath(); x.arc(bx2, by2, 7, 0, Math.PI * 2); x.fill();
+        x.fillStyle = 'rgba(200,220,240,0.3)';
+        x.beginPath(); x.arc(bx2 - 1.5, by2 - 1.5, 2.5, 0, Math.PI * 2); x.fill();
+      }
+      x.fillStyle = 'rgba(226,158,62,0.5)';
+      x.font = '700 17px Menlo, monospace';
+      x.textAlign = 'center'; x.textBaseline = 'middle';
+      x.save(); x.translate(128, 128); x.rotate(0.7);
+      x.fillText('REDSKY', 0, -70);
+      x.fillText('SWL 500', 0, 78);
+      x.restore();
+      var eo = x.createRadialGradient(128, 128, 104, 128, 128, 128);   // edge AO
+      eo.addColorStop(0, 'rgba(0,0,0,0)');
+      eo.addColorStop(1, 'rgba(0,0,0,0.5)');
+      x.fillStyle = eo;
+      x.fillRect(0, 0, 256, 256);
+    })();
+    var plateT = new THREE.CanvasTexture(plateC);
+    plateT.encoding = THREE.sRGBEncoding;
+    var plate = new THREE.Mesh(new THREE.CircleGeometry(0.9, 32),
+      new THREE.MeshPhongMaterial({ map: plateT, shininess: 30, specular: 0x2e3d4c }));
+    plate.rotation.x = -Math.PI / 2;
+    plate.position.y = 0.162;
+    plate.receiveShadow = true;
+    stand.add(plate);
+    var ring = new THREE.Mesh(new THREE.TorusGeometry(1.0, 0.02, 8, 40), mat(0xc78a2e, { emissive: 0xc78a2e, ei: 0.22 }));
     ring.rotation.x = Math.PI / 2;
     ring.position.y = 0.17;
     stand.add(ring);
-    var col = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.22, 0.72, 12), mat(0x3a4c5d));
-    col.position.y = 0.52; col.castShadow = true;
-    stand.add(col);
-    [-0.5, 0.5].forEach(function (x) {
-      var arm = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.34, 0.5), mat(0x3a4c5d));
-      arm.position.set(x, 1.0, 0);
-      arm.castShadow = true;
-      stand.add(arm);
+    // hydraulic column: barrel, wiper collar, polished ram
+    var barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.21, 0.26, 0.46, 14), mat(0x1a222c));
+    barrel.position.y = 0.39; barrel.castShadow = true;
+    stand.add(barrel);
+    var collar = new THREE.Mesh(new THREE.CylinderGeometry(0.235, 0.235, 0.07, 14), mat(0x141b23, { shin: 40 }));
+    collar.position.y = 0.64;
+    stand.add(collar);
+    var ram = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.13, 0.42, 14), mat(0x3d4954, { shin: 70, flat: false }));
+    ram.position.y = 0.86; ram.castShadow = true;
+    stand.add(ram);
+    // crosshead + uprights + rubber cradle pads
+    var beam = new THREE.Mesh(new THREE.BoxGeometry(1.18, 0.1, 0.16), mat(0x1d2732));
+    beam.position.y = 1.02; beam.castShadow = true;
+    stand.add(beam);
+    [-0.5, 0.5].forEach(function (bx) {
+      var up = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.16, 0.34), mat(0x1d2732));
+      up.position.set(bx, 1.08, 0);
+      up.castShadow = true;
+      stand.add(up);
       [-1, 1].forEach(function (sz) {
-        var pad = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.16, 0.08), mat(0x22303c));
-        pad.position.set(x, 1.12, sz * 0.2);
+        var pad = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.16, 0.08), mat(0x14181d, { shin: 4 }));
+        pad.position.set(bx, 1.12, sz * 0.2);
         pad.rotation.x = sz * -0.5;
         stand.add(pad);
       });
     });
+    // pendant control on its drooping cable — UP · DOWN · a red one you don't touch
+    var pCable = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3([
+      V3(0.52, 1.0, 0.06), V3(0.72, 0.82, 0.2), V3(0.78, 0.6, 0.3), V3(0.73, 0.46, 0.34)
+    ]), 16, 0.013, 6, false), mat(0x141920, { shin: 25 }));
+    stand.add(pCable);
+    var pend = new THREE.Group();
+    var pBody = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.2, 0.05), mat(0x8f7524, { shin: 40 }));
+    pend.add(pBody);
+    [[0.05, 0x2e7d4f, 0x37995f], [-0.01, 0x2e7d4f, 0x37995f], [-0.07, 0x8a2f24, 0xb0392b]].forEach(function (bt) {
+      var btn = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.014, 8),
+        mat(bt[1], { emissive: bt[2], ei: 0.5 }));
+      btn.rotation.x = Math.PI / 2;
+      btn.position.set(0, bt[0], 0.028);
+      pend.add(btn);
+    });
+    pend.position.set(0.73, 0.36, 0.34);
+    pend.rotation.set(0.1, 0.3, 0.05);
+    stand.add(pend);
+    // hydraulic hose, base to collar
+    stand.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3([
+      V3(-0.62, 0.17, 0.42), V3(-0.5, 0.2, 0.28), V3(-0.3, 0.36, 0.1), V3(-0.19, 0.61, 0.02)
+    ]), 14, 0.02, 6, false), mat(0x1a222b, { shin: 15 })));
     scene.add(stand);
 
     var device = new THREE.Group();
@@ -898,6 +1736,7 @@
       dip: 0, dipV: 0,                       // work stand suspension
       velTheta: 0, velPhi: 0, velFresh: 0,   // inertial orbit
       repaintFloor: repaintFloor, clipboard: clip, worklight: rig, floorCanvas: fc,
+      dust: dust, lamps: lamps,              // 2am housekeeping
       wiring: null, detStage: null, armStage: null
     };
   }
@@ -5422,6 +6261,20 @@
       rig.position.set(Math.sin(rig.userData.angle) * 3.1, 0, Math.cos(rig.userData.angle) * 3.1);
       rig.lookAt(0, 0, 0);
       rig.userData.head.lookAt(0, 1.32, 0);
+      // 2am housekeeping: dust drifts through the key light, the lamps breathe
+      if (bay.dust) for (var bi = 0; bi < bay.dust.length; bi++) {
+        var mote = bay.dust[bi], mu = mote.userData;
+        mote.position.y -= mu.vy * dt;
+        mote.position.x += Math.sin(now * 0.0005 + mu.p) * 0.05 * dt;
+        mote.position.z += Math.cos(now * 0.0004 + mu.p * 1.7) * 0.05 * dt;
+        if (mote.position.y < 0.55) mote.position.y = 3.5;
+      }
+      if (bay.lamps) for (var bl = 0; bl < bay.lamps.length; bl++) {
+        var lp = bay.lamps[bl];
+        lp.light.intensity = lp.base * (0.93 + 0.05 * Math.sin(now * 0.0021 + lp.p) + 0.02 * Math.sin(now * 0.013 + lp.p * 3));
+        lp.g.rotation.x = Math.sin(now * 0.00037 + lp.p) * 0.012;
+        lp.g.rotation.z = Math.cos(now * 0.00031 + lp.p) * 0.012;
+      }
       renderer.render(bay.scene, bay.camera);
       return;
     }
@@ -6952,6 +7805,10 @@
     },
     result: function () { return S.result; },
     setSpin: function (on) { bay.spinEnabled = !!on; },
+    setOrbit: function (t, p, r) {
+      bay.orbit.theta = t; bay.orbit.phi = p; bay.orbit.radius = r;
+      bay.velTheta = 0; bay.velPhi = 0; bay.lastTouch = performance.now();
+    },
     nodes: function () {
       var out = {};
       nodeList().forEach(function (n) {
