@@ -51,7 +51,11 @@ button { font-family: inherit; color: inherit; background: none; border: none; c
   background: var(--bp-deep);
   box-shadow: 0 0 80px rgba(0,0,0,.7);
 }
-@media (min-width: 561px) {
+/* a phone held sideways gets the whole screen — no letterbox, full-bleed 3D */
+@media (orientation: landscape) and (max-height: 620px) {
+  #app { max-width: none; width: 100vw; }
+}
+@media (min-width: 561px) and (orientation: portrait) {
   #app { border-left: 1px solid #16324e; border-right: 1px solid #16324e; }
 }
 
