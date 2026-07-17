@@ -1625,3 +1625,35 @@ body.lefty .bay-cta.hq { left: auto; right: 12px; }
   background: none; border: none; text-decoration: underline; padding: 6px; margin: 0 auto; display: block; position: relative; }
 .hq-world-badge { display: inline-block; margin-left: 8px; font-size: 7.5px; letter-spacing: .16em;
   color: var(--bp-deep); background: var(--bp-bright); border-radius: 3px; padding: 2px 6px; vertical-align: 1px; }
+
+/* ============ GUIDANCE: the alignment bench ============ */
+.bay-cta.gyro { left: 12px; right: auto; bottom: calc(156px + var(--sab));
+  background: #0d1f33; color: #7fd4b8; border: 1.5px solid rgba(127,212,184,.55);
+  box-shadow: 0 4px 0 #0a1826; font-size: 10px; padding: 10px 13px; }
+.bay-cta.gyro.warn { color: var(--amber-hot); border-color: rgba(229,161,61,.6); }
+body.lefty .bay-cta.gyro { left: auto; right: 12px; }
+.gyro-card {
+  width: 100%; max-width: 360px; margin: auto 0; border-radius: 12px;
+  border: 1px solid var(--bp-line); background: linear-gradient(165deg, #0b1826, #060f1a);
+  padding: 16px 14px calc(14px + var(--sab)); display: flex; flex-direction: column; gap: 10px;
+  align-items: center;
+}
+#gyro-scope-wrap { width: min(72vw, 300px); }
+#gyro-scope { width: 100%; height: auto; display: block; touch-action: none; }
+.gs-bezel { fill: #050c14; stroke: #3c4650; stroke-width: 6; }
+.gs-grid { fill: none; stroke: rgba(127,212,184,.22); stroke-width: 1; }
+.gs-target { fill: rgba(127,212,184,.06); stroke: #7fd4b8; stroke-width: 1.6; stroke-dasharray: 5 4; }
+.gs-dot { fill: #b8ffd9; filter: drop-shadow(0 0 6px rgba(127,212,184,.9)); }
+#gs-trim line { stroke: var(--amber-hot); stroke-width: 1.6; }
+.gs-prog { fill: none; stroke: var(--amber); stroke-width: 3.5; stroke-linecap: round; }
+#gyro-read { font-family: var(--mono); font-size: 10px; letter-spacing: .2em; color: #7fd4b8; min-height: 15px; }
+#gyro-run { width: 100%; font-family: var(--mono); font-size: 11px; font-weight: 800; letter-spacing: .14em;
+  color: #0a1420; background: #7fd4b8; border-radius: 6px; padding: 12px; }
+#gyro-run:disabled { opacity: .35; }
+/* the test-setup picker rows */
+.tgt-params { display: flex; gap: 6px; margin-top: 8px; }
+.tgt-params button { flex: 1; font-family: var(--mono); font-size: 7.5px; font-weight: 800; letter-spacing: .1em;
+  color: var(--bp-dim); border: 1px solid var(--bp-line-soft); border-radius: 6px; padding: 7px 4px;
+  background: rgba(6,16,28,.6); }
+.tgt-params button.on { color: var(--amber-hot); border-color: var(--amber); background: rgba(229,161,61,.1); }
+.tgt-param-sub { font-family: var(--type); font-size: 9.5px; color: var(--bp-dim); margin-top: 5px; line-height: 1.4; min-height: 13px; }

@@ -655,6 +655,30 @@
     g.add(lbl);
     return g;
   }
+  function buildGyro() {
+    // GYRO CORE G-7: a caged sphere in gimbal rings — the most instrument-looking
+    // thing in the drawer, and it knows it
+    var g = new THREE.Group();
+    var housing = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.18, 0.16, 12), mat(0x39424c, { shin: 45 }));
+    housing.castShadow = true;
+    g.add(housing);
+    var ringA = new THREE.Mesh(new THREE.TorusGeometry(0.115, 0.014, 8, 22), mat(0xc7b06a, { shin: 85 }));
+    ringA.position.y = 0.1;
+    ringA.rotation.x = 0.5;
+    g.add(ringA);
+    var ringB = new THREE.Mesh(new THREE.TorusGeometry(0.085, 0.012, 8, 20), mat(0xd8dde2, { shin: 90 }));
+    ringB.position.y = 0.1;
+    ringB.rotation.z = 0.9;
+    g.add(ringB);
+    var rotor = new THREE.Mesh(new THREE.SphereGeometry(0.055, 12, 10),
+      mat(0x9cc8ea, { shin: 95, emissive: 0x27506e, ei: 0.45 }));
+    rotor.position.y = 0.1;
+    g.add(rotor);
+    var lbl = textPlane('G-7', 0.12, 0.05, { color: '#9cc8ea', px: 72 });
+    lbl.position.set(0, -0.02, 0.185);
+    g.add(lbl);
+    return g;
+  }
   function buildPaintTin() {
     var g = new THREE.Group();
     var tin = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 0.22, 16), mat(0x777f83, { shin: 40 }));
@@ -684,6 +708,7 @@
     if (id === 'delayrelay') return buildDelayRelay();
     if (id === 'impactfuze') return buildImpactFuze();
     if (id === 'paintlocker') return buildPaintTin();
+    if (id === 'gyro') return buildGyro();
     if (id === 'cap') return buildCap();
     if (id === 'fins') return buildFins();
     if (id === 'panel') return buildArmPanel();
@@ -903,6 +928,7 @@
     if (!a.panel) nodes.push({ id: 'side', pos: V3(-d.L * 0.31, 0.05, d.r + 0.02), accepts: ['panel'] });
     if (!a.delayrelay) nodes.push({ id: 'relaymount', pos: V3(d.L * 0.28, -0.13, d.r - 0.02), accepts: ['delayrelay'] });
     if (!a.harness) nodes.push({ id: 'harnessmount', pos: V3(-d.L * 0.05, -d.r - 0.04, 0), accepts: ['harness'] });
+    if (!a.gyro) nodes.push({ id: 'gyromount', pos: V3(-d.L * 0.18, 0.06, -d.r - 0.03), accepts: ['gyro'] });
     return nodes;
   }
   function nodePose(nodeId, partId) {
@@ -921,6 +947,7 @@
     if (nodeId === 'side') return { pos: V3(-d.L * 0.31, 0.05, d.r + 0.02), rot: V3(0, 0, 0) };
     if (nodeId === 'relaymount') return { pos: V3(d.L * 0.28, -0.13, d.r - 0.02), rot: V3(0, 0, 0) };
     if (nodeId === 'harnessmount') return { pos: V3(-d.L * 0.05, -d.r - 0.02, 0), rot: V3(0, 0, 0) };
+    if (nodeId === 'gyromount') return { pos: V3(-d.L * 0.18, 0.04, -d.r - 0.02), rot: V3(Math.PI / 2, 0, 0) };
     return { pos: V3(0, 0, 0), rot: V3(0, 0, 0) };
   }
 
@@ -1041,7 +1068,7 @@
     { id: 'fuzing',   name: 'FUZING' },
     { id: 'power',    name: 'POWER' },
     { id: 'trim',     name: 'TRIM' },
-    { id: 'guidance', name: 'GUIDANCE', sealed: 'SEALED — ACT II' }   // the tease
+    { id: 'guidance', name: 'GUIDANCE' }   // the seal is off (M3b wave 2)
   ];
   /* the catalog: category, one effect line, unlock contract (locked = silhouette) */
   var CATALOG = [
@@ -1065,6 +1092,7 @@
     { id: 'batteryl', cat: 'power',   name: 'BATTERY PACK L', fx: 'HEAVY · SPARE AUX TERMINAL',  group: 'unique', unlock: 'RFP-063', excl: ['battery'] },
     { id: 'harness',  cat: 'power',   name: 'SHIELDED HARNESS', fx: 'NO COLOUR ASIDE · +1 PROBE FREE', group: 'unique', unlock: 'RFP-055' },
     { id: 'panel',    cat: 'power',   name: 'ARM SWITCH',     fx: 'ONE GUARD · ONE SWITCH',      group: 'unique' },
+    { id: 'gyro',     cat: 'guidance', name: 'GYRO CORE G-7', fx: 'CANCELS DRIFT · ALIGN BY HAND', group: 'unique', unlock: 'RFP-063' },
     { id: 'cap',      cat: 'trim',    name: 'WELL CAP',       fx: 'SEALS THE DET WELL',          group: 'unique' },
     { id: 'fins',     cat: 'trim',    name: 'FINS',           fx: 'ZERO EFFECT · MORALE',        group: 'unique' },
     { id: 'paintlocker', cat: 'trim', name: 'PAINT LOCKER',   fx: '3 FINISHES · ZERO MECHANICS', group: 'unique', unlock: 'RFP-063', free: true,
@@ -1311,7 +1339,7 @@
                  view: { theta: 0.7, phi: 1.18, radius: 4.4, target: [0, 1.25, 0] } },
     payload:   { label: 'PAYLOAD', cats: ['payload'],
                  view: { theta: 0.7, phi: 0.52, radius: 3.1, target: [0, 1.35, 0] } },
-    systems:   { label: 'SYSTEMS', cats: ['fuzing', 'power'],
+    systems:   { label: 'SYSTEMS', cats: ['fuzing', 'power', 'guidance'],
                  view: { theta: 1.25, phi: 1.02, radius: 2.7, target: [0.45, 1.3, 0] } },
     closeout:  { label: 'CLOSE-OUT', cats: [] }
   };
@@ -1413,6 +1441,7 @@
     btn.disabled = !(d.complete && !d.overBudget && !d.overWeight && !shortOnCash);
     $('btn-refire').classList.toggle('hidden', !(S.phase === 'build' && closeoutReady() && d.complete && !d.overBudget && !d.overWeight && !shortOnCash));
     $('btn-refinery').classList.toggle('hidden', !(S.phase === 'build' && R.needsRefinery));
+    gyroBtnRefresh();
     refreshComMarker(d);
     refreshHint(d);
     refreshDrawer();
@@ -1671,6 +1700,7 @@
       kind = 'canister'; slot = node.slot;
     } else {
       a[id] = true;
+      if (id === 'gyro') a.gyroCal = null;   // a fresh gyro arrives uncaged
       kind = id;
     }
     var w = partWeight01(id);
@@ -1697,6 +1727,7 @@
       a.canisters[info.slot] = null;
     } else {
       a[info.kind] = false;
+      if (info.kind === 'gyro') a.gyroCal = null;   // alignment doesn't survive removal
     }
     PGAudio.unsnap();
     standDip(-partWeight01(info.kind === 'shell' ? 'standard' : info.kind) * 0.4);
@@ -1757,7 +1788,8 @@
     battery: 'DC-9 cells. The label says DO NOT LICK because somebody asked.',
     cap: 'A hat for the important hole. Fits like bureaucracy: snugly.',
     fins: 'Aerodynamically useless. Morale-critical.',
-    panel: 'One switch, one guard, zero excuses. The little light means it.'
+    panel: 'One switch, one guard, zero excuses. The little light means it.',
+    gyro: 'A spinning opinion about which way is straight. Align it by hand or it argues with the fins.'
   };
   function showPartCard(root, p) {
     var info = root.userData.remove;
@@ -3126,7 +3158,7 @@
       bay.scene.remove(bay.detStage.det);
     }
     document.querySelector('.ck-head').textContent = 'PRE-FLIGHT CLOSE-OUT · ' + rfp().id;
-    ['ck-wiring', 'ck-torque', 'ck-det', 'ck-dial'].forEach(function (id) { $(id).classList.remove('shown'); });
+    ['ck-wiring', 'ck-torque', 'ck-det', 'ck-dial', 'ck-gyro'].forEach(function (id) { $(id).classList.remove('shown'); });
     $('ck-foot').textContent = S.assembly.armed ? 'Still armed from last time. It remembers.' : 'Flip the guard. Throw the switch.';
     var pm = bay.armPanelMesh;
     var pw = pm.getWorldPosition(new THREE.Vector3());
@@ -3154,6 +3186,12 @@
     if (rfp().dial) {
       lines.splice(1, 0, { id: 'ck-dial', ok: a.timerSet != null,
         okTxt: '✓ DIAL SET', sub: 'the vernier keeps your secret' });
+    }
+    $('ck-gyro').classList.toggle('gone', !a.gyro);
+    if (a.gyro) {
+      lines.push({ id: 'ck-gyro', ok: a.gyroCal != null,
+        okTxt: '✓ ALIGNED ' + Math.round((a.gyroCal || 0) * 100) + '%',
+        sub: (a.gyroCal || 0) >= 0.85 ? 'the rotor hums' : 'it will hold' });
     }
     lines.forEach(function (l, i) {
       later(350 + i * 550, function () {
@@ -3942,6 +3980,7 @@
     if (a.batteryl) { var bl = buildBatteryL(); bl.position.set(-d.L / 2 - 0.16, 0, 0); g.add(bl); }
     if (a.delayrelay) { var dr = buildDelayRelay(); dr.position.set(d.L * 0.28, -0.13, d.r - 0.02); g.add(dr); }
     if (a.harness) { var hn = buildHarness(); hn.position.set(-d.L * 0.05, -d.r - 0.02, 0); g.add(hn); }
+    if (a.gyro) { var gy = buildGyro(); gy.position.set(-d.L * 0.18, 0.04, -d.r - 0.02); gy.rotation.x = Math.PI / 2; g.add(gy); }
     if (a.cap) { var c2 = buildCap(); c2.position.set(wellX(a.shell), d.r + 0.055, 0); g.add(c2); }
     if (a.fins) { var f = buildFins(); f.position.set(-d.L / 2 + 0.28, 0, 0); g.add(f); }
     if (a.panel) { var p = buildArmPanel(); p.position.set(-d.L * 0.31, 0.05, d.r + 0.02); p.userData.leverPivot.rotation.x = a.armed ? 0.6 : -0.5; g.add(p); }
@@ -5821,6 +5860,129 @@
     showHQ();
   });
 
+  /* ---------- GYRO ALIGNMENT BENCH: hold the wander in the ring ---------- */
+  var gyroSt = null;
+  function gyroBtnRefresh() {
+    var a = S.assembly;
+    var show = S.phase === 'build' && a.shell && a.gyro;
+    $('btn-gyro').classList.toggle('hidden', !show);
+    if (!show) return;
+    var sub = $('btn-gyro-sub');
+    if (a.gyroCal == null) {
+      sub.textContent = 'UNCAGED — ALIGN IT';
+      $('btn-gyro').classList.add('warn');
+    } else {
+      sub.textContent = 'ALIGNED ' + Math.round(a.gyroCal * 100) + '%';
+      $('btn-gyro').classList.remove('warn');
+    }
+  }
+  $('btn-gyro').addEventListener('click', function () {
+    PGAudio.tap();
+    openGyroBench();
+  });
+  function openGyroBench() {
+    gyroSt = { running: false, trim: { x: 0, y: 0 }, drag: null };
+    $('gyro-read').textContent = S.assembly.gyroCal == null
+      ? 'ROTOR CAGED' : 'LAST CAPTURE · ' + Math.round(S.assembly.gyroCal * 100) + '% — RUN IT AGAIN IF YOU DARE';
+    $('gyro-sub').textContent = 'Spin it up. Drag the amber trim to hold the wander inside the ring for the whole capture.';
+    $('gyro-run').disabled = false;
+    $('gs-prog').setAttribute('d', '');
+    $('gs-dot').setAttribute('cx', 120); $('gs-dot').setAttribute('cy', 120);
+    $('gs-trim').setAttribute('transform', 'translate(120,120)');
+    $('gyro-overlay').classList.remove('hidden');
+  }
+  $('gyro-close').addEventListener('click', function () {
+    PGAudio.tap();
+    if (gyroSt) gyroSt.running = false;
+    $('gyro-overlay').classList.add('hidden');
+    gyroBtnRefresh();
+    refreshHUD();
+  });
+  /* the trim crosshair follows the finger — you are the servo */
+  (function () {
+    var scope = $('gyro-scope');
+    function toScope(e) {
+      var r = scope.getBoundingClientRect();
+      return { x: (e.clientX - r.left) / r.width * 240 - 120, y: (e.clientY - r.top) / r.height * 240 - 120 };
+    }
+    scope.addEventListener('pointerdown', function (e) {
+      if (!gyroSt) return;
+      e.preventDefault();
+      scope.setPointerCapture(e.pointerId);
+      gyroSt.drag = e.pointerId;
+      var p = toScope(e);
+      gyroSt.trim = { x: clamp(p.x, -95, 95), y: clamp(p.y, -95, 95) };
+    });
+    scope.addEventListener('pointermove', function (e) {
+      if (!gyroSt || gyroSt.drag !== e.pointerId) return;
+      var p = toScope(e);
+      gyroSt.trim = { x: clamp(p.x, -95, 95), y: clamp(p.y, -95, 95) };
+    });
+    function up(e) { if (gyroSt && gyroSt.drag === e.pointerId) gyroSt.drag = null; }
+    scope.addEventListener('pointerup', up);
+    scope.addEventListener('pointercancel', up);
+  })();
+  $('gyro-run').addEventListener('click', function () {
+    if (!gyroSt || gyroSt.running) return;
+    PGAudio.armLatch();
+    $('gyro-run').disabled = true;
+    $('gyro-read').textContent = 'ROTOR AT SPEED · CAPTURING…';
+    // the wander: three incommensurate sines per axis, phases rolled fresh
+    function wobble() {
+      return { a: 26 + Math.random() * 22, f: 0.35 + Math.random() * 0.75, p: Math.random() * 6.28 };
+    }
+    gyroSt.wx = [wobble(), wobble(), wobble()];
+    gyroSt.wy = [wobble(), wobble(), wobble()];
+    gyroSt.running = true;
+    gyroSt.t0 = performance.now();
+    gyroSt.good = 0;
+    gyroSt.samples = 0;
+    var DUR = 6000, RING = 30;
+    function step(now) {
+      if (!gyroSt || !gyroSt.running) return;
+      var t = (now - gyroSt.t0) / 1000;
+      var k = clamp((now - gyroSt.t0) / DUR, 0, 1);
+      function drift(w, tt) {
+        var v = 0;
+        w.forEach(function (o) { v += Math.sin(tt * o.f * 6.28 + o.p) * o.a; });
+        return v / w.length * (0.5 + k * 0.9);   // it gets meaner as the capture runs
+      }
+      var dx = drift(gyroSt.wx, t) + gyroSt.trim.x;
+      var dy = drift(gyroSt.wy, t) + gyroSt.trim.y;
+      dx = clamp(dx, -100, 100); dy = clamp(dy, -100, 100);
+      $('gs-dot').setAttribute('cx', 120 + dx);
+      $('gs-dot').setAttribute('cy', 120 + dy);
+      $('gs-trim').setAttribute('transform', 'translate(' + (120 + gyroSt.trim.x) + ',' + (120 + gyroSt.trim.y) + ')');
+      var err = Math.hypot(dx, dy);
+      gyroSt.samples++;
+      if (err <= RING) { gyroSt.good++; if (gyroSt.samples % 14 === 0) PGAudio.measureTick(); }
+      // progress arc around the bezel
+      var ang = k * Math.PI * 2 - Math.PI / 2;
+      var large = k > 0.5 ? 1 : 0;
+      $('gs-prog').setAttribute('d', 'M 120 8 A 112 112 0 ' + large + ' 1 ' +
+        (120 + 112 * Math.cos(ang)) + ' ' + (120 + 112 * Math.sin(ang)));
+      $('gyro-read').textContent = 'DRIFT ' + err.toFixed(0) + ' µRAD · IN-RING ' +
+        Math.round(gyroSt.good / gyroSt.samples * 100) + '%';
+      if (k >= 1) {
+        gyroSt.running = false;
+        var q = clamp(gyroSt.good / gyroSt.samples, 0, 1);
+        S.assembly.gyroCal = Math.round(q * 100) / 100;
+        saveBench();
+        var grade = q >= 0.85 ? 'FINE ALIGNMENT' : q >= 0.6 ? 'SERVICEABLE' : q >= 0.35 ? 'ROUGH' : 'BARELY CAGED';
+        $('gyro-read').textContent = 'LOCKED · ' + Math.round(q * 100) + '% — ' + grade;
+        $('gyro-sub').textContent = q >= 0.85
+          ? 'The rotor hums. The fins will never know what they lost.'
+          : 'It will hold. Run the capture again to tighten it.';
+        $('gyro-run').disabled = false;
+        PGAudio.stampThud();
+        gyroBtnRefresh();
+        return;
+      }
+      requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
+  });
+
   /* ---------- the target picker: which object measures you tonight ---------- */
   function openTargetPicker() {
     var d = PG2.derive(S.assembly, rfp());
@@ -5832,19 +5994,47 @@
     $('tgt-cost').textContent = 'THIS SHOT EXPENDS THE ARTICLE — ' + fmt$(d.cost) + ' · ACCOUNT ' + cashLabel();
     var list = $('tgt-list');
     list.innerHTML = '';
+    if (!S.rndParams) S.rndParams = {};
     PG2.TARGET_ORDER.forEach(function (tid) {
       var t = PG2.TARGETS[tid];
-      var b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'tgt-row';
-      b.innerHTML = '<span class="tg-metric">' + t.metric + '</span><div class="tg-name">' + t.name + '</div>' +
-        '<div class="tg-sub">' + t.sub + '</div><div class="tg-blurb">' + t.blurb + '</div>';
-      b.addEventListener('click', function () {
+      if (S.rndParams[tid] == null) S.rndParams[tid] = t.param.options[t.param.key === 'standoff' ? 1 : 0].id;
+      var row = document.createElement('div');
+      row.className = 'tgt-row';
+      row.innerHTML = '<span class="tg-metric">' + t.metric + '</span><div class="tg-name">' + t.name + '</div>' +
+        '<div class="tg-sub">' + t.sub + '</div><div class="tg-blurb">' + t.blurb + '</div>' +
+        '<div class="tgt-params" data-tid="' + tid + '"></div>' +
+        '<div class="tgt-param-sub" id="tps-' + tid + '"></div>' +
+        '<button type="button" class="tgt-go" style="width:100%;margin-top:8px;font-family:var(--mono);font-size:9px;font-weight:800;letter-spacing:.14em;color:#0a1420;background:var(--amber);border-radius:6px;padding:9px">TRUCK IT OUT — ' + t.param.label + ': <span id="tgo-' + tid + '"></span></button>';
+      var pWrap = row.querySelector('.tgt-params');
+      function refreshParamUI() {
+        var opt = null;
+        t.param.options.forEach(function (o) { if (o.id === S.rndParams[tid]) opt = o; });
+        pWrap.querySelectorAll('button').forEach(function (bb) {
+          bb.classList.toggle('on', bb.dataset.opt === S.rndParams[tid]);
+        });
+        row.querySelector('#tps-' + tid).textContent = opt ? opt.sub : '';
+        row.querySelector('#tgo-' + tid).textContent = opt ? opt.label : '';
+      }
+      t.param.options.forEach(function (o) {
+        var ob = document.createElement('button');
+        ob.type = 'button';
+        ob.dataset.opt = o.id;
+        ob.textContent = o.label;
+        ob.addEventListener('click', function (ev) {
+          ev.stopPropagation();
+          PGAudio.tick();
+          S.rndParams[tid] = o.id;
+          refreshParamUI();
+        });
+        pWrap.appendChild(ob);
+      });
+      refreshParamUI();
+      row.querySelector('.tgt-go').addEventListener('click', function () {
         PGAudio.tap();
         $('target-overlay').classList.add('hidden');
-        enterRangeRnd(tid);
+        enterRangeRnd(tid, S.rndParams[tid]);
       });
-      list.appendChild(b);
+      list.appendChild(row);
     });
     $('target-overlay').classList.remove('hidden');
   }
@@ -5854,14 +6044,14 @@
   });
 
   /* ---------- the R&D range: out the back gate, no convoy, an object that measures back ---------- */
-  function enterRangeRnd(targetId) {
+  function enterRangeRnd(targetId, param) {
     clearLater();
     S.rndTarget = targetId;
     var d = PG2.derive(S.assembly, rfp());
     cashSpend(d.cost);                 // the article is spent the moment it leaves the shed
     WS().rndTests++;
     saveBench();
-    var rt = PG2.resolveTarget(S.assembly, S.seed, targetId);
+    var rt = PG2.resolveTarget(S.assembly, S.seed, targetId, { param: param });
     S.result = { outcome: rt.o, visual: PG2.visualFor(rt.o), rnd: rt, shotCost: d.cost, seed: S.seed };
     if (!range) range = initRange();
     S.phase = 'station';
@@ -5920,8 +6110,11 @@
       range.trestle = tr;
     }
     range.trestle.visible = true;
-    // the object of the evening
+    // the object of the evening, set up per the test card
     setTargetObject(targetId);
+    if (targetId === 'array' && range.targetG) {
+      range.targetG.position.x = param === '40' ? 25 : param === '80' ? 55 : 40;   // stage depth reads the standoff
+    }
     // Station 7, after hours
     range.camera.position.set(60, 14, 1600);
     range.camera.fov = 7;
@@ -6016,13 +6209,14 @@
     });
     if (g.userData.tid === 'truck') {
       var pen = rt.primary || 0;
-      if (pen >= 140) {          // clean through, and the hauler leaves the ground
+      var toss = rt.toss || 0;
+      if (pen >= 140 || toss >= 9) {   // clean through, or thrown outright
         g.rotation.z = 1.75 + r() * 0.4;
         g.position.y += 1.15;
-        g.position.x += 1.6;
-      } else if (pen >= 70) {
+        g.position.x += 1.0 + toss * 0.22;
+      } else if (pen >= 70 || toss >= 5) {
         g.rotation.z = 0.34;
-        g.position.x += 0.7;
+        g.position.x += 0.4 + toss * 0.12;
         g.position.y += 0.18;
       }
       if (pen >= 40 && g.userData.bed) {
@@ -6035,6 +6229,7 @@
     } else if (g.userData.tid === 'wall') {
       var breach = rt.primary || 0;
       var mid = g.userData.slabs[1];
+      if (rt.collapsed) breach = 100;   // the lintel went; the panel followed
       if (breach >= 95) {
         mid.visible = false;
         for (var i = 0; i < 7; i++) {
@@ -6184,7 +6379,8 @@
     }
     cashSpend(fee);
     var certSeed = PG2.makeSeed().toUpperCase();
-    var series = PG2.certSeries(S.assembly, certSeed, S.rndTarget);
+    var certParam = S.result && S.result.rnd ? S.result.rnd.param : null;
+    var series = PG2.certSeries(S.assembly, certSeed, S.rndTarget, certParam);
     var doc = $('cert-doc');
     var t = series.target;
     function stampRow(st) {
@@ -6227,7 +6423,7 @@
     var name = PG2.certCodename(certSeed);
     var s1 = series.shots[0];
     var ty = {
-      plate: plate, name: name, target: S.rndTarget,
+      plate: plate, name: name, target: S.rndTarget, param: series.param || null,
       grade: series.grade, band: series.band, primary: s1.primary,
       unitCost: S.result && S.result.shotCost != null ? S.result.shotCost : PG2.derive(S.assembly, rfp()).cost,
       abuseKind: series.abuseKind, incidents: 0,
@@ -6244,6 +6440,7 @@
         '<div class="tp-name">“' + name + '”</div>' +
         '<span class="tp-ready">PRODUCTION READY</span>' +
         '<div class="tp-spec">' +
+          (series.param ? '<div>TEST CARD · ' + t.name + ' <b>' + String(series.param).toUpperCase() + '</b></div>' : '') +
           '<div>' + t.metric + ', CERTIFIED <b>' + series.band.lo + '–' + series.band.hi + ' ' + t.unit + '</b></div>' +
           '<div>CONSISTENCY <b>GRADE ' + series.grade + '</b></div>' +
           '<div>ABUSE · ' + (series.abuseKind === 'hotsoak' ? 'HOT SOAK' : 'WASHBOARD') + ' <b>PASSED</b></div>' +
@@ -6283,6 +6480,7 @@
         '<div class="bt-head"><span class="bt-plate">' + ty.plate + ' “' + ty.name + '”</span>' +
         '<span class="bt-grade">GRADE ' + ty.grade + (ty.incidents ? ' · ' + ty.incidents + ' QA CALLBACK' + (ty.incidents > 1 ? 'S' : '') : '') + '</span></div>' +
         '<div class="bt-spec">' + t.metric + ' ' + ty.band.lo + '–' + ty.band.hi + ' ' + t.unit +
+        (ty.param ? ' · ' + String(ty.param).toUpperCase() + ' CARD' : '') +
         ' · UNIT COST ' + fmt$(ty.unitCost) + '</div>' +
         (mine.length ? '' : '<div class="bt-spec" style="margin-top:8px">No open orders this week. The paper says demand is “seasonal”.</div>');
       mine.forEach(function (order) {
@@ -6406,7 +6604,9 @@
     /* M3b — the Workshop */
     rnd: function () { return S.result && S.result.rnd ? JSON.parse(JSON.stringify({
       target: S.result.rnd.target.id, primary: S.result.rnd.primary,
-      funcOk: S.result.rnd.funcOk, measures: S.result.rnd.measures })) : null; },
+      funcOk: S.result.rnd.funcOk, measures: S.result.rnd.measures,
+      param: S.result.rnd.param, pegged: !!S.result.rnd.pegged, collapsed: !!S.result.rnd.collapsed,
+      toss: S.result.rnd.toss || 0 })) : null; },
     debugGrant: function (opts) {
       opts = opts || {};
       if (opts.wins) {

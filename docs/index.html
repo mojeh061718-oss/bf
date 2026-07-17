@@ -127,6 +127,30 @@
     <button id="delivery-close" type="button">BANK IT</button>
   </div>
 
+  <!-- gyro alignment: the most instrument-looking minute in the game -->
+  <div id="gyro-overlay" class="overlay hidden">
+    <div class="gyro-card">
+      <div class="set-head">GYRO CORE G-7 · ALIGNMENT BENCH</div>
+      <div class="set-sub" id="gyro-sub">Spin it up. Hold the wander inside the ring for the whole capture.</div>
+      <div id="gyro-scope-wrap">
+        <svg id="gyro-scope" viewBox="0 0 240 240" aria-label="Gyro alignment scope">
+          <circle cx="120" cy="120" r="112" class="gs-bezel"/>
+          <circle cx="120" cy="120" r="100" class="gs-grid"/>
+          <circle cx="120" cy="120" r="66" class="gs-grid"/>
+          <circle cx="120" cy="120" r="30" class="gs-target"/>
+          <line x1="120" y1="12" x2="120" y2="228" class="gs-grid"/>
+          <line x1="12" y1="120" x2="228" y2="120" class="gs-grid"/>
+          <circle id="gs-dot" cx="120" cy="120" r="6" class="gs-dot"/>
+          <g id="gs-trim"><line x1="-10" y1="0" x2="10" y2="0"/><line x1="0" y1="-10" x2="0" y2="10"/></g>
+          <path id="gs-prog" class="gs-prog" d=""/>
+        </svg>
+      </div>
+      <div id="gyro-read">ROTOR CAGED</div>
+      <button id="gyro-run" type="button">SPIN UP &amp; CAPTURE</button>
+      <button id="gyro-close" type="button">BACK TO THE BAY</button>
+    </div>
+  </div>
+
   <!-- the auction beat -->
   <div id="auction-overlay" class="overlay hidden">
     <div class="paper auction-doc" id="auction-doc"></div>
@@ -203,6 +227,7 @@
 
     <div id="stage-build">
       <button id="btn-hq" type="button" class="bay-cta hq hidden">← THE COMPOUND</button>
+      <button id="btn-gyro" type="button" class="bay-cta gyro hidden">⟲ GYRO<span class="cta-sub" id="btn-gyro-sub">UNCAGED</span></button>
       <button id="btn-refinery" type="button" class="bay-cta ref hidden">⚗ THE STILL</button>
       <button id="btn-refire" type="button" class="bay-cta refire hidden">REFIRE →<span class="cta-sub">BUILD IS READY</span></button>
       <button id="btn-closeout" type="button" class="bay-cta" disabled>CLOSE-OUT →</button>
@@ -289,6 +314,7 @@
         <div class="ck-line" id="ck-dial"><span class="ck-name">TIMER DIAL</span><span class="ck-stamp"></span></div>
         <div class="ck-line" id="ck-torque"><span class="ck-name">TERMINALS TORQUED</span><span class="ck-stamp"></span></div>
         <div class="ck-line" id="ck-det"><span class="ck-name">DETONATOR SEATED</span><span class="ck-stamp"></span></div>
+        <div class="ck-line" id="ck-gyro"><span class="ck-name">GYRO ALIGNED</span><span class="ck-stamp"></span></div>
         <div class="ck-foot" id="ck-foot">Flip the guard. Throw the switch.</div>
       </div>
       <button id="btn-torange" type="button" class="bay-cta hidden">TRUCK TO RANGE →</button>

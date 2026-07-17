@@ -241,7 +241,10 @@ var PG2 = (function () {
     delayrelay: { id: 'delayrelay', name: 'DELAY RELAY', cost: 150, w: 1.5,
                   blurb: 'Adds half a second. Exactly half a second. The only honest component in the drawer.' },
     impactfuze: { id: 'impactfuze', name: 'IMPACT FUZE NOSE', cost: 320, w: 3,
-                  blurb: 'No countdown, no opinions. It fires when the ground asks it to.' }
+                  blurb: 'No countdown, no opinions. It fires when the ground asks it to.' },
+    /* GUIDANCE (M3b wave 2) — the sealed drawer opens */
+    gyro:       { id: 'gyro', name: 'GYRO CORE G-7', cost: 520, w: 4,
+                  blurb: 'A spinning opinion about which way is straight. Aligned by hand, it cancels the load’s drift. Uncaged, it argues with the fins and wins.' }
   };
   var DELAY_RELAY_S = 0.5;   // the delay relay's fixed stage, stacked after the dial
   var PAINTS = [
@@ -505,6 +508,7 @@ var PG2 = (function () {
       canisters: [],                     // per bay: compound id | null
       timer: false, battery: false, cap: false, fins: false, panel: false,
       batteryl: false, harness: false, delayrelay: false, impactfuze: false,
+      gyro: false, gyroCal: null,       // guidance: installed + hand-aligned quality 0..1
       paint: null,                       // cosmetic finish — zero mechanics, pure ownership
       timerSet: null,                    // seconds set on the dial; null = factory 5.0
       refine: { spend: 0, stock: { emberx: 0, emberxs: 0, glaze: 0 } },
@@ -555,7 +559,7 @@ var PG2 = (function () {
       heat += COMPOUNDS[c].heat;
     });
     if (a.refine) cost += a.refine.spend;
-    ['timer', 'battery', 'cap', 'fins', 'panel', 'batteryl', 'harness', 'delayrelay', 'impactfuze'].forEach(function (k) {
+    ['timer', 'battery', 'cap', 'fins', 'panel', 'batteryl', 'harness', 'delayrelay', 'impactfuze', 'gyro'].forEach(function (k) {
       if (a[k]) { cost += PARTS[k].cost; weight += PARTS[k].w; }
     });
     // DENSE-PACK wants a STANDARD-rated shell under it — a mis-fit never trucks out
@@ -589,7 +593,8 @@ var PG2 = (function () {
       slots: sh ? sh.slots : 0, filled: filled, hotFrac: hotFrac,
       effHot: effHot, cookRisk: cookRisk, glazeN: glazeN,
       comX: comX,
-      offsetMean: comX * craterMean * OFFSET_GAIN,   // metres, negative = WEST
+      offsetMean: comX * craterMean * OFFSET_GAIN * gyroMul(a),   // metres, negative = WEST — the gyro has a say
+      gyroMul: gyroMul(a),
       craterMean: craterMean,
       frag: !!(sh && sh.frag), badFit: badFit,
       bandLo: craterMean * (1 - spread),
@@ -721,6 +726,13 @@ var PG2 = (function () {
     return (a.shell || '-') + '|' + (a.canisters || []).join(',');
   }
 
+  /* GUIDANCE: an aligned gyro cancels drift; an uncaged one amplifies it.
+     Multiplies every spatial error the load produces. */
+  function gyroMul(a) {
+    if (!a.gyro) return 1;
+    if (a.gyroCal == null) return 1.28;                    // uncaged: it argues with the fins
+    return clamp(1 - a.gyroCal * 0.85, 0.12, 1);
+  }
   /* crater geometry from a resolved lean */
   function applyLean(o, seed, d, a, rfp) {
     var r = gauss(stream(seed, 'lean:' + loadKey(a)));
@@ -730,14 +742,16 @@ var PG2 = (function () {
       // the drop drifts with the lean: landing point = crater centre
       o.offsetM = o.dropOff != null ? o.dropOff : 0;
     } else {
-      o.offsetM = o.craterActual != null ? comXa * o.craterActual * OFFSET_GAIN : 0;   // negative = WEST
+      o.offsetM = o.craterActual != null ? comXa * o.craterActual * OFFSET_GAIN * gyroMul(a) : 0;   // negative = WEST
     }
     o.ellipse = 1 + Math.abs(comXa) * ELLIPSE_GAIN;
   }
   /* SKIPSTONE: where the dropped article lands, relative to the plate centre */
   function dropPlan(a, seed, d, rfp) {
     var comXa = clamp(d.comX + gauss(stream(seed, 'lean:' + loadKey(a))) * 0.03, -1, 1);
-    var off = comXa * rfp.impact.drift + gauss(stream(seed, 'drop:' + loadKey(a))) * rfp.impact.scatter;
+    var scatterMul = a.gyro && a.gyroCal != null ? 1 - a.gyroCal * 0.55 : 1;
+    var off = comXa * rfp.impact.drift * gyroMul(a) +
+              gauss(stream(seed, 'drop:' + loadKey(a))) * rfp.impact.scatter * scatterMul;
     return { comX: comXa, off: off };
   }
 
@@ -1334,13 +1348,27 @@ var PG2 = (function () {
   var TARGETS = {
     truck: { id: 'truck', name: 'DERELICT HAULER', sub: 'K-9 FLATBED · RETIRED IN DISGRACE',
              metric: 'PENETRATION', unit: 'mm-e', floor: 55,
-             blurb: 'Punch through the bed plate. Survey reads the hole in millimetres of plate-equivalent.' },
+             blurb: 'Punch through the bed plate. Survey reads the hole in millimetres of plate-equivalent.',
+             param: { key: 'mount', label: 'CHARGE MOUNT', options: [
+               { id: 'contact', label: 'CONTACT', sub: 'strapped to the plate — deepest hole, least drama' },
+               { id: 'standoff', label: 'STANDOFF', sub: 'a metre off the bed — shallower hole, the hauler travels' }
+             ] } },
     wall:  { id: 'wall', name: 'WALL SECTION', sub: 'RC-4 CONCRETE · 60 CM · POURED TUESDAY',
              metric: 'BREACH', unit: '%', floor: 60,
-             blurb: 'Open a door. Survey reads the breach as a percentage of the panel — off-centre hits open less of it.' },
-    array: { id: 'array', name: 'INSTRUMENT ARRAY', sub: '12 GAUGE PANELS · 60 M STANDOFF',
+             blurb: 'Open a door. Survey reads the breach as a percentage of the panel — off-centre hits open less of it.',
+             param: { key: 'aim', label: 'AIM POINT', options: [
+               { id: 'base', label: 'BASE', sub: 'the honest cut — full credit, forgiving of lean' },
+               { id: 'center', label: 'CENTRE', sub: 'bigger door if you hit it — lean is punished double' },
+               { id: 'top', label: 'LINTEL', sub: 'less breach, but past 70% the whole panel comes down' }
+             ] } },
+    array: { id: 'array', name: 'INSTRUMENT ARRAY', sub: '12 GAUGE PANELS · SET YOUR STANDOFF',
              metric: 'OVERPRESSURE', unit: 'br', floor: 18,
-             blurb: 'Ring the gauges. Twelve glass panels read peak overpressure in brandt — and shatter in order of honesty.' }
+             blurb: 'Ring the gauges. Closer reads higher — but peg them past 62 br and the data dies with the glass.',
+             param: { key: 'standoff', label: 'STANDOFF', options: [
+               { id: '40', label: '40 M', sub: 'hot reading, real risk of pegging the gauges' },
+               { id: '60', label: '60 M', sub: 'the book distance' },
+               { id: '80', label: '80 M', sub: 'safe and modest — the gauges barely wake up' }
+             ] } }
   };
   var TARGET_ORDER = ['truck', 'wall', 'array'];
 
@@ -1352,9 +1380,10 @@ var PG2 = (function () {
     opts = opts || {};
     var rfp = opts.hot ? RND_RFP_HOT : RND_RFP;
     var t = TARGETS[targetId] || TARGETS.truck;
+    var param = opts.param || (t.param ? t.param.options[t.param.key === 'standoff' ? 1 : 0].id : null);
     var o = resolve(a, seed, rfp);
     var funcOk = o.fired && o.detT != null && Math.abs(o.detT) <= rfp.tTol;
-    var out = { o: o, target: t, funcOk: funcOk, primary: null, measures: [], d: o.d };
+    var out = { o: o, target: t, param: param, funcOk: funcOk, primary: null, measures: [], d: o.d };
     if (!o.fired) {
       out.measures.push({ lbl: t.metric, val: 'NO DATA', unit: '', sub: 'THE OBJECT DECLINES TO COMMENT' });
       return out;
@@ -1363,23 +1392,38 @@ var PG2 = (function () {
     var qm = QUAL_MULT[o.quality] != null ? QUAL_MULT[o.quality] : 0.5;
     var off = Math.abs(o.offsetM || 0);
     if (t.id === 'truck') {
-      var pen = Math.pow(Ye, 1.12) * 2.4 * (o.d.frag ? 1.15 : 1) * qm;
-      var toss = Ye * 0.32;
+      // the test setup is part of the design: contact digs, standoff throws
+      var mount = param === 'standoff' ? { pen: 0.78, toss: 1.5, sub: 'STANDOFF MOUNT' }
+                                       : { pen: 1.22, toss: 0.55, sub: 'CONTACT MOUNT' };
+      var pen = Math.pow(Ye, 1.12) * 2.4 * (o.d.frag ? 1.15 : 1) * qm * mount.pen;
+      var toss = Ye * 0.32 * mount.toss;
       out.primary = Math.round(pen);
-      out.measures.push({ lbl: 'PENETRATION', val: String(Math.round(pen)), unit: 'mm-e', sub: 'BED PLATE, READ BY SURVEY' });
+      out.toss = toss;
+      out.measures.push({ lbl: 'PENETRATION', val: String(Math.round(pen)), unit: 'mm-e', sub: 'BED PLATE · ' + mount.sub });
       out.measures.push({ lbl: 'TOSS', val: toss.toFixed(1), unit: 'm', sub: 'WHERE THE HAULER WENT' });
     } else if (t.id === 'wall') {
-      var centred = 1 - Math.min(off / 14, 0.4);
-      var breach = clamp(Ye / 26, 0, 1.35) * 100 * qm * centred;
+      var aim = param === 'center' ? { mult: 1.15, offSens: 2.0, sub: 'AIMED AT CENTRE' }
+              : param === 'top'    ? { mult: 0.78, offSens: 1.0, sub: 'AIMED AT THE LINTEL' }
+                                   : { mult: 1.0, offSens: 1.0, sub: 'AIMED AT THE BASE' };
+      var centred = 1 - Math.min(off * aim.offSens / 14, 0.55);
+      var breach = clamp(Ye / 26, 0, 1.35) * 100 * qm * centred * aim.mult;
       out.primary = Math.round(breach);
-      out.measures.push({ lbl: 'BREACH', val: String(Math.round(breach)), unit: '%', sub: 'OF PANEL, DAYLIGHT THROUGH' });
+      out.collapsed = param === 'top' && breach >= 70;   // the lintel goes, the panel follows
+      out.measures.push({ lbl: 'BREACH', val: String(Math.round(breach)), unit: '%',
+                          sub: out.collapsed ? 'LINTEL CUT — FULL PANEL DOWN' : 'OF PANEL · ' + aim.sub });
       out.measures.push({ lbl: 'HIT', val: off < 0.8 ? 'CENTRE' : off.toFixed(1) + ' m OFF', unit: '',
                           sub: 'OFF-CENTRE OPENS LESS DOOR' });
+      if (out.collapsed) out.primary = Math.max(out.primary, 100);   // a downed panel is a 100% door
     } else {
-      var op = Math.pow(Ye, 0.92) * 2.6 * qm;
+      var dist = param === '40' ? 40 : param === '80' ? 80 : 60;
+      var op = Math.pow(Ye, 0.92) * 2.6 * qm * Math.pow(60 / dist, 1.05);
+      var pegged = op > 62;   // the gauges die with the glass
       var panels = clamp(Math.round(op / 6.5), 0, 12);
-      out.primary = Math.round(op * 10) / 10;
-      out.measures.push({ lbl: 'OVERPRESSURE', val: out.primary.toFixed(1), unit: 'br', sub: 'PEAK, AT 60 M' });
+      out.pegged = pegged;
+      out.primary = pegged ? null : Math.round(op * 10) / 10;
+      out.measures.push(pegged
+        ? { lbl: 'OVERPRESSURE', val: 'PEGGED', unit: '', sub: 'GAUGES OVERRANGE AT ' + dist + ' M — THE DATA DIED WITH THE GLASS' }
+        : { lbl: 'OVERPRESSURE', val: out.primary.toFixed(1), unit: 'br', sub: 'PEAK, AT ' + dist + ' M' });
       out.measures.push({ lbl: 'PANELS', val: panels + ' / 12', unit: '', sub: 'SHATTERED, IN ORDER OF HONESTY' });
       out.panels = panels;
     }
@@ -1399,15 +1443,15 @@ var PG2 = (function () {
   function consistencyGrade(rel) {
     return rel <= 0.09 ? 'A' : rel <= 0.18 ? 'B' : rel <= 0.30 ? 'C' : 'F';
   }
-  function certSeries(a, seed, targetId) {
+  function certSeries(a, seed, targetId, param) {
     var t = TARGETS[targetId] || TARGETS.truck;
-    var s1 = resolveTarget(a, seed + '§C1', targetId);
-    var s2 = resolveTarget(a, seed + '§C2', targetId);
+    var s1 = resolveTarget(a, seed + '§C1', targetId, { param: param });
+    var s2 = resolveTarget(a, seed + '§C2', targetId, { param: param });
     /* abuse pick is seeded: the standards series owns its own dice */
     var abuseKind = stream(seed, 'abuse')() < 0.5 ? 'hotsoak' : 'washboard';
     var a3 = JSON.parse(JSON.stringify(a));
     if (abuseKind === 'washboard') a3.det = { seated: a.det.seated, slam: Math.min(1, (a.det.slam || 0) + 0.4) };
-    var s3 = resolveTarget(a3, seed + '§C3', targetId, { hot: abuseKind === 'hotsoak' });
+    var s3 = resolveTarget(a3, seed + '§C3', targetId, { hot: abuseKind === 'hotsoak', param: param });
 
     var perfOk = !!(s1.o.fired && s1.funcOk && s1.primary != null && s1.primary >= t.floor);
     var bothFired = s1.o.fired && s2.o.fired && s1.primary != null && s2.primary != null;
@@ -1426,7 +1470,7 @@ var PG2 = (function () {
       return extra || '';
     }
     return {
-      pass: pass, target: t, grade: grade, rel: rel, band: band, abuseKind: abuseKind,
+      pass: pass, target: t, grade: grade, rel: rel, band: band, abuseKind: abuseKind, param: param,
       shots: [s1, s2, s3],
       stamps: [
         { key: 'perf', label: 'PERFORMANCE', ok: perfOk,
@@ -1625,7 +1669,7 @@ var PG2 = (function () {
     cannedClean: cannedClean, cannedClean2: cannedClean2,
     /* M3b — the Workshop */
     RND_RFP: RND_RFP, TARGETS: TARGETS, TARGET_ORDER: TARGET_ORDER, BUYERS: BUYERS,
-    resolveTarget: resolveTarget, certSeries: certSeries, certCodename: certCodename,
+    resolveTarget: resolveTarget, certSeries: certSeries, certCodename: certCodename, gyroMul: gyroMul,
     typeQ: typeQ, genOrders: genOrders, auctionRun: auctionRun, qaRoll: qaRoll,
     cannedRnd: cannedRnd
   };

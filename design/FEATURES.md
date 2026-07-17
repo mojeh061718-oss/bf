@@ -57,6 +57,16 @@ A teaching ladder where every RFP adds one idea: restraint on a mean budget (FIR
 - **Premium detonation:** the blast owns the light — a point-light flare that washes the terrain, pad and target objects, decaying to ember red; ballistic ember arcs that land in their own dust.
 - **Blast survey contours:** every crater now plots its **SCORCH** and **OVERPRESSURE** radii as animated rings on the dirt, labeled live during the measuring pass (career) and read out by the smug plotter (R&D).
 
+## ✅ SHIPPED — GUIDANCE unsealed + interactive test cards (M3b wave 2, part 2)
+
+- **The GUIDANCE drawer opens:** the **GYRO CORE G-7** (unlocks with THE FLY-OFF; free in sandbox) — a caged rotor in gimbal rings that multiplies every spatial error the load produces. Aligned well, it cancels drift (measured: mean off-centre 4.4 m → 1.0 m); left **uncaged, it argues with the fins and wins** (drift ×1.28). It tightens SHAPED breaches, SKIPSTONE drops, and every wall shot.
+- **The Alignment Bench:** a real instrument — phosphor scope, wandering rotor dot, an amber trim crosshair you drag to hold the wander in-ring through a 6-second capture that gets meaner as it runs. Your in-ring percentage IS the calibration quality, stamped on the close-out checklist (✓ ALIGNED 95% / UNCAGED — UNVERIFIED).
+- **Interactive test cards per object:** every range object now has a test setup chosen at the picker and *frozen into certification*:
+  - HAULER — **CHARGE MOUNT**: CONTACT (deepest hole) vs STANDOFF (shallower, the hauler travels).
+  - WALL — **AIM POINT**: BASE (honest), CENTRE (bigger door, lean punished double), LINTEL (less breach, but past 70% the whole panel comes down).
+  - ARRAY — **STANDOFF**: 40/60/80 m — closer reads hotter, but **peg the gauges past 62 br and the data dies with the glass** (a pegged shot fails certification performance).
+  Type plates and the bid board carry the test card (e.g. "STANDOFF CARD").
+
 ## 📋 NEXT — M3b wave 2 (remainder)
 
 - More target objects (the decommissioned bunker, stacked containers), per-object range scarring, richer auction drama, production-run vignettes.
