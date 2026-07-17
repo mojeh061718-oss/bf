@@ -3400,6 +3400,44 @@
     terrain.rotation.x = -Math.PI / 2;
     scene.add(terrain);
 
+    // GROUND DRESSING — the aerial view needs something to fly over:
+    // creosote scrub, rocks and survey stakes, seeded so the desert is always the same desert
+    var dressG = new THREE.Group();
+    var dRand = PG2.stream('RANGE', 'dressing');
+    for (var di = 0; di < 64; di++) {
+      var da = dRand() * Math.PI * 2;
+      var dr = 24 + Math.pow(dRand(), 0.6) * 240;
+      var dx2 = Math.cos(da) * dr, dz2 = Math.sin(da) * dr;
+      if (Math.abs(dz2 - 26) < 9) continue;              // the road stays drivable
+      if (dRand() < 0.68) {
+        var tuft = new THREE.Mesh(new THREE.ConeGeometry(0.5 + dRand() * 0.9, 0.8 + dRand() * 1.1, 6),
+          mat(dRand() < 0.5 ? 0x5c6038 : 0x6b6444, { shin: 2 }));
+        tuft.position.set(dx2, 0.4, dz2);
+        tuft.rotation.y = dRand() * 3;
+        dressG.add(tuft);
+      } else {
+        var rock = new THREE.Mesh(new THREE.DodecahedronGeometry(0.5 + dRand() * 1.1, 0),
+          mat(0x8a7a62, { shin: 4 }));
+        rock.position.set(dx2, 0.3, dz2);
+        rock.rotation.set(dRand() * 3, dRand() * 3, dRand() * 3);
+        rock.scale.y = 0.55;
+        dressG.add(rock);
+      }
+    }
+    // survey stakes on the cardinal lines every 25 m — the aerial ruler
+    [25, 50, 75, 100].forEach(function (sd) {
+      [[sd, 0], [-sd, 0], [0, -sd]].forEach(function (sp) {
+        var stake = new THREE.Mesh(new THREE.BoxGeometry(0.22, 1.5, 0.22), mat(0xd8cfc0, { shin: 8 }));
+        stake.position.set(sp[0], 0.75, sp[1]);
+        dressG.add(stake);
+        var flag = new THREE.Mesh(new THREE.PlaneGeometry(0.6, 0.4),
+          mat(0xc94f38, { shin: 4 }));
+        flag.position.set(sp[0] + 0.3, 1.3, sp[1]);
+        dressG.add(flag);
+      });
+    });
+    scene.add(dressG);
+
     // mesas — four ridge lines now, blue-shifting into the fog with distance
     var mesas = [];
     [{ z: -900, h: 48, sp: 2200 }, { z: -1500, h: 74, sp: 3000 },
@@ -3626,6 +3664,177 @@
       mesas: mesas, shimmer: shimmer, nearShimmer: nearShimmer, shimmerBase: 1,
       fx: null, shake: 0, convoyShake: 0, mode: 'idle', palette: null
     };
+  }
+
+  /* ================= RECON 2 — THE AERIAL RIG =================
+     45° overhead, touch to fly: one finger orbits and tilts the range,
+     pinch zooms, a tap during the survey drops a measuring stake. */
+  var aerial = { on: false, theta: 0.75, radius: 95, tx: 0, tz: 0, marks: [], savedFov: 7, savedStation: '' };
+  var surveyHold = null;
+  function aerialAllowed() {
+    return !!range && ['station', 'counting', 'crater'].indexOf(S.phase) >= 0;
+  }
+  function gzPoint() {
+    var ox = S.result && S.result.visual ? (S.result.visual.offsetM || 0) : 0;
+    return { x: ox, z: 0 };
+  }
+  function setAerial(on) {
+    if (on === aerial.on) return;
+    aerial.on = on;
+    var cam = range.camera;
+    var btn = $('btn-cam');
+    if (on) {
+      var gz = gzPoint();
+      aerial.tx = gz.x; aerial.tz = gz.z;
+      aerial.theta = 0.75;
+      aerial.savedFov = cam.fov;
+      aerial.savedStation = $('cam-station').textContent;
+      cam.fov = 38;
+      cam.updateProjectionMatrix();
+      var r0 = 230, r1 = S.phase === 'crater' ? 68 : 110;
+      aerial.radius = r0;
+      tween(750, function (e) { aerial.radius = lerp(r0, r1, e); });   // the recon plane banks in
+      btn.classList.add('aerial');
+      btn.innerHTML = '📷 STATION 7<span class="bc-sub">BACK TO THE LONG LENS</span>';
+      PGAudio.radioBlip();
+    } else {
+      cam.fov = aerial.savedFov;
+      cam.updateProjectionMatrix();
+      $('cam-station').textContent = aerial.savedStation || (PG2.CAMERA.id + ' — ' + PG2.CAMERA.km.toFixed(1) + ' KM');
+      // hand the camera back to whoever owned it
+      if (S.phase === 'crater') {
+        // the survey orbit (stepMeasure) or the parked survey cam picks it back up
+      } else {
+        cam.position.set(60, 14, 1600);
+        cam.lookAt(S.rndTarget === 'array' && S.mode === 'rnd' ? 18 : 6, 3, 0);
+      }
+      btn.classList.remove('aerial');
+      btn.innerHTML = '✈ RECON 2<span class="bc-sub">OVERHEAD · TOUCH TO FLY</span>';
+    }
+  }
+  function applyAerialCam() {
+    if (!aerial.on || !range) return;
+    var cam = range.camera;
+    var h = aerial.radius * 0.707;                    // 45° up, 45° out
+    cam.position.set(
+      aerial.tx + Math.sin(aerial.theta) * aerial.radius * 0.707,
+      Math.max(h, 8),
+      aerial.tz + Math.cos(aerial.theta) * aerial.radius * 0.707);
+    cam.lookAt(aerial.tx, 0.6, aerial.tz);
+    $('cam-station').textContent = 'RECON 2 · ALT ' + Math.round(h) + ' M';
+  }
+  /* touch: fly it like you mean it */
+  (function () {
+    var pts = {};
+    var cv = $('gl');
+    function gate() { return aerial.on && aerialAllowed(); }
+    cv.addEventListener('pointerdown', function (e) {
+      if (!gate()) return;
+      pts[e.pointerId] = { x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, t0: performance.now() };
+    });
+    cv.addEventListener('pointermove', function (e) {
+      if (!gate() || !pts[e.pointerId]) return;
+      var p = pts[e.pointerId];
+      var ids = Object.keys(pts);
+      if (ids.length === 1) {
+        aerial.theta -= (e.clientX - p.x) * 0.0062;
+        aerial.radius = clamp(aerial.radius + (e.clientY - p.y) * 0.45, 26, 320);
+      } else if (ids.length === 2) {
+        var o = pts[ids[0] === String(e.pointerId) ? ids[1] : ids[0]];
+        var d0 = Math.hypot(p.x - o.x, p.y - o.y);
+        p.x = e.clientX; p.y = e.clientY;
+        var d1 = Math.hypot(p.x - o.x, p.y - o.y);
+        if (d0 > 0 && d1 > 0) aerial.radius = clamp(aerial.radius * d0 / d1, 26, 320);
+        return;
+      }
+      p.x = e.clientX; p.y = e.clientY;
+    });
+    function up(e) {
+      if (!pts[e.pointerId]) return;
+      var p = pts[e.pointerId];
+      var moved = Math.hypot(e.clientX - p.x0, e.clientY - p.y0);
+      var dt = performance.now() - p.t0;
+      delete pts[e.pointerId];
+      if (!gate()) return;
+      // a stationary press is a tap — clocks lie under load, fingers don't move
+      if (moved < 12 && S.phase === 'crater') tapMeasure(e);
+    }
+    cv.addEventListener('pointerup', up);
+    cv.addEventListener('pointercancel', up);
+  })();
+  /* a tap drops a survey stake: range from ground zero, plotted live */
+  var _mPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -0.5);
+  var _mHit = new THREE.Vector3();
+  function tapMeasure(e) {
+    var cam = range.camera;
+    var ndc = new THREE.Vector2((e.clientX / W) * 2 - 1, -(e.clientY / H) * 2 + 1);
+    raycaster.setFromCamera(ndc, cam);
+    if (!raycaster.ray.intersectPlane(_mPlane, _mHit)) return;
+    var gz = gzPoint();
+    var d = Math.hypot(_mHit.x - gz.x, _mHit.z - gz.z);
+    aerial.marks.push({ x: _mHit.x, z: _mHit.z, d: d });
+    if (aerial.marks.length > 3) aerial.marks.shift();
+    PGAudio.measureTick();
+    ensureMarksSvg();
+  }
+  function ensureMarksSvg() {
+    var svg = $('measure-svg');
+    if (svg.classList.contains('hidden')) {          // R&D survey has no tape — marks only
+      svg.classList.remove('hidden');
+      svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+      svg.style.width = W + 'px'; svg.style.height = H + 'px';
+      svg.style.left = '0'; svg.style.top = '0'; svg.style.transform = 'none';
+      svg.innerHTML = '<g id="msr-marks"></g>';
+    } else if (!svg.querySelector('#msr-marks')) {
+      var g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      g.setAttribute('id', 'msr-marks');
+      svg.appendChild(g);
+    }
+  }
+  function drawMarks() {
+    var g = document.querySelector('#msr-marks');
+    if (!g) return;
+    if (!aerial.marks.length) { g.innerHTML = ''; return; }
+    var cam = range.camera;
+    var gz = gzPoint();
+    var p0 = worldToScreen(V3(gz.x, 0.7, gz.z), cam);
+    var out = '';
+    aerial.marks.forEach(function (m) {
+      var p1 = worldToScreen(V3(m.x, 0.7, m.z), cam);
+      out += '<line class="msr-mark" x1="' + p0.x + '" y1="' + p0.y + '" x2="' + p1.x + '" y2="' + p1.y + '" stroke-dasharray="5 4"/>' +
+        '<circle class="msr-mark" cx="' + p1.x + '" cy="' + p1.y + '" r="4" fill="none"/>' +
+        '<text class="msr-mark-txt" x="' + (p1.x + 8) + '" y="' + (p1.y - 8) + '">' + m.d.toFixed(0) + ' m</text>';
+    });
+    g.innerHTML = out;
+  }
+  /* the survey files when YOU say so — if you're flying, it waits */
+  function advanceOrHold(fn) {
+    if (aerial.on) {
+      surveyHold = fn;
+      $('btn-survey').classList.remove('hidden');
+    } else fn();
+  }
+  $('btn-survey').addEventListener('click', function () {
+    PGAudio.tap();
+    var fn = surveyHold;
+    surveyHold = null;
+    $('btn-survey').classList.add('hidden');
+    aerial.marks = [];
+    setAerial(false);
+    if (fn) fn();
+  });
+  $('btn-cam').addEventListener('click', function () {
+    PGAudio.tap();
+    setAerial(!aerial.on);
+  });
+  function aerialReset() {
+    aerial.on = false;
+    aerial.marks = [];
+    surveyHold = null;
+    $('btn-cam').classList.remove('aerial');
+    $('btn-cam').innerHTML = '✈ RECON 2<span class="bc-sub">OVERHEAD · TOUCH TO FLY</span>';
+    $('btn-cam').classList.add('hidden');
+    $('btn-survey').classList.add('hidden');
   }
 
   /* ---------- range flow ---------- */
@@ -3889,6 +4098,7 @@
   }
   function enterRange() {
     clearLater();
+    aerialReset();
     S.attempt++;
     contractRec(S.contract).tests++;   // chalk on the bay floor, forever
     persist();
@@ -4660,6 +4870,7 @@
     var to = V3(ox + r * 3.3, r * 1.35, r * 4.4);
     setCaption('SURVEY PASS · PAD A', S.result.outcome.fired ? 'The dust votes last. Measuring…' : 'There is a device-shaped silence on the pad.');
     tween(3800, function (t) {
+      if (aerial.on) return;                        // the recon plane has the stick
       c.position.lerpVectors(from, to, t);
       c.lookAt(ox, 0.6, 0);
     }, function () { initMeasure(r, ox); }, easeInOut);
@@ -4705,9 +4916,12 @@
     if (!msr.active) return;
     var cam = range.camera;
     // the aftermath walk-around: a patient half-orbit while the survey runs
-    msr.ang += dt * 0.055;
-    cam.position.set(msr.ox + Math.sin(msr.ang) * msr.orbR, msr.orbY, Math.cos(msr.ang) * msr.orbR);
-    cam.lookAt(msr.ox, 0.6, 0);
+    // (unless the recon plane has the stick)
+    if (!aerial.on) {
+      msr.ang += dt * 0.055;
+      cam.position.set(msr.ox + Math.sin(msr.ang) * msr.orbR, msr.orbY, Math.cos(msr.ang) * msr.orbR);
+      cam.lookAt(msr.ox, 0.6, 0);
+    }
     // re-project the tape every frame so it stays glued to the dirt
     var pL = worldToScreen(V3(msr.ox - msr.r, 0.8, 0), cam);
     var pR = worldToScreen(V3(msr.ox + msr.r, 0.8, 0), cam);
@@ -4760,7 +4974,7 @@
         el.offtxt.textContent = 'CENTRE ' + (Math.abs(westOff) < 0.8 ? 'ON DATUM'
           : Math.abs(westOff).toFixed(1) + ' m ' + (westOff > 0 ? 'WEST' : 'EAST'));
       }
-      later(3400, showScore);   // the walk-around continues while it breathes
+      later(3400, function () { advanceOrHold(showScore); });   // the walk-around continues — unless you're flying
     }
     if (msr.progDone && !msr.bandDone) {
       msr.bandDone = true;
@@ -4819,6 +5033,7 @@
     clearLater();
     S.phase = 'score';
     msr.active = false;
+    aerialReset();
     showUI(null);
     $('measure-svg').classList.add('hidden');
     var r = S.result;
@@ -5195,7 +5410,11 @@
         }
       }
       stepFX(dt);
+      // RECON 2: the aerial rig owns the camera when it's on
+      $('btn-cam').classList.toggle('hidden', !aerialAllowed());
+      applyAerialCam();
       if (S.phase === 'crater') stepMeasure(now, dt);
+      if (S.phase === 'crater' && aerial.marks.length) drawMarks();
       if (range.craterG) {
         range.craterG.children.forEach(function (ch) {
           if (ch.isSprite) { ch.position.y += (ch.userData.rise || 0.4) * dt * 2; ch.material.opacity = Math.max(ch.material.opacity - dt * 0.02, 0.12); }
@@ -6046,6 +6265,7 @@
   /* ---------- the R&D range: out the back gate, no convoy, an object that measures back ---------- */
   function enterRangeRnd(targetId, param) {
     clearLater();
+    aerialReset();
     S.rndTarget = targetId;
     var d = PG2.derive(S.assembly, rfp());
     cashSpend(d.cost);                 // the article is spent the moment it leaves the shed
@@ -6286,6 +6506,7 @@
     var to = V3(tx - (rt.target.id === 'array' ? 16 : 9), 4.2, 13);
     setCaption('SURVEY PASS · THE OBJECT', 'The dust votes first. The instruments vote last.');
     tween(4200, function (e) {
+      if (aerial.on) return;                        // the recon plane has the stick
       cam.position.lerpVectors(from, to, e);
       cam.lookAt(tx, rt.target.id === 'wall' ? 2.2 : 1.4, tz);
     }, null, easeInOut);
@@ -6307,7 +6528,7 @@
         '<b>CRATER ⌀ ' + crater.toFixed(1) + ' m · SCORCH R ' + (cr * 2.2).toFixed(0) +
         ' m · OVERPRESSURE R ' + (cr * 4.2).toFixed(0) + ' m</b><br>The plotter is smug about the circles.');
     });
-    later(8800, showRndScore);
+    later(8800, function () { advanceOrHold(showRndScore); });
   }
 
   /* ---------- the R&D readout card ---------- */
@@ -6320,6 +6541,7 @@
     clearLater();
     S.phase = 'score';
     msr.active = false;
+    aerialReset();
     showUI(null);
     $('measure-svg').classList.add('hidden');
     var rt = S.result.rnd;

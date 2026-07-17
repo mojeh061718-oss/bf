@@ -67,6 +67,12 @@ A teaching ladder where every RFP adds one idea: restraint on a mean budget (FIR
   - ARRAY — **STANDOFF**: 40/60/80 m — closer reads hotter, but **peg the gauges past 62 br and the data dies with the glass** (a pegged shot fails certification performance).
   Type plates and the bid board carry the test card (e.g. "STANDOFF CARD").
 
+## ✅ SHIPPED — RECON 2: the aerial rig (M3b wave 2, part 3)
+
+- **Fly the range:** a ✈ RECON 2 toggle during the pre-shot, countdown and aftermath swaps the fixed long lens for a **45° overhead camera you fly by touch** — one finger orbits and tilts, pinch zooms (26–320 m), the HUD reads your altitude. Watch the detonation from directly above: the flash washing the desert, the shock ring racing outward, embers arcing below you.
+- **The survey is yours now:** while flying the aftermath, the auto-advance waits. **Tap the ground to drop survey stakes** — dashed range lines plot live from ground zero with distances — then **FILE THE SURVEY →** when you're done. The long lens remains the default; the plane is one tap away.
+- **A desert worth flying over:** seeded ground dressing — creosote scrub, rock scatter, and red-flag survey stakes at 25/50/75/100 m on the cardinal lines (the aerial ruler).
+
 ## 📋 NEXT — M3b wave 2 (remainder)
 
 - More target objects (the decommissioned bunker, stacked containers), per-object range scarring, richer auction drama, production-run vignettes.

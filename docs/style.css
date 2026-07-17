@@ -1657,3 +1657,24 @@ body.lefty .bay-cta.gyro { left: auto; right: 12px; }
   background: rgba(6,16,28,.6); }
 .tgt-params button.on { color: var(--amber-hot); border-color: var(--amber); background: rgba(229,161,61,.1); }
 .tgt-param-sub { font-family: var(--type); font-size: 9.5px; color: var(--bp-dim); margin-top: 5px; line-height: 1.4; min-height: 13px; }
+
+/* ============ RECON 2: the aerial rig ============ */
+#btn-cam {
+  position: absolute; right: 12px; top: calc(64px + var(--sat)); z-index: 12;
+  font-family: var(--mono); font-size: 9px; font-weight: 800; letter-spacing: .14em;
+  color: #0a1420; background: var(--bp-bright); border-radius: 7px; padding: 9px 12px;
+  box-shadow: 0 4px 0 #3d556b, 0 8px 18px rgba(0,0,0,.45);
+}
+#btn-cam.aerial { background: var(--amber); box-shadow: 0 4px 0 #8a5c1a, 0 8px 18px rgba(0,0,0,.45); }
+#btn-cam .bc-sub { display: block; font-size: 6.5px; letter-spacing: .16em; opacity: .7; margin-top: 2px; }
+#btn-survey {
+  position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(26px + var(--sab)); z-index: 12;
+  font-size: 13px; font-weight: 800; letter-spacing: .1em;
+  color: var(--bp-deep); background: var(--green-hot); border-radius: 5px; padding: 13px 22px;
+  box-shadow: 0 4px 0 #2c6b44, 0 8px 20px rgba(0,0,0,.45);
+}
+.msr-mark { stroke: var(--green-hot); stroke-width: 1.4; }
+.msr-mark-txt { fill: #d9ffe9; font-family: var(--mono); font-size: 10px; text-shadow: 0 1px 3px #000; }
+/* presentation layers never eat the recon plane's touch input */
+#cam-overlay, #flash, #dustwall, #range-caption { pointer-events: none; }
+#cam-overlay * { pointer-events: none; }
