@@ -1304,6 +1304,234 @@ var PG2 = (function () {
     };
   }
 
+  /* ================= M3b — THE WORKSHOP =================
+     Free R&D, target objects, Type Certification, and the production
+     economy. All of it resolves from build + seed, same as everything. */
+
+  /* The bench answers to nobody: a pseudo-contract with no spec sheet.
+     Timing carries no stamp — but the close-out still has to be RIGHT,
+     because a dud on the range is a shot's worth of parts in the sand. */
+  var RND_RFP = {
+    idx: -1, id: 'R&D', title: 'WEAPONS ASSEMBLY', form: 'FORM RD-0000-R',
+    craterMin: 0, craterMax: 0, meterMax: 44,
+    budget: Infinity,                       // your own dime is the only cap
+    tSpec: 5.0, tTol: 0.6,                  // FUNCTION window, not a stamp
+    payout: 0, bonusClean: 0,
+    timeOfDay: 'dusk',                      // R&D happens after hours
+    wind: { dir: 290, speed: 0.3 },
+    clause: 'No spec sheet. No board. Just you, the article, and an object that measures back.',
+    needsRefinery: true                     // the still is your still
+  };
+  /* the hot-soak abuse variant: the certification oven, basically */
+  var RND_RFP_HOT = (function () {
+    var r = {};
+    for (var k in RND_RFP) r[k] = RND_RFP[k];
+    r.heatMult = 1.45;
+    return r;
+  })();
+
+  /* ---------- TARGET OBJECTS (each measures differently) ---------- */
+  var TARGETS = {
+    truck: { id: 'truck', name: 'DERELICT HAULER', sub: 'K-9 FLATBED · RETIRED IN DISGRACE',
+             metric: 'PENETRATION', unit: 'mm-e', floor: 55,
+             blurb: 'Punch through the bed plate. Survey reads the hole in millimetres of plate-equivalent.' },
+    wall:  { id: 'wall', name: 'WALL SECTION', sub: 'RC-4 CONCRETE · 60 CM · POURED TUESDAY',
+             metric: 'BREACH', unit: '%', floor: 60,
+             blurb: 'Open a door. Survey reads the breach as a percentage of the panel — off-centre hits open less of it.' },
+    array: { id: 'array', name: 'INSTRUMENT ARRAY', sub: '12 GAUGE PANELS · 60 M STANDOFF',
+             metric: 'OVERPRESSURE', unit: 'br', floor: 18,
+             blurb: 'Ring the gauges. Twelve glass panels read peak overpressure in brandt — and shatter in order of honesty.' }
+  };
+  var TARGET_ORDER = ['truck', 'wall', 'array'];
+
+  var QUAL_MULT = { clean: 1.0, ragged: 0.8, partial: 0.55, 'low-order': 0.4 };
+
+  /* resolveTarget: full close-out physics (duds, slams, wiring faults all
+     apply), then the object reads the blast its own way. */
+  function resolveTarget(a, seed, targetId, opts) {
+    opts = opts || {};
+    var rfp = opts.hot ? RND_RFP_HOT : RND_RFP;
+    var t = TARGETS[targetId] || TARGETS.truck;
+    var o = resolve(a, seed, rfp);
+    var funcOk = o.fired && o.detT != null && Math.abs(o.detT) <= rfp.tTol;
+    var out = { o: o, target: t, funcOk: funcOk, primary: null, measures: [], d: o.d };
+    if (!o.fired) {
+      out.measures.push({ lbl: t.metric, val: 'NO DATA', unit: '', sub: 'THE OBJECT DECLINES TO COMMENT' });
+      return out;
+    }
+    var Ye = o.craterActual || 0;
+    var qm = QUAL_MULT[o.quality] != null ? QUAL_MULT[o.quality] : 0.5;
+    var off = Math.abs(o.offsetM || 0);
+    if (t.id === 'truck') {
+      var pen = Math.pow(Ye, 1.12) * 2.4 * (o.d.frag ? 1.15 : 1) * qm;
+      var toss = Ye * 0.32;
+      out.primary = Math.round(pen);
+      out.measures.push({ lbl: 'PENETRATION', val: String(Math.round(pen)), unit: 'mm-e', sub: 'BED PLATE, READ BY SURVEY' });
+      out.measures.push({ lbl: 'TOSS', val: toss.toFixed(1), unit: 'm', sub: 'WHERE THE HAULER WENT' });
+    } else if (t.id === 'wall') {
+      var centred = 1 - Math.min(off / 14, 0.4);
+      var breach = clamp(Ye / 26, 0, 1.35) * 100 * qm * centred;
+      out.primary = Math.round(breach);
+      out.measures.push({ lbl: 'BREACH', val: String(Math.round(breach)), unit: '%', sub: 'OF PANEL, DAYLIGHT THROUGH' });
+      out.measures.push({ lbl: 'HIT', val: off < 0.8 ? 'CENTRE' : off.toFixed(1) + ' m OFF', unit: '',
+                          sub: 'OFF-CENTRE OPENS LESS DOOR' });
+    } else {
+      var op = Math.pow(Ye, 0.92) * 2.6 * qm;
+      var panels = clamp(Math.round(op / 6.5), 0, 12);
+      out.primary = Math.round(op * 10) / 10;
+      out.measures.push({ lbl: 'OVERPRESSURE', val: out.primary.toFixed(1), unit: 'br', sub: 'PEAK, AT 60 M' });
+      out.measures.push({ lbl: 'PANELS', val: panels + ' / 12', unit: '', sub: 'SHATTERED, IN ORDER OF HONESTY' });
+      out.panels = panels;
+    }
+    out.measures.push({ lbl: 'FUNCTION', val: funcOk ? 'ON CUE' : (o.detT < 0 ? 'EARLY' : 'LATE'), unit: '',
+                        sub: 'T' + (o.detT >= 0 ? '+' : '−') + Math.abs(rfp.tSpec + o.detT).toFixed(2) + ' s' });
+    return out;
+  }
+
+  /* ---------- TYPE CERTIFICATION (three tests, design frozen) ---------- */
+  var PLATE_NAMES = ['SLEDGE', 'MULE', 'KESTREL', 'ANVIL', 'LANTERN', 'BADGER', 'PICKAXE',
+                     'HORNET', 'CALLIOPE', 'DITCH WITCH', 'POSTMASTER', 'JACKRABBIT'];
+  function certCodename(seed) {
+    var r = stream(seed, 'plate');
+    return PLATE_NAMES[Math.floor(r() * PLATE_NAMES.length) % PLATE_NAMES.length];
+  }
+  function consistencyGrade(rel) {
+    return rel <= 0.09 ? 'A' : rel <= 0.18 ? 'B' : rel <= 0.30 ? 'C' : 'F';
+  }
+  function certSeries(a, seed, targetId) {
+    var t = TARGETS[targetId] || TARGETS.truck;
+    var s1 = resolveTarget(a, seed + '§C1', targetId);
+    var s2 = resolveTarget(a, seed + '§C2', targetId);
+    /* abuse pick is seeded: the standards series owns its own dice */
+    var abuseKind = stream(seed, 'abuse')() < 0.5 ? 'hotsoak' : 'washboard';
+    var a3 = JSON.parse(JSON.stringify(a));
+    if (abuseKind === 'washboard') a3.det = { seated: a.det.seated, slam: Math.min(1, (a.det.slam || 0) + 0.4) };
+    var s3 = resolveTarget(a3, seed + '§C3', targetId, { hot: abuseKind === 'hotsoak' });
+
+    var perfOk = !!(s1.o.fired && s1.funcOk && s1.primary != null && s1.primary >= t.floor);
+    var bothFired = s1.o.fired && s2.o.fired && s1.primary != null && s2.primary != null;
+    var rel = bothFired ? Math.abs(s1.primary - s2.primary) / Math.max((s1.primary + s2.primary) / 2, 1e-6) : 1;
+    var grade = bothFired ? consistencyGrade(rel) : 'F';
+    var consOk = bothFired && grade !== 'F';
+    var abuseOk = !!(s3.o.fired && s3.funcOk && s3.primary != null && s3.primary >= t.floor * 0.7);
+    var pass = perfOk && consOk && abuseOk;
+
+    var fired = [s1, s2, s3].filter(function (s) { return s.o.fired && s.primary != null; })
+                            .map(function (s) { return s.primary; });
+    var band = fired.length ? { lo: Math.min.apply(null, fired), hi: Math.max.apply(null, fired) } : null;
+    function why(s, extra) {
+      if (!s.o.fired) return (s.o.rootCause && s.o.rootCause.title) || 'NO FUNCTION';
+      if (!s.funcOk) return 'FIRED OFF CUE';
+      return extra || '';
+    }
+    return {
+      pass: pass, target: t, grade: grade, rel: rel, band: band, abuseKind: abuseKind,
+      shots: [s1, s2, s3],
+      stamps: [
+        { key: 'perf', label: 'PERFORMANCE', ok: perfOk,
+          value: s1.primary != null && s1.o.fired ? s1.primary + ' ' + t.unit : 'NO DATA',
+          spec: '≥ ' + t.floor + ' ' + t.unit + ' · ON CUE',
+          note: perfOk ? '' : why(s1, s1.primary != null && s1.primary < t.floor ? 'UNDER THE FLOOR' : '') },
+        { key: 'cons', label: 'CONSISTENCY', ok: consOk,
+          value: bothFired ? 'GRADE ' + grade + ' (±' + Math.round(rel * 50) + '%)' : 'NO REPEAT',
+          spec: 'TWO SHOTS, ONE NUMBER',
+          note: consOk ? '' : (bothFired ? 'THE TWO SHOTS DISAGREED' : why(s2)) },
+        { key: 'abuse', label: abuseKind === 'hotsoak' ? 'ABUSE · HOT SOAK' : 'ABUSE · WASHBOARD', ok: abuseOk,
+          value: s3.primary != null && s3.o.fired ? s3.primary + ' ' + t.unit : 'NO DATA',
+          spec: 'SURVIVE IT, STILL PERFORM',
+          note: abuseOk ? '' : why(s3, 'FADED UNDER ABUSE') }
+      ]
+    };
+  }
+
+  /* ---------- THE PRODUCTION BID BOARD ---------- */
+  var BUYERS = [
+    'REPUBLIC PROVING AUTHORITY', 'HARBOUR BOARD (DEMOLITION ARM)', 'NAVY TEST DIRECTORATE',
+    'ALLIED PROGRAMME NINE', 'BUREAU OF ROADS & GRIEVANCES', 'THE QUARRY CONSORTIUM',
+    'FRONTIER SURVEY OFFICE', 'MINISTRY OF SANCTIONED NOISE'
+  ];
+  /* a type's quality score, 0..1 — what buyers actually pay for */
+  function typeQ(type) {
+    var g = { A: 1, B: 0.62, C: 0.32 }[type.grade] || 0.2;
+    var perf = clamp(type.primary / (TARGETS[type.target].floor * 2), 0, 1);
+    return clamp(g * 0.6 + perf * 0.4 - (type.incidents || 0) * 0.08, 0.05, 1);
+  }
+  /* the week's open orders — same week + same plates = same board */
+  function genOrders(types, weekKey, rep) {
+    var out = [];
+    types.forEach(function (ty) {
+      var r = stream(ty.plate + '·' + weekKey, 'orders');
+      var n = 1 + (r() < clamp(0.25 + typeQ(ty) * 0.5, 0, 0.85) ? 1 : 0);
+      for (var i = 0; i < n; i++) {
+        var buyer = BUYERS[Math.floor(r() * BUYERS.length) % BUYERS.length];
+        var units = 12 + Math.floor(r() * 53);                       // 12–64 units
+        out.push({
+          id: ty.plate + '-' + weekKey + '-' + (i + 1),
+          plate: ty.plate, buyer: buyer, units: units,
+          seedKey: ty.plate + '·' + weekKey + '·' + (i + 1)
+        });
+      }
+    });
+    return out;
+  }
+  /* the auction beat: bids climb; specs, grade and history set the ceiling */
+  function auctionRun(type, order, rep) {
+    var r = stream(order.seedKey, 'auction');
+    var q = typeQ(type);
+    var unitCost = Math.max(type.unitCost, 1);
+    var base = unitCost * (1.3 + 0.55 * q + 0.04 * Math.min(rep || 0, 6) - 0.06 * (type.incidents || 0));
+    var nBids = clamp(2 + Math.round(q * 2 + r() * 2 - (type.incidents || 0) * 0.7), 1, 6);
+    var steps = [], u = base * 0.72;
+    for (var i = 0; i < nBids; i++) {
+      u = u * (1.04 + r() * 0.07);
+      var buyer = i === nBids - 1 ? order.buyer : BUYERS[Math.floor(r() * BUYERS.length) % BUYERS.length];
+      steps.push({ buyer: buyer, unit: Math.round(u / 5) * 5 });
+    }
+    var finalUnit = steps[steps.length - 1].unit;
+    var revenue = finalUnit * order.units;
+    var matCost = unitCost * order.units;
+    return { steps: steps, finalUnit: finalUnit, revenue: revenue, matCost: matCost,
+             net: revenue - matCost, durMin: clamp(Math.round(2 + order.units / 16), 2, 8) };
+  }
+  /* field QA: the customer's acceptance testing finds the design's true weak point */
+  function qaRoll(type, order) {
+    var r = stream(order.seedKey, 'qa');
+    var q = typeQ(type);
+    var p = clamp(0.26 - q * 0.18 + (type.incidents || 0) * 0.04, 0.04, 0.4);
+    if (r() >= p) return null;
+    var unit = 1 + Math.floor(r() * order.units);
+    var t = TARGETS[type.target];
+    var story;
+    if (type.grade === 'C' || type.grade === 'B') {
+      var pct = 6 + Math.floor(r() * 9);
+      story = { title: 'FIELD QA CALLBACK — UNIT ' + unit + ' UNDER CARD',
+        cause: 'Acceptance testing read unit ' + unit + ' at ' + pct + '% under the certified ' +
+          t.metric.toLowerCase() + ' card. The card was honest; the spread was honest too — consistency grade ' +
+          type.grade + ' is a promise about variance, and variance kept it.',
+        receipt: 'Root cause: batch-to-batch spread inherited from the certified design. A calmer load certifies tighter and sells dearer.' };
+    } else if (type.abuseKind === 'hotsoak') {
+      story = { title: 'FIELD QA CALLBACK — HOT MAGAZINE',
+        cause: 'The customer stored a pallet somewhere the certification oven only hinted at. Unit ' + unit +
+          ' functioned, grudgingly, under the card. The customer’s letter uses the word "disappointed" twice.',
+        receipt: 'Root cause: thermal margin — the design passed hot-soak with little to spare. ADDITIVE G-3 buys shade at scale, too.' };
+    } else {
+      story = { title: 'FIELD QA CALLBACK — TRANSPORT SHOCK',
+        cause: 'Eleven miles of customer washboard found what the certification rig found: unit ' + unit +
+          ' arrived with its detonator sulking. It fired late on the acceptance stand.',
+        receipt: 'Root cause: handling margin — the design certified near its shock limit. It ships as gently as it was seated.' };
+    }
+    story.unit = unit;
+    return story;
+  }
+
+  /* the intended R&D article — harness + tests */
+  function cannedRnd(seed) {
+    var a = makeAssembly();
+    a.shell = 'standard';
+    a.canisters = ['ember', 'ember', 'ember', 'frost'];
+    return finish(a, seed, RND_RFP);
+  }
+
   /* ---------- canned assemblies (harness + tests + validation sweeps) ---------- */
   function wireCorrect(a, seed, rfp) {
     rfp = rfp || CONTRACTS[0];
@@ -1393,7 +1621,12 @@ var PG2 = (function () {
     resolve: resolve, visualFor: visualFor,
     simVantage: simVantage, simVantageFlyoff: simVantageFlyoff, adjudicate: adjudicate,
     wireCorrect: wireCorrect, cannedFor: cannedFor,
-    cannedClean: cannedClean, cannedClean2: cannedClean2
+    cannedClean: cannedClean, cannedClean2: cannedClean2,
+    /* M3b — the Workshop */
+    RND_RFP: RND_RFP, TARGETS: TARGETS, TARGET_ORDER: TARGET_ORDER, BUYERS: BUYERS,
+    resolveTarget: resolveTarget, certSeries: certSeries, certCodename: certCodename,
+    typeQ: typeQ, genOrders: genOrders, auctionRun: auctionRun, qaRoll: qaRoll,
+    cannedRnd: cannedRnd
   };
 })();
 

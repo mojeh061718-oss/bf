@@ -74,6 +74,67 @@
     </div>
   </div>
 
+  <!-- ================= THE HQ (M3b — the compound is the main menu) ================= -->
+  <section id="scr-hq" class="screen">
+    <div class="hq-frame">
+      <div class="hq-sky"><div class="hq-sun"></div><div class="hq-mesa m1"></div><div class="hq-mesa m2"></div></div>
+      <div class="hq-head">
+        <div class="hq-brand">REDSKY INC · THE COMPOUND</div>
+        <div class="hq-cash" id="hq-cash">COMPANY ACCOUNT · $0</div>
+      </div>
+      <div id="hq-run-ticker" class="hidden"></div>
+      <div class="hq-doors" id="hq-doors"></div>
+      <div class="hq-foot">SECTOR 9 · GATE CLOSES AT DUSK · GATE HAS NEVER ONCE CLOSED</div>
+    </div>
+  </section>
+
+  <!-- ================= PRODUCTION BID BOARD (M3b) ================= -->
+  <section id="scr-bids" class="screen">
+    <div class="bids-frame">
+      <div class="board-head">PRODUCTION BID BOARD · CERTIFIED TYPES ONLY</div>
+      <div class="board-sub" id="bids-sub"></div>
+      <div class="bids-scroll" id="bids-wall"></div>
+      <div class="board-btns"><button id="btn-bids-back" type="button">BACK TO THE COMPOUND</button></div>
+    </div>
+  </section>
+
+  <!-- target picker: which object measures you tonight -->
+  <div id="target-overlay" class="overlay hidden">
+    <div class="tgt-card">
+      <div class="set-head">THE RANGE · PICK YOUR OBJECT</div>
+      <div class="set-sub" id="tgt-cost">THIS SHOT EXPENDS THE ARTICLE</div>
+      <div id="tgt-list"></div>
+      <button id="tgt-close" type="button">BACK TO THE BENCH</button>
+    </div>
+  </div>
+
+  <!-- type certification: the standards series -->
+  <div id="cert-overlay" class="overlay hidden">
+    <div class="paper cert-doc" id="cert-doc"></div>
+    <button id="cert-close" type="button" class="hidden">CONTINUE</button>
+  </div>
+
+  <!-- the type plate: PRODUCTION READY -->
+  <div id="plate-overlay" class="overlay hidden">
+    <div id="plate-doc"></div>
+    <button id="plate-close" type="button">HANG IT IN THE WORKSHOP</button>
+  </div>
+
+  <!-- delivery receipt (+ the occasional QA letter) -->
+  <div id="delivery-overlay" class="overlay hidden">
+    <div class="paper delivery-doc" id="delivery-doc"></div>
+    <button id="delivery-close" type="button">BANK IT</button>
+  </div>
+
+  <!-- the auction beat -->
+  <div id="auction-overlay" class="overlay hidden">
+    <div class="paper auction-doc" id="auction-doc"></div>
+    <div class="auction-btns">
+      <button id="auction-accept" type="button" class="hidden">ACCEPT THE ORDER</button>
+      <button id="auction-decline" type="button" class="hidden">LET IT GO</button>
+    </div>
+  </div>
+
   <!-- ================= CONTRACT BOARD (corkboard of folders) ================= -->
   <section id="scr-board" class="screen">
     <div class="board-frame">
@@ -140,6 +201,7 @@
     <div id="bay-hint" class="bay-hint"></div>
 
     <div id="stage-build">
+      <button id="btn-hq" type="button" class="bay-cta hq hidden">← THE COMPOUND</button>
       <button id="btn-refinery" type="button" class="bay-cta ref hidden">⚗ THE STILL</button>
       <button id="btn-refire" type="button" class="bay-cta refire hidden">REFIRE →<span class="cta-sub">BUILD IS READY</span></button>
       <button id="btn-closeout" type="button" class="bay-cta" disabled>CLOSE-OUT →</button>

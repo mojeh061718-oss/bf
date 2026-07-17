@@ -41,7 +41,9 @@
   } catch (e) {}
   var S = {
     seed: (urlSeed || PG2.makeSeed()).toUpperCase(),
-    phase: 'title',            // title board museum rfp build wiring dial det arm truck station counting aftermath crater score
+    phase: 'title',            // title hq board museum rfp build wiring dial det arm truck station counting aftermath crater score
+    mode: 'contract',          // 'contract' | 'rnd' — the Workshop's two front doors
+    rndTarget: 'truck',        // which object measures you tonight
     contract: urlContract,     // index into PG2.CONTRACTS — the Act I ladder
     attempt: 0,                // tests fired on this contract — worn with pride
     best: PG2.CONTRACTS.map(function () { return null; }),   // per-contract best {stars, net, wonOn}
@@ -49,7 +51,7 @@
     result: null,
     closeoutStep: -1
   };
-  function rfp() { return PG2.CONTRACTS[S.contract]; }
+  function rfp() { return S.mode === 'rnd' ? PG2.RND_RFP : PG2.CONTRACTS[S.contract]; }
 
   /* ================= SETTINGS + SAVE (schema v2 — migrates v1 in place) ================= */
   var SAVE_KEY = 'pg2.save.v1';
@@ -60,7 +62,16 @@
     museum: { irs: [], firsts: {}, plaques: {} },    // framed disasters, brass firsts, best-crater plaques
     scars: {},                                       // per-contract id: [{x,z,r,e}] — the range remembers
     ui: { drawerCat: 'shells' },                     // the drawer remembers your last category
-    paint: null                                      // the paint locker's finish — ownership persists
+    paint: null,                                     // the paint locker's finish — ownership persists
+    /* M3b — the Workshop */
+    cash: 2500,                                      // the company account — R&D runs on it, production feeds it
+    banked: {},                                      // per-contract id: development award banked (first win only)
+    bench: null,                                     // the R&D workbench assembly, exactly as you left it
+    rndTests: 0,                                     // shots fired on the company dime
+    rsk: 0,                                          // type-plate counter (RSK-1, RSK-2, …)
+    types: [],                                       // certified designs: plate, name, target, grade, band, unitCost…
+    run: null,                                       // the active production run, if the workshop is booked
+    doneOrders: {}                                   // orders already run — a bid board never repeats itself
   };
   function migrateSave(s) {
     // v1 → v2: everything old is kept; the new rooms start empty.
@@ -73,7 +84,27 @@
     if (!s.scars) s.scars = {};
     if (!s.ui) s.ui = { drawerCat: 'shells' };
     if (s.paint === undefined) s.paint = null;
-    s.v = 2;
+    // v2 → v3: the company gets an account. Every development award you ever
+    // banked arrives with it — the Workshop era starts on money you earned.
+    if (typeof s.cash !== 'number') {
+      s.cash = 2500;
+      s.banked = {};
+      Object.keys(s.contracts || {}).forEach(function (id) {
+        var rec = s.contracts[id];
+        if (rec && rec.won && typeof rec.net === 'number' && rec.net > 0) {
+          s.cash += rec.net;
+          s.banked[id] = rec.net;
+        }
+      });
+    }
+    if (!s.banked) s.banked = {};
+    if (s.bench === undefined) s.bench = null;
+    if (typeof s.rndTests !== 'number') s.rndTests = 0;
+    if (typeof s.rsk !== 'number') s.rsk = 0;
+    if (!s.types) s.types = [];
+    if (s.run === undefined) s.run = null;
+    if (!s.doneOrders) s.doneOrders = {};
+    s.v = 3;
     return s;
   }
   function loadSave() {
@@ -92,16 +123,31 @@
       SAVE.scars = s.scars;
       SAVE.ui = s.ui;
       SAVE.paint = s.paint || null;
+      SAVE.cash = s.cash;
+      SAVE.banked = s.banked;
+      SAVE.bench = s.bench;
+      SAVE.rndTests = s.rndTests;
+      SAVE.rsk = s.rsk;
+      SAVE.types = s.types;
+      SAVE.run = s.run;
+      SAVE.doneOrders = s.doneOrders;
       if (SAVE.ui && SAVE.ui.drawerCat) drawer.cat = SAVE.ui.drawerCat;
     } catch (e) { /* private mode etc — play in-memory */ }
   }
   function persist() {
     try {
       localStorage.setItem(SAVE_KEY, JSON.stringify({
-        v: 2, settings: SETTINGS, contracts: SAVE.contracts,
-        stock: SAVE.stock, museum: SAVE.museum, scars: SAVE.scars, ui: SAVE.ui, paint: SAVE.paint
+        v: 3, settings: SETTINGS, contracts: SAVE.contracts,
+        stock: SAVE.stock, museum: SAVE.museum, scars: SAVE.scars, ui: SAVE.ui, paint: SAVE.paint,
+        cash: SAVE.cash, banked: SAVE.banked, bench: SAVE.bench, rndTests: SAVE.rndTests,
+        rsk: SAVE.rsk, types: SAVE.types, run: SAVE.run, doneOrders: SAVE.doneOrders
       }));
     } catch (e) {}
+  }
+  function wonCountAll() {
+    var n = 0;
+    PG2.CONTRACTS.forEach(function (c, i) { if (contractRec(i).won) n++; });
+    return n;
   }
   function contractRec(idx) {
     var id = PG2.CONTRACTS[idx].id;
@@ -1126,7 +1172,7 @@
       e.preventDefault();
       PGAudio.init();
       if (partLocked(entry)) { PGAudio.buzz(); toast(entry.name + ' — UNLOCKS · ' + entry.unlock + '. The catalog is the brochure.'); return; }
-      if (t.classList.contains('disabled')) return;
+      if (t.classList.contains('disabled')) { PGAudio.buzz(); toast(explainDisabled(entry)); return; }
       if (entry.tap) { entry.tap(); return; }        // tap-action tiles (e.g. the paint locker)
       var grid = $('drawer-grid');
       var st = { pid: e.pointerId, x0: e.clientX, y0: e.clientY, lastY: e.clientY, mode: null };
@@ -1191,6 +1237,28 @@
     buildDrawerSpine();
     buildDrawerGrid();
   }
+  /* a grayed tile is never mute: tap it and it says why (doctrine: challenging, never confusing) */
+  function explainDisabled(p) {
+    var a = S.assembly;
+    var d = PG2.derive(a, rfp());
+    if (p.tap) return 'Place a shell first — there is nothing to paint.';
+    if (p.group === 'shell') return 'A shell is already on the stand. Tap it to take it off first — parts come off with it.';
+    if (!a.shell) return p.name + ' needs a shell on the stand first. STRUCTURE before trimmings.';
+    if (p.group === 'fill' || p.group === 'refined') {
+      if (d.filled >= d.slots) return 'All ' + d.slots + ' bays are full. Tap a canister to take it back off.';
+      if (p.group === 'refined') return 'No ' + p.name + ' in stock — run ⚗ THE STILL.';
+    }
+    if (a[p.id]) return p.name + ' is already installed. Tap it on the article to take it back off.';
+    if (p.excl) {
+      for (var i = 0; i < p.excl.length; i++) {
+        if (a[p.excl[i]]) {
+          var other = PG2.PARTS[p.excl[i]] ? PG2.PARTS[p.excl[i]].name : p.excl[i].toUpperCase();
+          return p.name + ' won’t share the article with ' + other + '. Take that off first.';
+        }
+      }
+    }
+    return p.name + ' can’t go on right now.';
+  }
   function refreshDrawer() {
     var a = S.assembly;
     var d = PG2.derive(a, rfp());
@@ -1207,7 +1275,10 @@
         if (b) b.textContent = '×' + a.refine.stock[p.id];
       }
       else dis = !a.shell || !!a[p.id] || (p.excl && p.excl.some(function (x) { return !!a[x]; }));
-      t.classList.toggle('disabled', dis);
+      // !! matters: for parts with no excl list the chain ends undefined, and
+      // classList.toggle(cls, undefined) FLIPS instead of clearing — the well
+      // cap greyed out at random on phones because of this.
+      t.classList.toggle('disabled', !!dis);
     });
   }
   $('drawer-tab').addEventListener('click', function () {
@@ -1291,7 +1362,8 @@
     var d = PG2.derive(S.assembly, rfp());
     var R = rfp();
     var maxM = R.meterMax;
-    $('m-goal').textContent = R.craterMin + '–' + R.craterMax + ' m';
+    // R&D: no spec band — the meter reads, it doesn't judge
+    $('m-goal').textContent = S.mode === 'rnd' ? 'NO SPEC · R&D' : R.craterMin + '–' + R.craterMax + ' m';
     $('m-max').textContent = maxM + ' m';
     var spec = $('m-crater-spec');
     spec.style.left = (R.craterMin / maxM * 100) + '%';
@@ -1316,14 +1388,16 @@
     wf.classList.toggle('over', d.overWeight);
     $('m-weight-cap').classList.toggle('hidden', !R.weightCap);
     var cost = $('m-cost-val');
-    cost.textContent = fmt$(d.cost);
-    cost.className = d.overBudget ? 'bad' : '';
+    // R&D runs on the company account: the cap is whatever's in it
+    var shortOnCash = S.mode === 'rnd' && d.cost > SAVE.cash;
+    cost.textContent = S.mode === 'rnd' ? fmt$(d.cost) + ' / ' + fmt$(SAVE.cash) : fmt$(d.cost);
+    cost.className = (d.overBudget || shortOnCash) ? 'bad' : '';
     var cf = $('m-cost-fill');
-    cf.style.width = clamp(d.cost / (R.budget / 0.88), 0, 1) * 100 + '%';
-    cf.classList.toggle('over', d.overBudget);
+    cf.style.width = clamp(d.cost / (S.mode === 'rnd' ? Math.max(SAVE.cash, 1) / 0.88 : R.budget / 0.88), 0, 1) * 100 + '%';
+    cf.classList.toggle('over', d.overBudget || shortOnCash);
     var btn = $('btn-closeout');
-    btn.disabled = !(d.complete && !d.overBudget && !d.overWeight);
-    $('btn-refire').classList.toggle('hidden', !(S.phase === 'build' && closeoutReady() && d.complete && !d.overBudget && !d.overWeight));
+    btn.disabled = !(d.complete && !d.overBudget && !d.overWeight && !shortOnCash);
+    $('btn-refire').classList.toggle('hidden', !(S.phase === 'build' && closeoutReady() && d.complete && !d.overBudget && !d.overWeight && !shortOnCash));
     $('btn-refinery').classList.toggle('hidden', !(S.phase === 'build' && R.needsRefinery));
     refreshComMarker(d);
     refreshHint(d);
@@ -1336,11 +1410,16 @@
     h.style.opacity = 1;
     var R = rfp();
     var msg;
-    if (!S.assembly.shell) msg = 'Pull the <b>PARTS</b> drawer and drag a <b>shell</b> onto the glowing stand.<br>One finger orbits · pinch zooms.';
-    else if (d.filled === 0) msg = R.needsRefinery
+    var shortCash = S.mode === 'rnd' && d.cost > SAVE.cash;
+    if (!S.assembly.shell) msg = S.mode === 'rnd'
+      ? 'Your bench, your dime, no spec sheet.<br>Pull the <b>PARTS</b> drawer and build the thing you keep sketching.'
+      : 'Pull the <b>PARTS</b> drawer and drag a <b>shell</b> onto the glowing stand.<br>One finger orbits · pinch zooms.';
+    else if (d.filled === 0) msg = R.needsRefinery && S.mode !== 'rnd'
       ? 'This job wants the still. Fire up <b>⚗ THE STILL</b>, then load the bays.'
       : 'Load <b>canisters</b> into the open bays.<br>Amber F-1A = more bang · blue F-2S = calmer.';
     else if (d.missing.length) msg = 'Still missing: <b>' + d.missing.join(' · ') + '</b>.<br>Tap a placed part to take it back off.';
+    else if (shortCash) msg = '<b style="color:#ff8d7e">The account is short.</b> This article costs ' + fmt$(d.cost) +
+      ' to expend; the company holds ' + fmt$(SAVE.cash) + '. Win a contract, land an order, or build cheaper.';
     else if (d.overBudget) msg = '<b style="color:#ff8d7e">Over budget.</b> Take something off — the Authority won’t pay a penny past $' + R.budget.toLocaleString('en-US') + '.';
     else if (d.overWeight) msg = '<b style="color:#ff8d7e">Over weight.</b> ' + Math.round(d.weight) + ' kg on a ' + R.weightCap + ' kg crane. The scale does not negotiate.';
     else if (d.cookRisk > 0) msg = '<b style="color:#ff8d7e">Heat warning.</b> This load may <b>cook off</b> under the forecast. F-2S or ADDITIVE G-3 buys shade.';
@@ -1414,11 +1493,35 @@
       w: partWeight01(id)
     };
     refreshNodes(id);
+    frameDragNodes();
     movePartDrag(e);
     dragPart.ghost.position.copy(dragPart.target);   // no fly-in from origin
     window.addEventListener('pointermove', movePartDrag);
     window.addEventListener('pointerup', endPartDrag);
     window.addEventListener('pointercancel', endPartDrag);
+  }
+  /* the bay presents the socket: if a grabbed part's sockets sit off-screen
+     (a long shell's well cap on a narrow phone), slide the view to frame them */
+  function frameDragNodes() {
+    if (!nodeMarkers.length) return;
+    var pad = 34, top = 170, bot = H - 160, bad = false, wx = 0;
+    nodeMarkers.forEach(function (mk) {
+      mk.getWorldPosition(_mkWP);
+      var sp = worldToScreen(_mkWP, bay.camera);
+      if (sp.x < pad || sp.x > W - pad || sp.y < top || sp.y > bot) bad = true;
+      wx += _mkWP.x;
+    });
+    if (!bad) return;
+    wx /= nodeMarkers.length;
+    var o = bay.orbit;
+    var t0 = o.target.x, r0 = o.radius;
+    var tx = clamp(wx * 0.6, -1.4, 1.4);
+    var r1 = Math.min(r0 + 0.9, 6.2);
+    tween(380, function (e) {
+      o.target.x = lerp(t0, tx, e);
+      o.radius = lerp(r0, r1, e);
+      bayCam();
+    });
   }
   function setGhostHot(hot) {
     if (!dragPart || dragPart.ghostHot === (hot ? 1 : 0)) return;
@@ -1804,7 +1907,7 @@
   }
 
   /* ================= SCREENS / FLOW ================= */
-  var screens = ['scr-title', 'scr-board', 'scr-museum', 'scr-rfp', 'scr-score'];
+  var screens = ['scr-title', 'scr-hq', 'scr-bids', 'scr-board', 'scr-museum', 'scr-rfp', 'scr-score'];
   function showScreen(id) {
     screens.forEach(function (s) { $(s).classList.toggle('active', s === id); });
   }
@@ -1918,8 +2021,15 @@
     hidePartCard();
     showScreen(null); showUI('ui-bay');
     $('ui-bay').classList.remove('closeout');
-    $('bay-brand-txt').textContent = 'REDSKY INC · ' + rfp().id;
-    $('bay-attempt').textContent = 'TEST #' + (S.attempt + 1);
+    if (S.mode === 'rnd') {
+      $('bay-brand-txt').textContent = 'WEAPONS ASSEMBLY · R&D';
+      $('bay-attempt').textContent = 'SHOT #' + (SAVE.rndTests + 1);
+      $('btn-torange').innerHTML = 'OUT THE BACK GATE →';
+    } else {
+      $('bay-brand-txt').textContent = 'REDSKY INC · ' + rfp().id;
+      $('bay-attempt').textContent = 'TEST #' + (S.attempt + 1);
+      $('btn-torange').innerHTML = 'TRUCK TO RANGE →';
+    }
     buildPhase = S.assembly.shell ? buildPhase : 'structure';   // a fresh stand starts at STRUCTURE
     buildDrawer();
     refreshPhaseRail();
@@ -1940,7 +2050,7 @@
   }
   function updateStandStory() {
     // the bay quietly tells the story of your convergence
-    var tests = contractRec(S.contract).tests;
+    var tests = S.mode === 'rnd' ? SAVE.rndTests : contractRec(S.contract).tests;
     bay.repaintFloor(tests);
     bay.clipboard.visible = tests >= 3;
   }
