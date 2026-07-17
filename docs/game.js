@@ -255,6 +255,13 @@
     renderer.toneMappingExposure = 1.32;
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    // WIDE GAMUT: the iPhone OLED is Display-P3 — paint the drawing buffer in
+    // P3 so the ambers and fireball reds run past the sRGB fence. Feature-
+    // detected: a no-op anywhere the extension is absent, so it can't hurt.
+    try {
+      var _gl = renderer.getContext();
+      if (_gl && 'drawingBufferColorSpace' in _gl) _gl.drawingBufferColorSpace = 'display-p3';
+    } catch (e) {}
     size();
     window.addEventListener('resize', size);
   }
@@ -264,6 +271,130 @@
     renderer.setSize(W, H, false);
     if (bay) { bay.camera.aspect = W / H; bay.camera.updateProjectionMatrix(); }
     if (range) { range.camera.aspect = W / H; range.camera.updateProjectionMatrix(); }
+    if (BLOOM.ready) bloomResize();
+  }
+
+  /* ================= REAL-TIME BLOOM =================
+     Hand-rolled (no postprocessing addon): render the scene to a target,
+     extract the bright emissives, blur them soft and wide, add back over
+     the sharp scene. Everything that glows — the fireball, the tungsten
+     lamps, the sun, the beacon, window light, hot terminals — blooms.
+     Operates in sRGB space (no dark-banding); hard fallback to a plain
+     render if anything in the chain fails, so it can never break the game. */
+  var BLOOM = {
+    ready: false, on: true, threshold: 0.60, strength: 1.05, spread: 1.35,
+    sceneRT: null, a: null, b: null, ortho: null, quad: null,
+    mBright: null, mBlur: null, mComp: null, _v: null
+  };
+  function bloomInit() {
+    if (BLOOM.ready || !BLOOM.on) return;
+    try {
+      var dpr = renderer.getPixelRatio();
+      var w = Math.floor(W * dpr), h = Math.floor(H * dpr);
+      var hw = Math.max(2, w >> 1), hh = Math.max(2, h >> 1);
+      var rtOpts = { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter,
+                     format: THREE.RGBAFormat, depthBuffer: true, stencilBuffer: false };
+      BLOOM.sceneRT = new THREE.WebGLRenderTarget(w, h, rtOpts);
+      if (BLOOM.sceneRT.texture.encoding !== undefined) BLOOM.sceneRT.texture.encoding = THREE.sRGBEncoding;
+      var half = { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, format: THREE.RGBAFormat, depthBuffer: false, stencilBuffer: false };
+      BLOOM.a = new THREE.WebGLRenderTarget(hw, hh, half);
+      BLOOM.b = new THREE.WebGLRenderTarget(hw, hh, half);
+      BLOOM.ortho = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+      BLOOM._v = new THREE.Vector2();
+      var VERT = 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }';
+      BLOOM.mBright = new THREE.ShaderMaterial({
+        uniforms: { tDiffuse: { value: null }, threshold: { value: BLOOM.threshold } },
+        vertexShader: VERT,
+        fragmentShader:
+          'varying vec2 vUv; uniform sampler2D tDiffuse; uniform float threshold;' +
+          'void main(){ vec3 c = texture2D(tDiffuse, vUv).rgb;' +
+          'float l = max(max(c.r, c.g), c.b);' +
+          'float k = max(0.0, l - threshold) / max(l, 1e-4);' +
+          'gl_FragColor = vec4(c * k * k, 1.0); }',
+        depthTest: false, depthWrite: false
+      });
+      BLOOM.mBlur = new THREE.ShaderMaterial({
+        uniforms: { tDiffuse: { value: null }, dir: { value: new THREE.Vector2() } },
+        vertexShader: VERT,
+        fragmentShader:
+          'varying vec2 vUv; uniform sampler2D tDiffuse; uniform vec2 dir;' +
+          'void main(){ vec3 s = vec3(0.0);' +
+          's += texture2D(tDiffuse, vUv + dir*-4.0).rgb * 0.0512;' +
+          's += texture2D(tDiffuse, vUv + dir*-3.0).rgb * 0.0918;' +
+          's += texture2D(tDiffuse, vUv + dir*-2.0).rgb * 0.1231;' +
+          's += texture2D(tDiffuse, vUv + dir*-1.0).rgb * 0.1353;' +
+          's += texture2D(tDiffuse, vUv).rgb * 0.1391;' +
+          's += texture2D(tDiffuse, vUv + dir* 1.0).rgb * 0.1353;' +
+          's += texture2D(tDiffuse, vUv + dir* 2.0).rgb * 0.1231;' +
+          's += texture2D(tDiffuse, vUv + dir* 3.0).rgb * 0.0918;' +
+          's += texture2D(tDiffuse, vUv + dir* 4.0).rgb * 0.0512;' +
+          'gl_FragColor = vec4(s, 1.0); }',
+        depthTest: false, depthWrite: false
+      });
+      BLOOM.mComp = new THREE.ShaderMaterial({
+        uniforms: { tScene: { value: null }, tBloom: { value: null }, strength: { value: BLOOM.strength } },
+        vertexShader: VERT,
+        fragmentShader:
+          'varying vec2 vUv; uniform sampler2D tScene; uniform sampler2D tBloom; uniform float strength;' +
+          'void main(){ vec3 base = texture2D(tScene, vUv).rgb; vec3 bl = texture2D(tBloom, vUv).rgb;' +
+          // screen-blend the bloom so highlights lift without blowing out
+          'vec3 outc = 1.0 - (1.0 - base) * (1.0 - bl * strength);' +
+          'gl_FragColor = vec4(outc, 1.0); }',
+        depthTest: false, depthWrite: false
+      });
+      BLOOM.quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), BLOOM.mBright);
+      BLOOM.ready = true;
+    } catch (e) { BLOOM.on = false; BLOOM.ready = false; }
+  }
+  function bloomResize() {
+    if (!BLOOM.ready) return;
+    try {
+      var dpr = renderer.getPixelRatio();
+      var w = Math.floor(W * dpr), h = Math.floor(H * dpr);
+      BLOOM.sceneRT.setSize(w, h);
+      BLOOM.a.setSize(Math.max(2, w >> 1), Math.max(2, h >> 1));
+      BLOOM.b.setSize(Math.max(2, w >> 1), Math.max(2, h >> 1));
+    } catch (e) { BLOOM.on = false; }
+  }
+  function _blitPass(mat, target) {
+    BLOOM.quad.material = mat;
+    renderer.setRenderTarget(target);
+    renderer.render(BLOOM.quad, BLOOM.ortho);
+  }
+  function renderScene(scene, cam) {
+    if (!BLOOM.on) { renderer.render(scene, cam); return; }
+    if (!BLOOM.ready) { bloomInit(); if (!BLOOM.ready) { renderer.render(scene, cam); return; } }
+    try {
+      // 1) the scene, tone-mapped + sRGB, into a texture
+      renderer.setRenderTarget(BLOOM.sceneRT);
+      renderer.clear();
+      renderer.render(scene, cam);
+      // 2) bright-pass → half-res A
+      BLOOM.mBright.uniforms.tDiffuse.value = BLOOM.sceneRT.texture;
+      BLOOM.mBright.uniforms.threshold.value = BLOOM.threshold;
+      _blitPass(BLOOM.mBright, BLOOM.a);
+      // 3) separable blur, two widening iterations, ping-ponging A↔B
+      var hw = BLOOM.a.width, hh = BLOOM.a.height;
+      for (var i = 0; i < 2; i++) {
+        var sp = BLOOM.spread * (1.0 + i);
+        BLOOM.mBlur.uniforms.tDiffuse.value = BLOOM.a.texture;
+        BLOOM.mBlur.uniforms.dir.value.set(sp / hw, 0);
+        _blitPass(BLOOM.mBlur, BLOOM.b);
+        BLOOM.mBlur.uniforms.tDiffuse.value = BLOOM.b.texture;
+        BLOOM.mBlur.uniforms.dir.value.set(0, sp / hh);
+        _blitPass(BLOOM.mBlur, BLOOM.a);
+      }
+      // 4) composite scene + bloom → screen
+      BLOOM.mComp.uniforms.tScene.value = BLOOM.sceneRT.texture;
+      BLOOM.mComp.uniforms.tBloom.value = BLOOM.a.texture;
+      BLOOM.mComp.uniforms.strength.value = BLOOM.strength;
+      _blitPass(BLOOM.mComp, null);
+      renderer.setRenderTarget(null);
+    } catch (e) {
+      BLOOM.on = false;                       // one strike and we go plain — never break the game
+      renderer.setRenderTarget(null);
+      renderer.render(scene, cam);
+    }
   }
 
   function gradientTexture(stops, vertical) {
@@ -373,6 +504,29 @@
       metalness: metal != null ? metal : 0.62,
       roughness: rough != null ? rough : 0.32
     });
+  }
+  /* PMREM environment — a real thing for the machined metals to reflect.
+     Generated once per scene from a small equirect canvas (sky + a hot
+     key glint), so brass gimbals and polished collars read like metal
+     instead of matte plastic. Guarded: on failure, metals just stay matte. */
+  var _pmrem = null;
+  function envMap(top, horizon, ground, glintX, glintCol) {
+    try {
+      var c = document.createElement('canvas'); c.width = 256; c.height = 128;
+      var x = c.getContext('2d');
+      var g = x.createLinearGradient(0, 0, 0, 128);
+      g.addColorStop(0, top); g.addColorStop(0.5, horizon); g.addColorStop(1, ground);
+      x.fillStyle = g; x.fillRect(0, 0, 256, 128);
+      var gl = x.createRadialGradient(glintX, 40, 4, glintX, 40, 60);   // the key light, to catch on a curve
+      gl.addColorStop(0, glintCol); gl.addColorStop(1, 'rgba(0,0,0,0)');
+      x.fillStyle = gl; x.fillRect(0, 0, 256, 128);
+      var tex = new THREE.CanvasTexture(c);
+      tex.mapping = THREE.EquirectangularReflectionMapping;
+      if (!_pmrem) { _pmrem = new THREE.PMREMGenerator(renderer); _pmrem.compileEquirectangularShader(); }
+      var rt = _pmrem.fromEquirectangular(tex);
+      tex.dispose();
+      return rt.texture;
+    } catch (e) { return null; }
   }
   function grainTint(hex, key, shin) {
     // subtle speckle map multiplied by a tint — for domes and small castings.
@@ -1273,6 +1427,7 @@
     var scene = new THREE.Scene();
     scene.background = gradientTexture([[0, '#0d1a29'], [0.6, '#0a1420'], [1, '#070e17']], true);
     scene.fog = new THREE.Fog(0x0a1420, 10, 24);
+    scene.environment = envMap('#22384f', '#16283b', '#0a141f', 60, 'rgba(255,224,170,0.9)');  // cool room, warm lamp glint
 
     var camera = new THREE.PerspectiveCamera(42, W / H, 0.05, 60);
 
@@ -1282,7 +1437,7 @@
     var key = new THREE.DirectionalLight(0xfff1dc, 0.62);
     key.position.set(4, 7, 5);
     key.castShadow = true;
-    key.shadow.mapSize.set(1024, 1024);
+    key.shadow.mapSize.set(2048, 2048);
     key.shadow.camera.left = -4; key.shadow.camera.right = 4;
     key.shadow.camera.top = 5; key.shadow.camera.bottom = -2;
     key.shadow.camera.far = 22;
@@ -4812,6 +4967,7 @@
   function initRange() {
     var scene = new THREE.Scene();
     scene.fog = new THREE.Fog(0xe3d4b0, 1400, 3600);
+    scene.environment = envMap('#cfe0f0', '#e8d6b4', '#8a6a42', 60, 'rgba(255,244,214,1)');  // desert sky IBL + sun glint
     var camera = new THREE.PerspectiveCamera(7, W / H, 0.5, 8000);
 
     var hemi = new THREE.HemisphereLight(0xcfe0f0, 0x8a6a42, 0.85);
@@ -4820,7 +4976,7 @@
     sun.position.set(-800, 900, 500);
     // REAL shadows on the range — the aerial view earns them
     sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.mapSize.set(3072, 3072);
     sun.shadow.camera.left = -170; sun.shadow.camera.right = 170;
     sun.shadow.camera.top = 170; sun.shadow.camera.bottom = -170;
     sun.shadow.camera.near = 150; sun.shadow.camera.far = 1200;
@@ -7691,7 +7847,7 @@
         lp.g.rotation.x = Math.sin(now * 0.00037 + lp.p) * 0.012;
         lp.g.rotation.z = Math.cos(now * 0.00031 + lp.p) * 0.012;
       }
-      renderer.render(bay.scene, bay.camera);
+      renderScene(bay.scene, bay.camera);
       return;
     }
 
@@ -7786,7 +7942,7 @@
         c.position.x += (Math.random() - 0.5) * range.shake * 0.6;
         c.position.y += (Math.random() - 0.5) * range.shake * 0.45;
       }
-      renderer.render(range.scene, range.camera);
+      renderScene(range.scene, range.camera);
     }
   }
 
