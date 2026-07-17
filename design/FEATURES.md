@@ -73,6 +73,13 @@ A teaching ladder where every RFP adds one idea: restraint on a mean budget (FIR
 - **The survey is yours now:** while flying the aftermath, the auto-advance waits. **Tap the ground to drop survey stakes** — dashed range lines plot live from ground zero with distances — then **FILE THE SURVEY →** when you're done. The long lens remains the default; the plane is one tap away.
 - **A desert worth flying over:** seeded ground dressing — creosote scrub, rock scatter, and red-flag survey stakes at 25/50/75/100 m on the cardinal lines (the aerial ruler).
 
+## ✅ SHIPPED — The premium rendering pass (M3b wave 2, part 4)
+
+- **Real shadows on the range:** the sun casts a 2048 PCF-soft shadow map over the play area — walls throw long dusk shadows, the article shades the pad, scrub and stakes anchor to the dirt. The aerial view earns it most.
+- **A real sky:** a gradient dome per hour (not a flat backdrop), a sun with a disc and halo that moves with the palette, and seven patient seeded clouds tinted dawn-gold / noon-white / dusk-ember. The recon plane can look up now.
+- **The desert reads like dirt:** a 1024px seeded speckle-and-strata detail texture, anisotropically filtered, repeated under the vertex shading.
+- **Filmic pipeline:** ACES tone mapping (exposure 1.32), native pixel ratio up to 3× on modern phones, doubled FX texture resolution (fireball/smoke/dust sprites 256px, scorch decal 512px).
+
 ## 📋 NEXT — M3b wave 2 (remainder)
 
 - More target objects (the decommissioned bunker, stacked containers), per-object range scarring, richer auction drama, production-run vignettes.

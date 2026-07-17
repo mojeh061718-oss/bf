@@ -249,8 +249,10 @@
 
   function initGL() {
     renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true, powerPreference: 'high-performance' });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 3));   // native-res on modern phones
     renderer.outputEncoding = THREE.sRGBEncoding;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;                  // the filmic curve is the premium
+    renderer.toneMappingExposure = 1.32;
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     size();
@@ -3331,6 +3333,8 @@
     if (!range.skyCache) range.skyCache = {};
     if (!range.skyCache[name]) range.skyCache[name] = gradientTexture(p.sky, true);
     range.scene.background = range.skyCache[name];
+    range.skyDome.material.map = range.skyCache[name];   // the dome wears the hour
+    range.skyDome.material.needsUpdate = true;
     range.scene.fog.color.setHex(p.fog);
     range.scene.fog.near = p.fogNear;
     range.scene.fog.far = p.fogFar;
@@ -3339,7 +3343,15 @@
     range.hemi.intensity = p.hemiI;
     range.sun.color.setHex(p.sun);
     range.sun.intensity = p.sunI;
-    range.sun.position.set(p.sunPos[0], p.sunPos[1], p.sunPos[2]);
+    // direction from the palette, distance fixed — the shadow frustum stays honest
+    var sv = V3(p.sunPos[0], p.sunPos[1], p.sunPos[2]).normalize();
+    range.sun.position.copy(sv.clone().multiplyScalar(600));
+    range.sunSpr.position.copy(sv.clone().multiplyScalar(3800));
+    range.sunSpr.material.color.setHex(p.sun);
+    range.cloudG.children.forEach(function (cs) {
+      cs.material.color.setHex(name === 'dusk' ? 0xf0a878 : name === 'dawn' ? 0xf3ddc0 : 0xffffff);
+      cs.material.opacity = name === 'noon' ? 0.32 : 0.5;
+    });
     range.mesas.forEach(function (m, i) { m.material.color.setHex(p.mesas[Math.min(i, p.mesas.length - 1)]); });
     range.terrain.material.color.setHex(p.terrTint);
     range.shimmerBase = p.shimmer;
@@ -3371,6 +3383,14 @@
     scene.add(hemi);
     var sun = new THREE.DirectionalLight(0xfff3da, 1.0);
     sun.position.set(-800, 900, 500);
+    // REAL shadows on the range — the aerial view earns them
+    sun.castShadow = true;
+    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.camera.left = -170; sun.shadow.camera.right = 170;
+    sun.shadow.camera.top = 170; sun.shadow.camera.bottom = -170;
+    sun.shadow.camera.near = 150; sun.shadow.camera.far = 1200;
+    sun.shadow.bias = -0.0006;
+    sun.shadow.radius = 3;
     scene.add(sun);
 
     // terrain (flattened along the convoy road corridor at world z≈26)
@@ -3396,9 +3416,77 @@
     }
     tg.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
     tg.computeVertexNormals();
-    var terrain = new THREE.Mesh(tg, new THREE.MeshLambertMaterial({ vertexColors: true }));
+    // high-res ground detail: seeded speckle + strata, repeated and anisotropic —
+    // the desert reads like dirt now instead of vinyl
+    var dtc = document.createElement('canvas');
+    dtc.width = dtc.height = 1024;
+    var dtx = dtc.getContext('2d');
+    dtx.fillStyle = '#8f867a';
+    dtx.fillRect(0, 0, 1024, 1024);
+    var dnR = PG2.stream('RANGE', 'dirt');
+    for (var dn = 0; dn < 9000; dn++) {
+      var l = 120 + Math.floor(dnR() * 46);
+      dtx.fillStyle = 'rgb(' + l + ',' + Math.round(l * 0.94) + ',' + Math.round(l * 0.84) + ')';
+      var ds = dnR() < 0.9 ? 1 + dnR() * 2.5 : 3 + dnR() * 6;
+      dtx.globalAlpha = 0.10 + dnR() * 0.22;
+      dtx.beginPath();
+      dtx.arc(dnR() * 1024, dnR() * 1024, ds, 0, 6.3);
+      dtx.fill();
+    }
+    dtx.globalAlpha = 0.09;
+    for (var dl2 = 0; dl2 < 42; dl2++) {   // faint wind strata
+      dtx.strokeStyle = dnR() < 0.5 ? '#6e6458' : '#b0a390';
+      dtx.lineWidth = 1 + dnR() * 2;
+      dtx.beginPath();
+      dtx.moveTo(0, dnR() * 1024);
+      dtx.bezierCurveTo(300, dnR() * 1024, 700, dnR() * 1024, 1024, dnR() * 1024);
+      dtx.stroke();
+    }
+    dtx.globalAlpha = 1;
+    var dirtTex = new THREE.CanvasTexture(dtc);
+    dirtTex.wrapS = dirtTex.wrapT = THREE.RepeatWrapping;
+    dirtTex.repeat.set(46, 46);
+    dirtTex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    dirtTex.encoding = THREE.sRGBEncoding;
+    var terrain = new THREE.Mesh(tg, new THREE.MeshLambertMaterial({ vertexColors: true, map: dirtTex }));
     terrain.rotation.x = -Math.PI / 2;
+    terrain.receiveShadow = true;
     scene.add(terrain);
+
+    // THE SKY — a real dome, not a backdrop: gradient by hour, a sun with a
+    // disc and a halo, and a few patient clouds. The aerial rig can look up now.
+    var skyDome = new THREE.Mesh(new THREE.SphereGeometry(4200, 28, 18),
+      new THREE.MeshBasicMaterial({ side: THREE.BackSide, fog: false, depthWrite: false }));
+    scene.add(skyDome);
+    var sunSpr = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: fxTextures().flash, transparent: true, depthWrite: false,
+      blending: THREE.AdditiveBlending, opacity: 0.85, fog: false }));
+    sunSpr.scale.set(700, 700, 1);
+    scene.add(sunSpr);
+    var cloudG = new THREE.Group();
+    var cloudTexC = document.createElement('canvas');
+    cloudTexC.width = 256; cloudTexC.height = 128;
+    var ctx2 = cloudTexC.getContext('2d');
+    var cR = PG2.stream('RANGE', 'clouds');
+    for (var cb = 0; cb < 26; cb++) {
+      var cg = ctx2.createRadialGradient(40 + cR() * 176, 40 + cR() * 48, 2, 40 + cR() * 176, 44 + cR() * 40, 22 + cR() * 26);
+      cg.addColorStop(0, 'rgba(255,255,255,0.55)');
+      cg.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx2.fillStyle = cg;
+      ctx2.fillRect(0, 0, 256, 128);
+    }
+    var cloudTex = new THREE.CanvasTexture(cloudTexC);
+    for (var cl = 0; cl < 7; cl++) {
+      var cs = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: cloudTex, transparent: true, depthWrite: false, opacity: 0.5, fog: false }));
+      var ca = cR() * Math.PI * 2;
+      var cd = 1400 + cR() * 1800;
+      cs.position.set(Math.cos(ca) * cd, 320 + cR() * 420, Math.sin(ca) * cd - 600);
+      var csw = 500 + cR() * 700;
+      cs.scale.set(csw, csw * 0.32, 1);
+      cloudG.add(cs);
+    }
+    scene.add(cloudG);
 
     // GROUND DRESSING — the aerial view needs something to fly over:
     // creosote scrub, rocks and survey stakes, seeded so the desert is always the same desert
@@ -3436,6 +3524,7 @@
         dressG.add(flag);
       });
     });
+    dressG.traverse(function (m) { if (m.isMesh) m.castShadow = true; });
     scene.add(dressG);
 
     // mesas — four ridge lines now, blue-shifting into the fog with distance
@@ -3661,6 +3750,7 @@
       convoyG: convoyG, truckShadow: truckShadow, escortShadow: escortShadow,
       dustPool: dustPool,
       hemi: hemi, sun: sun, terrain: terrain,
+      skyDome: skyDome, sunSpr: sunSpr, cloudG: cloudG,
       mesas: mesas, shimmer: shimmer, nearShimmer: nearShimmer, shimmerBase: 1,
       fx: null, shake: 0, convoyShake: 0, mode: 'idle', palette: null
     };
@@ -4480,13 +4570,13 @@
   /* ---------- detonation FX ---------- */
   function spriteTexture(inner, outer) {
     var c = document.createElement('canvas');
-    c.width = c.height = 128;
+    c.width = c.height = 256;
     var x = c.getContext('2d');
-    var g = x.createRadialGradient(64, 64, 6, 64, 64, 62);
+    var g = x.createRadialGradient(128, 128, 12, 128, 128, 124);
     g.addColorStop(0, inner);
     g.addColorStop(1, outer);
     x.fillStyle = g;
-    x.fillRect(0, 0, 128, 128);
+    x.fillRect(0, 0, 256, 256);
     var t = new THREE.CanvasTexture(c);
     t.encoding = THREE.sRGBEncoding;
     return t;
@@ -4774,15 +4864,15 @@
     var g = new THREE.Group();
     // scorch decal
     var sc = document.createElement('canvas');
-    sc.width = sc.height = 256;
+    sc.width = sc.height = 512;
     var sx = sc.getContext('2d');
-    var sg = sx.createRadialGradient(128, 128, 12, 128, 128, 128);
+    var sg = sx.createRadialGradient(256, 256, 24, 256, 256, 256);
     sg.addColorStop(0, 'rgba(28,20,13,0.95)');
     sg.addColorStop(0.4, 'rgba(56,40,25,0.8)');
     sg.addColorStop(0.72, 'rgba(92,68,42,0.35)');
     sg.addColorStop(1, 'rgba(92,68,42,0)');
     sx.fillStyle = sg;
-    sx.fillRect(0, 0, 256, 256);
+    sx.fillRect(0, 0, 512, 512);
     var stx = new THREE.CanvasTexture(sc);
     stx.encoding = THREE.sRGBEncoding;
     var scorch = new THREE.Mesh(new THREE.PlaneGeometry(r * 4.6, r * 4.6),
@@ -6323,6 +6413,7 @@
       var tr = new THREE.Group();
       [-0.9, 0.9].forEach(function (x) {
         var leg = new THREE.Mesh(new THREE.BoxGeometry(0.28, 1.5, 1.6), mat(0x6b4a2a));
+        leg.castShadow = true;
         leg.position.set(x, 0.75, 0);
         tr.add(leg);
       });
@@ -6355,6 +6446,7 @@
   function setTargetObject(tid) {
     if (range.targetG) { range.scene.remove(range.targetG); range.targetG = null; }
     var g = buildTargetGroup(tid);
+    g.traverse(function (m) { if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; } });
     range.scene.add(g);
     range.targetG = g;
   }
