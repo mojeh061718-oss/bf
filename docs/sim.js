@@ -1647,6 +1647,103 @@ var PG2 = (function () {
   function cannedClean(seed) { return cannedFor(0, seed); }
   function cannedClean2(seed) { return cannedFor(2, seed); }
 
+  /* ================= THE LONG SHOT PROGRAM =================
+     Pick a target 1–5000 miles out; build an air-to-surface article from
+     stepped components; dial in elevation, azimuth, fuel and gyro by hand.
+     Range is the difficulty: a fraction of a degree that's nothing at
+     5 miles is tens of miles at 5000. Careless dialing misses; a tight
+     solution can bullseye any range. Deterministic from build+dials+seed. */
+  var LS_AIRFRAMES = {
+    dart:   { id: 'dart',   name: 'DART',   sub: 'LIGHT · TWITCHY',   mass: 340, stab: 0.55, cost: 2200 },
+    lance:  { id: 'lance',  name: 'LANCE',  sub: 'BALANCED',          mass: 560, stab: 0.85, cost: 3400 },
+    pillar: { id: 'pillar', name: 'PILLAR', sub: 'HEAVY · STEADY',    mass: 980, stab: 1.10, cost: 5200 }
+  };
+  var LS_MOTORS = {
+    single: { id: 'single', name: 'SINGLE STAGE', sub: 'SHORT REACH',  reach: 320,  mass: 300,  cost: 2600 },
+    dual:   { id: 'dual',   name: 'DUAL STAGE',   sub: 'MEDIUM REACH', reach: 1500, mass: 700,  cost: 6000 },
+    triple: { id: 'triple', name: 'TRIPLE STAGE', sub: 'ICBM CLASS',   reach: 6000, mass: 1350, cost: 12000 }
+  };
+  var LS_GUIDANCE = {
+    fin:     { id: 'fin',     name: 'FIN-STABILIZED', sub: 'BALLISTIC · UNFORGIVING', corr: 0.0,  driftK: 1.0,  cepBase: 0.0026, cost: 900 },
+    inertial:{ id: 'inertial',name: 'INERTIAL (INS)', sub: 'CORRECTS · STEADY',       corr: 0.60, driftK: 0.42, cepBase: 0.0018, cost: 4200 },
+    star:    { id: 'star',    name: 'STAR-TRACKER',   sub: 'SELF-CORRECTING · TIGHT',  corr: 0.85, driftK: 0.18, cepBase: 0.0010, cost: 9800 }
+  };
+  var LS_WARHEADS = {
+    light:  { id: 'light',  name: 'LIGHT',    sub: 'FAR REACH, SMALL BANG', mass: 90,  bang: 0.7, cost: 1400 },
+    std:    { id: 'std',    name: 'STANDARD', sub: 'THE SENSIBLE ONE',       mass: 180, bang: 1.0, cost: 2200 },
+    heavy:  { id: 'heavy',  name: 'HEAVY',    sub: 'SHORT REACH, BIG BANG',  mass: 340, bang: 1.5, cost: 3800 }
+  };
+  var LS_STEPS = [
+    { key: 'airframe', label: 'AIRFRAME',  cat: LS_AIRFRAMES, order: ['dart', 'lance', 'pillar'] },
+    { key: 'motor',    label: 'PROPULSION',cat: LS_MOTORS,    order: ['single', 'dual', 'triple'] },
+    { key: 'guidance', label: 'GUIDANCE',  cat: LS_GUIDANCE,  order: ['fin', 'inertial', 'star'] },
+    { key: 'warhead',  label: 'WARHEAD',   cat: LS_WARHEADS,  order: ['light', 'std', 'heavy'] }
+  ];
+  var LS_REF_DRY = 800;   // reference dry mass for the range penalty
+  function lsBuildDefault() { return { airframe: 'lance', motor: 'dual', guidance: 'inertial', warhead: 'std' }; }
+  function lsCapability(b) {
+    var af = LS_AIRFRAMES[b.airframe], mo = LS_MOTORS[b.motor], gu = LS_GUIDANCE[b.guidance], wh = LS_WARHEADS[b.warhead];
+    var dry = af.mass + wh.mass + 120;             // airframe + warhead + the guidance can
+    var total = dry + mo.mass;
+    // heavier articles reach less; a big motor still dominates
+    var rangeMax = mo.reach * clamp(1.15 - (total - (LS_REF_DRY + mo.mass)) / (LS_REF_DRY * 1.6), 0.3, 1.25);
+    rangeMax = Math.max(rangeMax, mo.reach * 0.3);
+    var cost = af.cost + mo.cost + gu.cost + wh.cost;
+    var accClass = gu.id === 'star' ? 'AAA' : gu.id === 'inertial' ? 'AA' : 'B';
+    return { rangeMax: Math.round(rangeMax), mass: Math.round(total), cost: cost, accClass: accClass,
+             stab: af.stab, guidance: gu, bang: wh.bang };
+  }
+  /* the intended solution: loft 45°, heading = bearing, burn-cutoff = the range */
+  function lsOptimal(b, targetMi, bearingDeg) {
+    var cap = lsCapability(b);
+    return { elev: 45, azimuth: bearingDeg, rangeSet: Math.min(targetMi, cap.rangeMax), gyro: 1,
+             rangeMax: cap.rangeMax, reachable: targetMi <= cap.rangeMax };
+  }
+  function angDiffDeg(a, b) { var d = ((a - b) % 360 + 540) % 360 - 180; return d; }   // signed −180..180
+  /* real-time flight duration: 5mi≈5s, 1000mi≈45s, 5000mi≈~93s */
+  function lsFlightTime(mi) { return clamp(2.587 * Math.pow(Math.max(mi, 1), 0.42), 4, 100); }
+  /* dial: { elev(deg 20..70), azimuth(deg 0..360), rangeSet(miles, ≤rangeMax), gyro(0..1|null) } */
+  function lsResolve(b, dial, targetMi, bearingDeg, seed) {
+    var cap = lsCapability(b);
+    var gu = cap.guidance;
+    var g = dial.gyro == null ? 0 : dial.gyro;                 // uncaged gyro = no drift help
+    var elevRad = dial.elev * Math.PI / 180;
+    // achieved downrange = burn-cutoff range · loft efficiency (peaks at 45°)
+    var elevEff = Math.max(0, Math.sin(2 * elevRad));
+    var achieved = Math.min(dial.rangeSet, cap.rangeMax) * elevEff;
+    var rawDown = achieved - targetMi;                          // + long, − short
+    var azErr = angDiffDeg(dial.azimuth, bearingDeg) * Math.PI / 180;
+    var rawCross = targetMi * Math.sin(azErr);                  // cross-range — magnified by distance
+    // guidance corrects a share of the DIAL error, scaled by gyro alignment
+    var correct = gu.corr * (0.4 + 0.6 * g);
+    var down = rawDown * (1 - correct);
+    var cross = rawCross * (1 - correct);
+    // residual random drift (worse guidance + poor alignment + longer range) and intrinsic CEP
+    var drift = gu.driftK * (1 - g) * gauss(stream(seed, 'ls:drift')) * targetMi * 0.010 / Math.max(cap.stab, 0.4);
+    var cep = gu.cepBase * targetMi;
+    down  += gauss(stream(seed, 'ls:cd')) * cep;
+    cross += drift + gauss(stream(seed, 'ls:cc')) * cep;
+    var reachable = targetMi <= cap.rangeMax * 1.02;
+    var missMi = Math.hypot(down, cross);
+    if (!reachable) { down = -(targetMi - cap.rangeMax); cross = 0; missMi = Math.abs(down); }   // out of gas, falls short
+    // grade bands scale with range: forgiving up close, brutal far out
+    var bull = Math.max(0.15, targetMi * 0.0016);
+    var hit  = Math.max(0.5, targetMi * 0.006);
+    var near = Math.max(2.5, targetMi * 0.025);
+    var grade = missMi <= bull ? 'DIRECT HIT' : missMi <= hit ? 'ON TARGET' : missMi <= near ? 'NEAR MISS' : 'MISS';
+    var apogee = Math.min(dial.rangeSet, cap.rangeMax) * 0.22 * (0.5 + Math.sin(elevRad));
+    return {
+      hit: missMi <= hit && reachable, grade: grade, missMi: missMi, downMi: down, crossMi: cross,
+      achievedMi: achieved, reachable: reachable, flightT: lsFlightTime(targetMi),
+      apogeeMi: apogee, targetMi: targetMi, bearingDeg: bearingDeg, cap: cap, cepMi: Math.round(cep * 10) / 10
+    };
+  }
+  /* a competent canned solution — harness + the 'nominal' hint */
+  function lsCannedDial(b, targetMi, bearingDeg) {
+    var o = lsOptimal(b, targetMi, bearingDeg);
+    return { elev: o.elev, azimuth: o.azimuth, rangeSet: o.rangeSet, gyro: 0.95 };
+  }
+
   return {
     CONTRACTS: CONTRACTS, CONTRACT_BY_ID: CONTRACT_BY_ID,
     RFP: CONTRACTS[0], CAMERA: CAMERA, SOUND_DELAY: SOUND_DELAY,
@@ -1671,7 +1768,11 @@ var PG2 = (function () {
     RND_RFP: RND_RFP, TARGETS: TARGETS, TARGET_ORDER: TARGET_ORDER, BUYERS: BUYERS,
     resolveTarget: resolveTarget, certSeries: certSeries, certCodename: certCodename, gyroMul: gyroMul,
     typeQ: typeQ, genOrders: genOrders, auctionRun: auctionRun, qaRoll: qaRoll,
-    cannedRnd: cannedRnd
+    cannedRnd: cannedRnd,
+    /* The Long Shot Program */
+    LS_AIRFRAMES: LS_AIRFRAMES, LS_MOTORS: LS_MOTORS, LS_GUIDANCE: LS_GUIDANCE, LS_WARHEADS: LS_WARHEADS, LS_STEPS: LS_STEPS,
+    lsBuildDefault: lsBuildDefault, lsCapability: lsCapability, lsOptimal: lsOptimal,
+    lsResolve: lsResolve, lsFlightTime: lsFlightTime, lsCannedDial: lsCannedDial, lsAngDiff: angDiffDeg
   };
 })();
 
