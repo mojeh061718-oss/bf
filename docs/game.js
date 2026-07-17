@@ -252,7 +252,7 @@
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 3));   // native-res on modern phones
     renderer.outputEncoding = THREE.sRGBEncoding;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;                  // the filmic curve is the premium
-    renderer.toneMappingExposure = 1.32;
+    renderer.toneMappingExposure = 1.45;
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     // WIDE GAMUT: the iPhone OLED is Display-P3 — paint the drawing buffer in
@@ -1432,9 +1432,9 @@
     var camera = new THREE.PerspectiveCamera(42, W / H, 0.05, 60);
 
     /* ---- lights: cool moonlit shell, warm tungsten heart ---- */
-    var hemi = new THREE.HemisphereLight(0x9db8d6, 0x2c231a, 0.26);
+    var hemi = new THREE.HemisphereLight(0x9db8d6, 0x2c231a, 0.44);
     scene.add(hemi);
-    var key = new THREE.DirectionalLight(0xfff1dc, 0.62);
+    var key = new THREE.DirectionalLight(0xfff1dc, 0.82);
     key.position.set(4, 7, 5);
     key.castShadow = true;
     key.shadow.mapSize.set(2048, 2048);
@@ -1446,7 +1446,7 @@
     var rim = new THREE.DirectionalLight(0x9cc8ea, 0.22);
     rim.position.set(-5, 3, -4);
     scene.add(rim);
-    var fill = new THREE.DirectionalLight(0x7d9cc4, 0.07);   // the night leaking in under the door
+    var fill = new THREE.DirectionalLight(0x7d9cc4, 0.14);   // the night leaking in under the door
     fill.position.set(-3, 2, 6);
     scene.add(fill);
 
@@ -7062,7 +7062,8 @@
         vel.push(dv);
       }
       dg.setAttribute('position', new THREE.BufferAttribute(pos2, 3));
-      var pts = new THREE.Points(dg, new THREE.PointsMaterial({ color: 0x3c2f22, size: 2.4, sizeAttenuation: true }));
+      var pts = new THREE.Points(dg, new THREE.PointsMaterial({ color: 0x3c2f22, size: 3.0, sizeAttenuation: true,
+        map: fxTextures().dust, transparent: true, depthWrite: false, opacity: 0.9 }));   // soft specks, not hard squares
       fxGroup.add(pts);
       fx.debris = { pts: pts, vel: vel };
     }
