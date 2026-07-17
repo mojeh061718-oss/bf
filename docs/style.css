@@ -258,6 +258,8 @@ button { font-family: inherit; color: inherit; background: none; border: none; c
   transition: opacity .3s;
 }
 .bay-hint .hint-small { display: block; font-family: var(--mono); font-size: 8.5px; letter-spacing: .2em; color: rgba(243,237,224,.6); margin-bottom: 4px; }
+/* an open drawer owns the left of the screen — the coach text yields instead of layering */
+#ui-bay.drawer-open .bay-hint { opacity: 0 !important; }
 
 /* ============ THE PARTS DRAWER (M3a) ============
    Left-edge slide-out, KSP grammar: spine tabs, 2-column grid,
@@ -266,7 +268,7 @@ button { font-family: inherit; color: inherit; background: none; border: none; c
   /* width is one source of truth so the collapse + lefty offsets track it;
      capped against the viewport so it never eats the bay on a phone */
   --drawer-w: min(210px, 56vw);
-  position: absolute; left: 0; top: calc(142px + var(--sat)); bottom: 0;
+  position: absolute; left: 0; top: calc(156px + var(--sat)); bottom: 0;   /* clears the phase rail */
   width: var(--drawer-w); z-index: 8;
   display: flex; flex-direction: row;
   transform: translateX(0);

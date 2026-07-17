@@ -1086,6 +1086,7 @@
   function setDrawerOpen(open, silent) {
     drawer.open = !!open;
     $('drawer').classList.toggle('collapsed', !drawer.open);
+    $('ui-bay').classList.toggle('drawer-open', drawer.open);   // the coach text yields
     if (!silent) PGAudio.tap();
   }
   function setDrawerCat(cat, silent) {
