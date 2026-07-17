@@ -73,6 +73,15 @@ A teaching ladder where every RFP adds one idea: restraint on a mean budget (FIR
 - **The survey is yours now:** while flying the aftermath, the auto-advance waits. **Tap the ground to drop survey stakes** — dashed range lines plot live from ground zero with distances — then **FILE THE SURVEY →** when you're done. The long lens remains the default; the plane is one tap away.
 - **A desert worth flying over:** seeded ground dressing — creosote scrub, rock scatter, and red-flag survey stakes at 25/50/75/100 m on the cardinal lines (the aerial ruler).
 
+## ✅ SHIPPED — THE LONG SHOT PROGRAM (strategic range)
+
+A whole new mode from the compound's Far Gate: put a target 1–5,000 miles out and thread it.
+- **Mission — the tactical map:** a radar plot with log-scale range rings and a compass; drag the target blip to set range + bearing. Difficulty (and flight time) scale with distance.
+- **Build — a clean stepped stack:** pick AIRFRAME → PROPULSION → GUIDANCE → WARHEAD as cards, with a live capability readout (max range, accuracy class, mass, cost) and a hard reach check — a single-stage motor simply cannot make 5,000 miles.
+- **Dial-in — the firing solution, by hand:** the pad hands you a deliberately *wrong* solution. Dial ELEVATION (loft), AZIMUTH (to a tenth of a degree), BURN CUTOFF (range set), and align the GUIDANCE GYRO on the bench. A nav computer rates the solution coarse → close → nominal, but never gives the answer.
+- **Flight — real-time mission control:** a live trajectory plot with the article arcing to the target, telemetry (altitude / downrange / velocity), tracking-station handoffs, and a WARP button. Duration is honest to distance — ~5 s at 5 miles, ~47 s at 1,000, ~93 s at 5,000.
+- **The skill is everything:** careless dialing misses by tens of miles (worse the farther out); a tight solution + the right guidance can bullseye any range. Verified — random launch missed by 71 mi, a dialed-in launch hit at 0.29 mi.
+
 ## ✅ SHIPPED — The full graphics rework (three-artist pass)
 
 A ground-up visual rebuild by three specialists working in parallel, integrated and re-verified:

@@ -3501,7 +3501,7 @@
   }
 
   /* ================= SCREENS / FLOW ================= */
-  var screens = ['scr-title', 'scr-hq', 'scr-bids', 'scr-board', 'scr-museum', 'scr-rfp', 'scr-score'];
+  var screens = ['scr-title', 'scr-hq', 'scr-bids', 'scr-board', 'scr-museum', 'scr-rfp', 'scr-score', 'scr-longshot'];
   function showScreen(id) {
     screens.forEach(function (s) { $(s).classList.toggle('active', s === id); });
   }
@@ -8523,9 +8523,19 @@
             (sandbox ? ' Yes, even here — the buyers have standards.' : ''),
         WS().types.length ? '' : 'locked',
         WS().types.length ? '' : '<span class="hd-badge warn">NO TYPES</span>') +
+      door('hq-longshot', 'THE FAR GATE', 'THE LONG SHOT PROGRAM',
+        waLocked ? 'Strategic range: put a target 1 to 5,000 miles out and thread it. Win one contract to open the program.'
+          : 'Pick a target anywhere from 1 to 5,000 miles. Build the article, dial the firing solution by hand, watch it fly. Precision is everything.',
+        waLocked ? 'locked' : (sandbox ? 'primary' : ''),
+        waLocked ? '<span class="hd-badge warn">CLEARANCE</span>' : '<span class="hd-badge">1–5000 MI</span>') +
       door('hq-museum', 'THE LONG HALL', 'THE MUSEUM',
         'Framed disasters, brass firsts, best-crater plaques.', '', '') +
       '<button id="hq-gate" type="button">← THE GATE · CHANGE MODE</button>';
+    $('hq-longshot').addEventListener('click', function () {
+      PGAudio.init();
+      if (waLocked) { PGAudio.buzz(); toast('Win one contract first — the Program vets its contractors.'); return; }
+      PGAudio.tap(); stopHqTimer(); showLongShot();
+    });
     $('hq-gate').addEventListener('click', function () {
       PGAudio.tap(); stopHqTimer();
       S.phase = 'title';
@@ -8628,8 +8638,10 @@
   }
   $('gyro-close').addEventListener('click', function () {
     PGAudio.tap();
+    var wasLs = gyroSt && gyroSt.lsTarget;
     if (gyroSt) gyroSt.running = false;
     $('gyro-overlay').classList.add('hidden');
+    if (wasLs) { lsRenderDial(); return; }   // the Long Shot dial-in reclaims the screen
     gyroBtnRefresh();
     refreshHUD();
   });
@@ -8701,8 +8713,8 @@
       if (k >= 1) {
         gyroSt.running = false;
         var q = clamp(gyroSt.good / gyroSt.samples, 0, 1);
-        S.assembly.gyroCal = Math.round(q * 100) / 100;
-        saveBench();
+        if (gyroSt.lsTarget && S.ls) { S.ls.dial.gyro = Math.round(q * 100) / 100; }
+        else { S.assembly.gyroCal = Math.round(q * 100) / 100; saveBench(); }
         var grade = q >= 0.85 ? 'FINE ALIGNMENT' : q >= 0.6 ? 'SERVICEABLE' : q >= 0.35 ? 'ROUGH' : 'BARELY CAGED';
         $('gyro-read').textContent = 'LOCKED · ' + Math.round(q * 100) + '% — ' + grade;
         $('gyro-sub').textContent = q >= 0.85
@@ -9580,6 +9592,337 @@
     };
   }
 
+  /* ================= THE LONG SHOT PROGRAM ================= */
+  var LS_MIN = 1, LS_MAX = 5000;   // miles
+  function lsShowPhase(id) {
+    ['ls-mission', 'ls-build', 'ls-dial', 'ls-flight', 'ls-result'].forEach(function (p) {
+      $(p).classList.toggle('hidden', p !== id);
+    });
+  }
+  function lsDifficulty(mi) {
+    return mi <= 50 ? { c: 'd-easy', t: 'SHORT RANGE · FORGIVING' }
+         : mi <= 600 ? { c: 'd-med', t: 'MEDIUM RANGE · STEADY HANDS' }
+         : mi <= 2500 ? { c: 'd-hard', t: 'LONG RANGE · UNFORGIVING' }
+         : { c: 'd-max', t: 'STRATEGIC RANGE · A FRACTION OF A DEGREE MATTERS' };
+  }
+  function showLongShot() {
+    if (!S.ls) S.ls = { rangeMi: 250, bearing: 127, build: PG2.lsBuildDefault(), dial: null, result: null };
+    S.phase = 'longshot';
+    showUI(null);
+    lsShowPhase('ls-mission');
+    lsRenderMission();
+    showScreen('scr-longshot');
+  }
+  /* ---------- PHASE 1: the tactical target map ---------- */
+  function lsMapGeom() { return { cx: 160, cy: 160, rMax: 132, rMin: 14 }; }
+  function lsRangeToR(mi) {   // log scale: 1mi near centre, 5000mi at the rim
+    var g = lsMapGeom();
+    var t = Math.log(mi / LS_MIN) / Math.log(LS_MAX / LS_MIN);
+    return g.rMin + t * (g.rMax - g.rMin);
+  }
+  function lsRToRange(r) {
+    var g = lsMapGeom();
+    var t = clamp((r - g.rMin) / (g.rMax - g.rMin), 0, 1);
+    return clamp(Math.round(LS_MIN * Math.pow(LS_MAX / LS_MIN, t)), LS_MIN, LS_MAX);
+  }
+  function lsRenderMission() {
+    var g = lsMapGeom(), svg = $('ls-map'), s = '';
+    // range rings + labels
+    [10, 100, 1000, 5000].forEach(function (mi) {
+      var r = lsRangeToR(mi);
+      s += '<circle class="lm-ring" cx="' + g.cx + '" cy="' + g.cy + '" r="' + r.toFixed(1) + '"/>';
+      s += '<text class="lm-ring-lbl" x="' + g.cx + '" y="' + (g.cy - r + 9).toFixed(1) + '" text-anchor="middle">' + (mi >= 1000 ? (mi / 1000) + 'K' : mi) + ' MI</text>';
+    });
+    // compass spokes + cardinal marks
+    ['N', 'E', 'S', 'W'].forEach(function (d, i) {
+      var a = i * 90 * Math.PI / 180;
+      s += '<line class="lm-spoke" x1="' + g.cx + '" y1="' + g.cy + '" x2="' + (g.cx + Math.sin(a) * g.rMax) + '" y2="' + (g.cy - Math.cos(a) * g.rMax) + '"/>';
+      s += '<text class="lm-ring-lbl" x="' + (g.cx + Math.sin(a) * (g.rMax + 8)) + '" y="' + (g.cy - Math.cos(a) * (g.rMax + 8) + 3) + '" text-anchor="middle">' + d + '</text>';
+    });
+    // launch site
+    s += '<circle class="lm-site-ring" cx="' + g.cx + '" cy="' + g.cy + '" r="7"/><circle class="lm-site" cx="' + g.cx + '" cy="' + g.cy + '" r="2.5"/>';
+    // the target
+    var tr = lsRangeToR(S.ls.rangeMi), ta = S.ls.bearing * Math.PI / 180;
+    var tx = g.cx + Math.sin(ta) * tr, ty = g.cy - Math.cos(ta) * tr;
+    s += '<line class="lm-line" x1="' + g.cx + '" y1="' + g.cy + '" x2="' + tx.toFixed(1) + '" y2="' + ty.toFixed(1) + '"/>';
+    s += '<circle class="lm-target-ring" cx="' + tx.toFixed(1) + '" cy="' + ty.toFixed(1) + '" r="8"/><circle class="lm-target" cx="' + tx.toFixed(1) + '" cy="' + ty.toFixed(1) + '" r="3.5"/>';
+    svg.innerHTML = s;
+    var d = lsDifficulty(S.ls.rangeMi);
+    $('ls-mission-read').innerHTML = 'TARGET · <b>' + S.ls.rangeMi.toLocaleString() + ' mi</b> · BEARING <b>' + Math.round(S.ls.bearing) + '°</b><br>' +
+      'FLIGHT TIME ≈ ' + PG2.lsFlightTime(S.ls.rangeMi).toFixed(0) + ' s<br><span class="diff ' + d.c + '">' + d.t + '</span>';
+  }
+  (function () {
+    var svg = $('ls-map'), drag = false;
+    function place(e) {
+      var r = svg.getBoundingClientRect(), g = lsMapGeom();
+      var mx = (e.clientX - r.left) / r.width * 320 - g.cx;
+      var my = (e.clientY - r.top) / r.height * 320 - g.cy;
+      var rr = Math.hypot(mx, my);
+      S.ls.rangeMi = lsRToRange(rr);
+      var brg = Math.atan2(mx, -my) * 180 / Math.PI;   // 0=N, clockwise
+      S.ls.bearing = (brg + 360) % 360;
+      lsRenderMission();
+    }
+    svg.addEventListener('pointerdown', function (e) { if (S.phase !== 'longshot') return; drag = true; svg.setPointerCapture(e.pointerId); place(e); });
+    svg.addEventListener('pointermove', function (e) { if (drag) place(e); });
+    svg.addEventListener('pointerup', function () { drag = false; });
+    svg.addEventListener('pointercancel', function () { drag = false; });
+  })();
+  $('ls-mission-back').addEventListener('click', function () { PGAudio.tap(); showHQ(); });
+  $('ls-mission-go').addEventListener('click', function () { PGAudio.tap(); lsRenderBuild(); lsShowPhase('ls-build'); });
+
+  /* ---------- PHASE 2: the stepped builder ---------- */
+  function lsRenderBuild() {
+    $('ls-build-target').textContent = 'TARGET ' + S.ls.rangeMi.toLocaleString() + ' MI · BRG ' + Math.round(S.ls.bearing) + '°';
+    var wrap = $('ls-build-steps');
+    wrap.innerHTML = '';
+    PG2.LS_STEPS.forEach(function (step) {
+      var row = document.createElement('div'); row.className = 'ls-step';
+      var opts = step.order.map(function (id) {
+        var o = step.cat[id], on = S.ls.build[step.key] === id;
+        return '<button type="button" class="ls-opt' + (on ? ' on' : '') + '" data-step="' + step.key + '" data-opt="' + id + '">' +
+          '<div class="lo-name">' + o.name + '</div><div class="lo-sub">' + o.sub + '</div></button>';
+      }).join('');
+      row.innerHTML = '<div class="ls-step-h">' + step.label + '</div><div class="ls-opts">' + opts + '</div>';
+      wrap.appendChild(row);
+    });
+    wrap.querySelectorAll('.ls-opt').forEach(function (b) {
+      b.addEventListener('click', function () {
+        PGAudio.tick();
+        S.ls.build[b.dataset.step] = b.dataset.opt;
+        lsRenderBuild();
+      });
+    });
+    var cap = PG2.lsCapability(S.ls.build);
+    var reaches = S.ls.rangeMi <= cap.rangeMax;
+    $('ls-build-caps').innerHTML =
+      'MAX RANGE <b>' + cap.rangeMax.toLocaleString() + ' mi</b>' +
+      ' · ACCURACY <b>' + cap.accClass + '</b>' +
+      ' · MASS <b>' + cap.mass + ' kg</b>' +
+      ' · COST <b>' + fmt$(cap.cost) + '</b>' +
+      ' · <span class="' + (reaches ? 'reach-ok' : 'reach-no') + '">' + (reaches ? 'REACHES TARGET ✓' : 'CANNOT REACH — BIGGER MOTOR') + '</span>';
+    $('ls-build-go').disabled = !reaches;
+  }
+  $('ls-build-back').addEventListener('click', function () { PGAudio.tap(); lsRenderMission(); lsShowPhase('ls-mission'); });
+  $('ls-build-go').addEventListener('click', function () {
+    PGAudio.tap();
+    var opt = PG2.lsOptimal(S.ls.build, S.ls.rangeMi, S.ls.bearing);
+    // the pad hands you a rough, WRONG starting solution — dialing it in is the game
+    S.ls.dial = { elev: 45, azimuth: (S.ls.bearing + 18) % 360, rangeSet: Math.round(opt.rangeSet * 0.7), gyro: null };
+    S.ls.rangeMax = opt.rangeMax;
+    lsRenderDial(); lsShowPhase('ls-dial');
+  });
+
+  /* ---------- PHASE 3: dial-in the firing solution ---------- */
+  function lsSlider(name, goal, valHtml, frac, onFrac, fine) {
+    var fineBtns = fine ? '<div class="ls-fine">' + fine.map(function (f, i) {
+      return '<button type="button" data-fine="' + f.d + '">' + f.t + '</button>'; }).join('') + '</div>' : '';
+    return '<div class="ls-dial-row" data-dial="' + name + '">' +
+      '<div class="ld-top"><span class="ld-name">' + name + '</span><span class="ld-goal">' + goal + '</span></div>' +
+      '<div class="ld-val">' + valHtml + '</div>' +
+      '<div class="ls-slider"><div class="lsl-fill" style="width:' + (frac * 100) + '%"></div><div class="lsl-knob" style="left:' + (frac * 100) + '%"></div></div>' +
+      fineBtns + '</div>';
+  }
+  function lsRenderDial() {
+    S.phase = 'longshot';
+    showScreen('scr-longshot');
+    lsShowPhase('ls-dial');
+    var d = S.ls.dial, rmax = S.ls.rangeMax;
+    $('ls-dial-target').textContent = 'TARGET ' + S.ls.rangeMi.toLocaleString() + ' MI · BRG ' + Math.round(S.ls.bearing) + '°';
+    var wrap = $('ls-dials');
+    wrap.innerHTML =
+      lsSlider('ELEVATION', 'LOFT · 45° IS EFFICIENT', d.elev.toFixed(1) + '<small>°</small>', (d.elev - 20) / 50, null,
+        [{ d: -1, t: '−1°' }, { d: -0.1, t: '−0.1°' }, { d: 0.1, t: '+0.1°' }, { d: 1, t: '+1°' }]) +
+      lsSlider('AZIMUTH', 'MATCH BEARING ' + Math.round(S.ls.bearing) + '°', d.azimuth.toFixed(1) + '<small>°</small>', d.azimuth / 360, null,
+        [{ d: -1, t: '−1°' }, { d: -0.1, t: '−0.1°' }, { d: 0.1, t: '+0.1°' }, { d: 1, t: '+1°' }]) +
+      lsSlider('BURN CUTOFF', 'RANGE SET · ≤ ' + rmax.toLocaleString() + ' MI', Math.round(d.rangeSet).toLocaleString() + '<small> mi</small>', d.rangeSet / rmax, null,
+        [{ d: -50, t: '−50' }, { d: -5, t: '−5' }, { d: 5, t: '+5' }, { d: 50, t: '+50' }]) +
+      '<div class="ls-dial-row"><div class="ld-top"><span class="ld-name">GUIDANCE GYRO</span><span class="ld-goal">' + S.ls.build.guidance.toUpperCase() + ' PACKAGE</span></div>' +
+      '<button type="button" id="ls-gyro-btn" class="ls-gyro-btn' + (d.gyro == null ? ' warn' : '') + '">' +
+      (d.gyro == null ? '⟲ ALIGN THE GYRO — UNCAGED' : '⟲ GYRO ALIGNED ' + Math.round(d.gyro * 100) + '% · RE-RUN') + '</button></div>';
+    // wire sliders
+    wrap.querySelectorAll('.ls-dial-row[data-dial]').forEach(function (row) {
+      var name = row.dataset.dial, sl = row.querySelector('.ls-slider');
+      function setFrac(fr) {
+        fr = clamp(fr, 0, 1);
+        if (name === 'ELEVATION') d.elev = 20 + fr * 50;
+        else if (name === 'AZIMUTH') d.azimuth = fr * 360;
+        else d.rangeSet = fr * rmax;
+        lsRenderDial();
+      }
+      sl.addEventListener('pointerdown', function (e) { sl.setPointerCapture(e.pointerId); sl._drag = true; var r = sl.getBoundingClientRect(); setFrac((e.clientX - r.left) / r.width); });
+      sl.addEventListener('pointermove', function (e) { if (!sl._drag) return; var r = sl.getBoundingClientRect(); setFrac((e.clientX - r.left) / r.width); });
+      sl.addEventListener('pointerup', function () { sl._drag = false; });
+      row.querySelectorAll('.ls-fine button').forEach(function (fb) {
+        fb.addEventListener('click', function () {
+          PGAudio.tick();
+          var dv = parseFloat(fb.dataset.fine);
+          if (name === 'ELEVATION') d.elev = clamp(d.elev + dv, 20, 70);
+          else if (name === 'AZIMUTH') d.azimuth = (d.azimuth + dv + 360) % 360;
+          else d.rangeSet = clamp(d.rangeSet + dv, 1, rmax);
+          lsRenderDial();
+        });
+      });
+    });
+    $('ls-gyro-btn').addEventListener('click', function () {
+      PGAudio.tap();
+      openGyroBench();
+      gyroSt.lsTarget = true;   // route the capture back to the firing solution
+    });
+    // soft nav-computer read: how close the solution looks (never the exact answer)
+    var opt = PG2.lsOptimal(S.ls.build, S.ls.rangeMi, S.ls.bearing);
+    var eAz = Math.abs(PG2.lsAngDiff(d.azimuth, S.ls.bearing));
+    var eEl = Math.abs(d.elev - 45);
+    var eRs = Math.abs(d.rangeSet - opt.rangeSet) / Math.max(S.ls.rangeMi, 1);
+    var score = eAz / 3 + eEl / 8 + eRs * 6 + (d.gyro == null ? 1.5 : (1 - d.gyro) * 1.2);
+    var tag = score < 0.6 ? ['sol-nominal', 'NOMINAL — SEND IT'] : score < 1.8 ? ['sol-close', 'CLOSE — TIGHTEN IT'] : ['sol-coarse', 'COARSE — KEEP DIALING'];
+    $('ls-solution').innerHTML = 'NAV COMPUTER · SOLUTION QUALITY: <b class="' + tag[0] + '">' + tag[1] + '</b>';
+  }
+  $('ls-dial-back').addEventListener('click', function () { PGAudio.tap(); lsRenderBuild(); lsShowPhase('ls-build'); });
+  $('ls-dial-launch').addEventListener('click', function () {
+    PGAudio.init(); PGAudio.armLatch();
+    S.ls.seed = PG2.makeSeed().toUpperCase();
+    S.ls.result = PG2.lsResolve(S.ls.build, S.ls.dial, S.ls.rangeMi, S.ls.bearing, S.ls.seed);
+    lsFlight();
+  });
+
+  /* ---------- PHASE 4: real-time mission-control flight ---------- */
+  var lsFly = null;
+  function lsFlight() {
+    lsShowPhase('ls-flight');
+    var res = S.ls.result;
+    var W2 = 360, H2 = 200;
+    // static arc backdrop (ghost = planned parabola to target; live arc fills over it)
+    var tgtX = W2 * 0.9;
+    var apexY = clamp(H2 - 20 - (res.apogeeMi / Math.max(res.targetMi, 1)) * 260, 24, H2 - 60);
+    var grid = '';
+    for (var gx = 0; gx <= W2; gx += 45) grid += '<line class="mca-grid" x1="' + gx + '" y1="0" x2="' + gx + '" y2="' + H2 + '"/>';
+    for (var gy = 0; gy <= H2; gy += 40) grid += '<line class="mca-grid" x1="0" y1="' + gy + '" x2="' + W2 + '" y2="' + gy + '"/>';
+    $('ls-mc-arc').innerHTML = grid +
+      '<line class="mca-ground" x1="0" y1="' + (H2 - 18) + '" x2="' + W2 + '" y2="' + (H2 - 18) + '"/>' +
+      '<path class="mca-arc-ghost" d="M 20 ' + (H2 - 18) + ' Q ' + (tgtX / 2) + ' ' + (apexY - 30) + ' ' + tgtX + ' ' + (H2 - 18) + '"/>' +
+      '<path class="mca-arc" id="mca-live" d=""/>' +
+      '<circle class="mca-target" cx="' + tgtX + '" cy="' + (H2 - 18) + '" r="4"/>' +
+      '<circle class="mca-missile" id="mca-m" cx="20" cy="' + (H2 - 18) + '" r="3.5"/>' +
+      '<text class="mca-lbl" x="' + tgtX + '" y="' + (H2 - 24) + '" text-anchor="middle">TGT</text>';
+    // track handoff nodes
+    var stations = ['LAUNCH', 'DOWNRANGE 1', 'MID-COURSE', 'TRACKING 7', 'TERMINAL'];
+    var tk = '';
+    stations.forEach(function (st, i) {
+      var x = 20 + i * (320 / (stations.length - 1));
+      tk += '<line class="mct-line" id="mct-l' + i + '" x1="' + (i ? 20 + (i - 1) * (320 / (stations.length - 1)) : 20) + '" y1="20" x2="' + x + '" y2="20"/>';
+    });
+    stations.forEach(function (st, i) {
+      var x = 20 + i * (320 / (stations.length - 1));
+      tk += '<circle class="mct-node" id="mct-n' + i + '" cx="' + x + '" cy="20" r="3"/>' +
+        '<text class="mct-lbl" x="' + x + '" y="34" text-anchor="middle">' + st + '</text>';
+    });
+    $('ls-mc-track').innerHTML = tk;
+    $('ls-warp').classList.remove('on');
+    lsFly = { t0: performance.now(), dur: res.flightT, warp: 1, res: res, W2: W2, H2: H2, tgtX: tgtX, apexY: apexY,
+              stations: stations, lastStation: -1, done: false, raf: 0 };
+    lsFlyStep();
+  }
+  function lsFlyStep() {
+    if (!lsFly || lsFly.done) return;
+    var now = performance.now();
+    var el = (now - lsFly.t0) / 1000 * lsFly.warp;
+    var k = clamp(el / lsFly.dur, 0, 1);
+    var res = lsFly.res, W2 = lsFly.W2, H2 = lsFly.H2, tgtX = lsFly.tgtX;
+    // trajectory: parabola; downrange fraction = k, height = arc. Terminal drifts to the ACTUAL impact.
+    var groundY = H2 - 18;
+    var landFrac = res.reachable ? clamp((res.targetMi + res.downMi) / res.targetMi, 0.2, 1.25) : (res.cap.rangeMax / res.targetMi);
+    var mx = 20 + k * (tgtX - 20) * (res.reachable ? 1 : landFrac);
+    var arcH = Math.sin(k * Math.PI) * (groundY - lsFly.apexY);
+    var my = groundY - arcH;
+    $('mca-m').setAttribute('cx', mx.toFixed(1));
+    $('mca-m').setAttribute('cy', my.toFixed(1));
+    // live arc path
+    var pts = 'M 20 ' + groundY;
+    for (var i = 1; i <= 24; i++) {
+      var kk = k * i / 24;
+      var px = 20 + kk * (tgtX - 20) * (res.reachable ? 1 : landFrac);
+      var py = groundY - Math.sin(kk * Math.PI) * (groundY - lsFly.apexY);
+      pts += ' L ' + px.toFixed(1) + ' ' + py.toFixed(1);
+    }
+    $('mca-live').setAttribute('d', pts);
+    // clock + phase + telemetry
+    var secs = el;
+    $('ls-mc-clock').textContent = 'T+' + String(Math.floor(secs / 60)).padStart(2, '0') + ':' + (secs % 60).toFixed(1).padStart(4, '0');
+    var phase = k < 0.12 ? 'BOOST' : k < 0.45 ? 'ASCENT' : k < 0.62 ? 'APOGEE' : k < 0.9 ? 'DESCENT' : 'TERMINAL';
+    $('ls-mc-phase').textContent = phase;
+    var alt = Math.round(arcH / (groundY - lsFly.apexY) * res.apogeeMi * 5.28 * 1000);   // ~feet, flavour
+    var downrange = Math.round(k * res.targetMi);
+    var vel = Math.round((res.targetMi * 3600 / lsFly.dur) * (0.6 + 0.8 * Math.cos(k * Math.PI)) );
+    $('ls-mc-tele').innerHTML =
+      '<div class="t-cell"><div class="t-lbl">ALTITUDE</div><div class="t-val">' + Math.max(0, alt).toLocaleString() + ' ft</div></div>' +
+      '<div class="t-cell"><div class="t-lbl">DOWNRANGE</div><div class="t-val">' + downrange.toLocaleString() + ' mi</div></div>' +
+      '<div class="t-cell"><div class="t-lbl">VELOCITY</div><div class="t-val">' + Math.max(0, vel).toLocaleString() + ' mph</div></div>';
+    // station handoffs
+    var stIdx = Math.min(lsFly.stations.length - 1, Math.floor(k * lsFly.stations.length));
+    if (stIdx > lsFly.lastStation) {
+      lsFly.lastStation = stIdx;
+      for (var n = 0; n <= stIdx; n++) { $('mct-n' + n).classList.add('on'); if (n > 0) $('mct-l' + n).classList.add('mct-done'); }
+      PGAudio.tick();
+      var caps = ['Ignition. The article clears the rail.', 'Downrange station has it — telemetry nominal.',
+        'Mid-course. The gyro holds the line, or it doesn’t.', 'Tracking Seven has acquired. Terminal geometry locking.',
+        'Terminal. The desert comes up to meet it.'];
+      $('ls-mc-caption').textContent = caps[stIdx];
+    }
+    if (k >= 1) { lsFly.done = true; lsImpact(); return; }
+    lsFly.raf = requestAnimationFrame(lsFlyStep);
+  }
+  $('ls-warp').addEventListener('click', function () {
+    if (!lsFly) return;
+    PGAudio.tap();
+    lsFly.warp = lsFly.warp === 1 ? 4 : 1;
+    // keep elapsed continuous when changing warp
+    var elapsed = (performance.now() - lsFly.t0) / 1000 * (lsFly.warp === 4 ? 1 : 4);
+    lsFly.t0 = performance.now() - elapsed * 1000 / lsFly.warp;
+    $('ls-warp').classList.toggle('on', lsFly.warp === 4);
+    $('ls-warp').textContent = lsFly.warp === 4 ? '►► 4×' : '► WARP';
+  });
+  function lsImpact() {
+    var res = S.ls.result;
+    PGAudio.detonation(clamp(res.cap.bang, 0.3, 1.4), false);
+    if (res.hit) PGAudio.fanfare(); else PGAudio.sadDrone();
+    // a flash on the arc at the impact point
+    $('ls-mc-caption').textContent = res.reachable
+      ? (res.hit ? 'IMPACT. ' + res.grade + '.' : 'Impact — ' + res.missMi.toFixed(1) + ' miles off. ' + res.grade + '.')
+      : 'Splashed short — out of fuel ' + Math.round(res.targetMi - res.cap.rangeMax) + ' miles from the target.';
+    later(1100, lsResult);
+  }
+  /* ---------- PHASE 5: result ---------- */
+  function lsResult() {
+    lsShowPhase('ls-result');
+    var res = S.ls.result;
+    var gcls = res.hit ? 'g-hit' : res.grade === 'NEAR MISS' ? 'g-near' : 'g-miss';
+    var downTxt = (res.downMi >= 0 ? 'LONG ' : 'SHORT ') + Math.abs(res.downMi).toFixed(1) + ' mi';
+    var crossTxt = (res.crossMi >= 0 ? 'RIGHT ' : 'LEFT ') + Math.abs(res.crossMi).toFixed(1) + ' mi';
+    var fix = res.hit ? 'Textbook. The Program files it under “show-off.”'
+      : !res.reachable ? 'It never had the legs. Bigger motor, or a lighter warhead.'
+      : Math.abs(res.crossMi) > Math.abs(res.downMi)
+        ? 'Cross-range dominated — your azimuth was off. At this range, tenths of a degree are miles.'
+        : 'Downrange dominated — trim the burn cutoff, and keep the loft at 45°.';
+    $('ls-result-card').innerHTML =
+      '<div class="ls-grade ' + gcls + '">' + res.grade + '</div>' +
+      '<div class="ls-miss">MISS DISTANCE <b>' + res.missMi.toFixed(res.missMi < 10 ? 2 : 1) + '</b> mi</div>' +
+      '<div class="ls-breakdown">' +
+        'TARGET <b>' + res.targetMi.toLocaleString() + ' mi</b> · BRG <b>' + Math.round(res.bearingDeg) + '°</b><br>' +
+        'DOWNRANGE ERROR <b>' + downTxt + '</b><br>CROSS-RANGE ERROR <b>' + crossTxt + '</b><br>' +
+        'GUIDANCE <b>' + S.ls.build.guidance.toUpperCase() + '</b> · CEP <b>' + res.cepMi + ' mi</b><br><br>' +
+        fix + '</div>';
+    // sandbox/career reward: a small bounty for a hit, scaled by range
+    if (res.hit && !cashUnlimited()) {
+      var bounty = Math.round(1500 + res.targetMi * 4 * (res.grade === 'DIRECT HIT' ? 1.6 : 1));
+      SAVE.cash += bounty; persist();
+      $('ls-result-card').innerHTML += '<div class="ls-miss" style="margin-top:10px">PROGRAM BOUNTY <b>' + fmt$(bounty) + '</b></div>';
+    }
+  }
+  $('ls-result-tweak').addEventListener('click', function () { PGAudio.tap(); lsRenderDial(); });
+  $('ls-result-new').addEventListener('click', function () { PGAudio.tap(); lsRenderMission(); lsShowPhase('ls-mission'); });
+  $('ls-result-hq').addEventListener('click', function () { PGAudio.tap(); showHQ(); });
+
   /* ================= DEBUG / TEST API ================= */
   window.__pg = {
     state: function () {
@@ -9609,6 +9952,14 @@
       refreshTitle();
     },
     showHQ: function () { showHQ(); },
+    showLongShot: function () { showLongShot(); },
+    lsState: function () { return S.ls ? JSON.parse(JSON.stringify({ rangeMi: S.ls.rangeMi, bearing: S.ls.bearing, build: S.ls.build, dial: S.ls.dial, rangeMax: S.ls.rangeMax, result: S.ls.result, phase: (function () { var ph = ['ls-mission', 'ls-build', 'ls-dial', 'ls-flight', 'ls-result'].filter(function (p) { return !$(p).classList.contains('hidden'); }); return ph[0]; })() })) : null; },
+    lsDialPerfect: function () {   // tests: snap to the intended firing solution
+      if (!S.ls || !S.ls.dial) return;
+      var o = PG2.lsOptimal(S.ls.build, S.ls.rangeMi, S.ls.bearing);
+      S.ls.dial = { elev: 45, azimuth: o.azimuth, rangeSet: o.rangeSet, gyro: 0.95 };
+      lsRenderDial();
+    },
     debugFinishCloseout: function () {
       // tests only: a correct panel, a gentle hand, an armed switch
       PG2.wireCorrect(S.assembly, S.seed, rfp());

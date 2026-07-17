@@ -20,3 +20,10 @@ graphics-rework-bay-workshop done
 graphics-rework-desert-range done
 graphics-rework-parts-targets done
 graphics-rework-integration-verified done
+
+longshot-sim-skill-model done
+longshot-mission-map done
+longshot-stepped-builder done
+longshot-dial-in-firing-solution done
+longshot-realtime-mission-control-flight done
+longshot-e2e-verified done

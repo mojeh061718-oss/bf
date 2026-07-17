@@ -113,6 +113,65 @@
     </div>
   </section>
 
+  <!-- ================= THE LONG SHOT PROGRAM ================= -->
+  <section id="scr-longshot" class="screen">
+    <div class="ls-frame">
+      <!-- PHASE 1: MISSION -->
+      <div id="ls-mission" class="ls-phase">
+        <div class="ls-head"><span class="ls-kick">THE LONG SHOT PROGRAM</span><span class="ls-step-lbl">MISSION · SELECT TARGET</span></div>
+        <div class="ls-map-wrap">
+          <svg id="ls-map" viewBox="0 0 320 320" aria-label="Tactical target map"></svg>
+        </div>
+        <div class="ls-readout" id="ls-mission-read"></div>
+        <div class="ls-btns">
+          <button id="ls-mission-back" type="button" class="ls-ghost">← COMPOUND</button>
+          <button id="ls-mission-go" type="button" class="ls-go">BUILD THE ARTICLE →</button>
+        </div>
+      </div>
+      <!-- PHASE 2: BUILD -->
+      <div id="ls-build" class="ls-phase hidden">
+        <div class="ls-head"><span class="ls-kick" id="ls-build-target"></span><span class="ls-step-lbl">BUILD · PICK YOUR STACK</span></div>
+        <div class="ls-steps" id="ls-build-steps"></div>
+        <div class="ls-caps" id="ls-build-caps"></div>
+        <div class="ls-btns">
+          <button id="ls-build-back" type="button" class="ls-ghost">← MISSION</button>
+          <button id="ls-build-go" type="button" class="ls-go">TO THE PAD →</button>
+        </div>
+      </div>
+      <!-- PHASE 3: DIAL-IN -->
+      <div id="ls-dial" class="ls-phase hidden">
+        <div class="ls-head"><span class="ls-kick" id="ls-dial-target"></span><span class="ls-step-lbl">DIAL-IN · THE FIRING SOLUTION</span></div>
+        <div class="ls-dials" id="ls-dials"></div>
+        <div class="ls-solution" id="ls-solution"></div>
+        <div class="ls-btns">
+          <button id="ls-dial-back" type="button" class="ls-ghost">← BUILD</button>
+          <button id="ls-dial-launch" type="button" class="ls-go launch">LAUNCH ▲</button>
+        </div>
+      </div>
+      <!-- PHASE 4: FLIGHT (mission control) -->
+      <div id="ls-flight" class="ls-phase hidden">
+        <div class="ls-mc-top">
+          <span id="ls-mc-clock">T+00:00</span>
+          <span id="ls-mc-phase">BOOST</span>
+          <button id="ls-warp" type="button">► WARP</button>
+        </div>
+        <div class="ls-mc-arc-wrap"><svg id="ls-mc-arc" viewBox="0 0 360 200" preserveAspectRatio="none"></svg></div>
+        <div class="ls-mc-tele" id="ls-mc-tele"></div>
+        <div class="ls-mc-track-wrap"><svg id="ls-mc-track" viewBox="0 0 360 40"></svg></div>
+        <div class="ls-mc-caption" id="ls-mc-caption"></div>
+      </div>
+      <!-- PHASE 5: RESULT -->
+      <div id="ls-result" class="ls-phase hidden">
+        <div class="ls-result-card" id="ls-result-card"></div>
+        <div class="ls-btns">
+          <button id="ls-result-tweak" type="button" class="ls-ghost">TWEAK &amp; REFIRE</button>
+          <button id="ls-result-new" type="button" class="ls-go">NEW MISSION</button>
+        </div>
+        <button id="ls-result-hq" type="button" class="ls-exit">THE COMPOUND</button>
+      </div>
+    </div>
+  </section>
+
   <!-- target picker: which object measures you tonight -->
   <div id="target-overlay" class="overlay hidden">
     <div class="tgt-card">
