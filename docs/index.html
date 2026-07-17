@@ -172,6 +172,20 @@
     </div>
   </section>
 
+  <!-- Long Shot: the 3D terminal-descent HUD (shown over the #gl canvas) -->
+  <div id="ls-term-hud" class="hidden">
+    <div class="lth-top"><span class="rec-dot"></span><span id="lth-clock">TERMINAL</span></div>
+    <div class="lth-caption" id="lth-caption"></div>
+  </div>
+  <!-- Long Shot: the program record board -->
+  <div id="ls-records-overlay" class="overlay hidden">
+    <div class="ls-records-card">
+      <div class="set-head">THE LONG SHOT PROGRAM · RECORD BOARD</div>
+      <div id="ls-records-list"></div>
+      <button id="ls-records-close" type="button">BACK</button>
+    </div>
+  </div>
+
   <!-- target picker: which object measures you tonight -->
   <div id="target-overlay" class="overlay hidden">
     <div class="tgt-card">

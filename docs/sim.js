@@ -1703,44 +1703,76 @@ var PG2 = (function () {
   /* real-time flight duration: 5mi≈5s, 1000mi≈45s, 5000mi≈~93s */
   function lsFlightTime(mi) { return clamp(2.587 * Math.pow(Math.max(mi, 1), 0.42), 4, 100); }
   /* dial: { elev(deg 20..70), azimuth(deg 0..360), rangeSet(miles, ≤rangeMax), gyro(0..1|null) } */
-  function lsResolve(b, dial, targetMi, bearingDeg, seed) {
-    var cap = lsCapability(b);
-    var gu = cap.guidance;
-    var g = dial.gyro == null ? 0 : dial.gyro;                 // uncaged gyro = no drift help
-    var elevRad = dial.elev * Math.PI / 180;
-    // achieved downrange = burn-cutoff range · loft efficiency (peaks at 45°)
-    var elevEff = Math.max(0, Math.sin(2 * elevRad));
+  var LS_TARGET_TYPES = {
+    static:   { id: 'static',   name: 'FIXED INSTALLATION', sub: 'STANDS STILL · ANY WARHEAD' },
+    hardened: { id: 'hardened', name: 'HARDENED BUNKER',    sub: 'NEEDS A HEAVY WARHEAD OR A DIRECT HIT' },
+    moving:   { id: 'moving',   name: 'MOVING CONVOY',      sub: 'DRIFTS IN FLIGHT · LEAD IT' }
+  };
+  /* where a moving target will be at impact — solve the lead (2 iterations) */
+  function lsIntercept(curMi, curBrg, speedMph, headingDeg, capReachMi) {
+    var cx = curMi * Math.sin(curBrg * Math.PI / 180), cy = curMi * Math.cos(curBrg * Math.PI / 180);
+    var hx = Math.sin(headingDeg * Math.PI / 180), hy = Math.cos(headingDeg * Math.PI / 180);
+    var mi = curMi;
+    for (var it = 0; it < 3; it++) {
+      var dist = speedMph * lsFlightTime(mi) / 3600;
+      var nx = cx + hx * dist, ny = cy + hy * dist;
+      mi = Math.hypot(nx, ny);
+    }
+    var fx = cx + hx * (speedMph * lsFlightTime(mi) / 3600), fy = cy + hy * (speedMph * lsFlightTime(mi) / 3600);
+    return { rangeMi: Math.round(Math.hypot(fx, fy)), bearingDeg: (Math.atan2(fx, fy) * 180 / Math.PI + 360) % 360 };
+  }
+  /* dial: {elev,azimuth,rangeSet,gyro}. aim* is the point to hit (intercept for
+     moving). opts.hardened toggles the bunker kill rule. Position-based so any
+     bearing/range works; static stays identical to before. */
+  function lsResolve(b, dial, aimMi, aimBearing, seed, opts) {
+    opts = opts || {};
+    var cap = lsCapability(b), gu = cap.guidance, g = dial.gyro == null ? 0 : dial.gyro;
+    var elevEff = Math.max(0, Math.sin(2 * dial.elev * Math.PI / 180));
     var achieved = Math.min(dial.rangeSet, cap.rangeMax) * elevEff;
-    var rawDown = achieved - targetMi;                          // + long, − short
-    var azErr = angDiffDeg(dial.azimuth, bearingDeg) * Math.PI / 180;
-    var rawCross = targetMi * Math.sin(azErr);                  // cross-range — magnified by distance
-    // guidance corrects a share of the DIAL error, scaled by gyro alignment
-    var correct = gu.corr * (0.4 + 0.6 * g);
-    var down = rawDown * (1 - correct);
-    var cross = rawCross * (1 - correct);
-    // residual random drift (worse guidance + poor alignment + longer range) and intrinsic CEP
-    var drift = gu.driftK * (1 - g) * gauss(stream(seed, 'ls:drift')) * targetMi * 0.010 / Math.max(cap.stab, 0.4);
-    var cep = gu.cepBase * targetMi;
+    var aRad = dial.azimuth * Math.PI / 180, tRad = aimBearing * Math.PI / 180;
+    // where the missile flies (the aimed point) minus where the target is — pure
+    // dial/aim skill, NEVER auto-corrected: the missile delivers to the coordinates
+    // you set, and if you aimed wrong (or failed to lead a convoy) that's on you.
+    var ex = (achieved * Math.sin(aRad) - aimMi * Math.sin(tRad));
+    var ey = (achieved * Math.cos(aRad) - aimMi * Math.cos(tRad));
+    var down  = ex * Math.sin(tRad) + ey * Math.cos(tRad);          // along the target bearing
+    var cross = ex * Math.cos(tRad) - ey * Math.sin(tRad);          // perpendicular
+    // dispersion — guidance sets your grouping, the gyro tightens it further
+    var drift = gu.driftK * (1 - g) * gauss(stream(seed, 'ls:drift')) * aimMi * 0.010 / Math.max(cap.stab, 0.4);
+    var cep = gu.cepBase * aimMi;
     down  += gauss(stream(seed, 'ls:cd')) * cep;
     cross += drift + gauss(stream(seed, 'ls:cc')) * cep;
-    var reachable = targetMi <= cap.rangeMax * 1.02;
+    var reachable = aimMi <= cap.rangeMax * 1.02;
     var missMi = Math.hypot(down, cross);
-    if (!reachable) { down = -(targetMi - cap.rangeMax); cross = 0; missMi = Math.abs(down); }   // out of gas, falls short
-    // grade bands scale with range: forgiving up close, brutal far out
-    var bull = Math.max(0.15, targetMi * 0.0016);
-    var hit  = Math.max(0.5, targetMi * 0.006);
-    var near = Math.max(2.5, targetMi * 0.025);
-    var grade = missMi <= bull ? 'DIRECT HIT' : missMi <= hit ? 'ON TARGET' : missMi <= near ? 'NEAR MISS' : 'MISS';
-    var apogee = Math.min(dial.rangeSet, cap.rangeMax) * 0.22 * (0.5 + Math.sin(elevRad));
+    if (!reachable) { down = -(aimMi - cap.rangeMax); cross = 0; missMi = Math.abs(down); }
+    var bull = Math.max(0.15, aimMi * 0.0016), hit = Math.max(0.5, aimMi * 0.006), near = Math.max(2.5, aimMi * 0.025);
+    var grade, win, destroyed = null;
+    if (opts.hardened) {
+      var pen = cap.bang * (missMi <= bull ? 1.6 : missMi <= hit ? 1.0 : 0.25);
+      destroyed = reachable && pen >= 1.15;
+      win = destroyed;
+      grade = !reachable ? 'FELL SHORT' : destroyed ? 'BUNKER DESTROYED'
+            : missMi <= hit ? 'STRUCK — INTACT' : missMi <= near ? 'NEAR MISS' : 'MISS';
+    } else {
+      win = missMi <= hit && reachable;
+      grade = missMi <= bull ? 'DIRECT HIT' : missMi <= hit ? 'ON TARGET' : missMi <= near ? 'NEAR MISS' : 'MISS';
+    }
+    var apogee = Math.min(dial.rangeSet, cap.rangeMax) * 0.22 * (0.5 + Math.sin(dial.elev * Math.PI / 180));
     return {
-      hit: missMi <= hit && reachable, grade: grade, missMi: missMi, downMi: down, crossMi: cross,
-      achievedMi: achieved, reachable: reachable, flightT: lsFlightTime(targetMi),
-      apogeeMi: apogee, targetMi: targetMi, bearingDeg: bearingDeg, cap: cap, cepMi: Math.round(cep * 10) / 10
+      hit: win, grade: grade, missMi: missMi, downMi: down, crossMi: cross, destroyed: destroyed,
+      achievedMi: achieved, reachable: reachable, flightT: lsFlightTime(aimMi),
+      apogeeMi: apogee, targetMi: aimMi, bearingDeg: aimBearing, cap: cap, cepMi: Math.round(cep * 10) / 10,
+      hardened: !!opts.hardened
     };
   }
+  /* a score for the record board: far + accurate + hard = high */
+  function lsScore(res) {
+    if (!res.hit) return 0;
+    return Math.round(res.targetMi * (1 + 2 / (1 + res.missMi)) * (res.hardened ? 1.4 : 1));
+  }
   /* a competent canned solution — harness + the 'nominal' hint */
-  function lsCannedDial(b, targetMi, bearingDeg) {
-    var o = lsOptimal(b, targetMi, bearingDeg);
+  function lsCannedDial(b, aimMi, aimBearing) {
+    var o = lsOptimal(b, aimMi, aimBearing);
     return { elev: o.elev, azimuth: o.azimuth, rangeSet: o.rangeSet, gyro: 0.95 };
   }
 
@@ -1772,7 +1804,8 @@ var PG2 = (function () {
     /* The Long Shot Program */
     LS_AIRFRAMES: LS_AIRFRAMES, LS_MOTORS: LS_MOTORS, LS_GUIDANCE: LS_GUIDANCE, LS_WARHEADS: LS_WARHEADS, LS_STEPS: LS_STEPS,
     lsBuildDefault: lsBuildDefault, lsCapability: lsCapability, lsOptimal: lsOptimal,
-    lsResolve: lsResolve, lsFlightTime: lsFlightTime, lsCannedDial: lsCannedDial, lsAngDiff: angDiffDeg
+    lsResolve: lsResolve, lsFlightTime: lsFlightTime, lsCannedDial: lsCannedDial, lsAngDiff: angDiffDeg,
+    LS_TARGET_TYPES: LS_TARGET_TYPES, lsIntercept: lsIntercept, lsScore: lsScore
   };
 })();
 

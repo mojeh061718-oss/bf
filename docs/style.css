@@ -1886,3 +1886,27 @@ body.lefty .bay-cta.gyro { left: auto; right: 12px; }
   .ls-map-wrap { flex: 1; }
   #ls-map { width: min(38vh, 300px); }
 }
+
+/* Long Shot — target-type selector, terminal HUD, records */
+.ls-type-row { display: flex; gap: 6px; margin-top: 10px; justify-content: center; }
+.ls-type { font-family: var(--mono); font-size: 8.5px; font-weight: 800; letter-spacing: .1em; color: var(--bp-dim);
+  background: rgba(10,22,38,.7); border: 1px solid var(--bp-line-soft); border-radius: 6px; padding: 7px 11px; }
+.ls-type.on { color: var(--amber-hot); border-color: var(--amber); background: rgba(229,161,61,.12); }
+#ls-term-hud { position: absolute; inset: 0; z-index: 30; pointer-events: none; }
+#ls-term-hud.hidden { display: none; }
+.lth-top { position: absolute; top: calc(16px + var(--sat)); left: 16px; display: flex; align-items: center; gap: 8px;
+  font-family: var(--mono); font-size: 15px; font-weight: 800; color: var(--green-hot); letter-spacing: .06em; text-shadow: 0 1px 4px #000; }
+.lth-caption { position: absolute; left: 0; right: 0; bottom: calc(26px + var(--sab)); text-align: center;
+  font-family: var(--type); font-size: 14px; color: #eef4fb; text-shadow: 0 2px 6px #000; padding: 0 20px; line-height: 1.4; }
+.ls-records-card { width: 100%; max-width: 420px; margin: auto 0; border-radius: 12px; border: 1px solid var(--bp-line);
+  background: linear-gradient(160deg,#0d2036,#081524); padding: 16px 14px calc(14px + var(--sab)); display: flex; flex-direction: column; gap: 8px; }
+#ls-records-list { display: flex; flex-direction: column; gap: 6px; max-height: 60vh; overflow-y: auto; }
+.ls-rec { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding: 8px 10px;
+  border: 1px solid var(--bp-line-soft); border-radius: 7px; background: rgba(6,14,24,.6); font-family: var(--mono); font-size: 9px; }
+.ls-rec .lr-rank { color: var(--amber-hot); font-weight: 800; }
+.ls-rec .lr-main { flex: 1; color: var(--bp-text); letter-spacing: .06em; }
+.ls-rec .lr-score { color: var(--green-hot); font-weight: 800; }
+.ls-rec-empty { font-family: var(--type); font-size: 12px; color: var(--bp-dim); text-align: center; padding: 20px; }
+.ls-sol-row { display: flex; gap: 8px; margin-top: 6px; }
+.ls-sol-row button { flex: 1; font-family: var(--mono); font-size: 9px; font-weight: 800; letter-spacing: .08em;
+  color: var(--bp-bright); background: rgba(16,42,68,.7); border: 1px solid var(--bp-line-soft); border-radius: 7px; padding: 9px; }
