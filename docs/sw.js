@@ -4,7 +4,7 @@
    fresh files and ?seed=/?c= URLs resolve to the cached shell offline. */
 'use strict';
 
-var CACHE_VERSION = 'pg-m3-v1';
+var CACHE_VERSION = 'pg-m3a-v1';
 var PRECACHE = [
   './',
   './index.html',

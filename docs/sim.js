@@ -9,10 +9,17 @@
 
    M2 — Act I complete: eight contracts, the TIMER DIAL
    (a.timerSet), PAYLOAD ARRANGEMENT (energy centre-of-mass →
-   crater offset/ellipse), GLAZE (FROST-derivative stabilizer:
-   calms hot loads, forgives rough seating, resists cook-off),
-   contract heat waves (thermal cook-off), and the Act I boss —
-   a seeded side-by-side FLY-OFF against Vantage Dynamics.
+   crater offset/ellipse), ADDITIVE G-3 (F-2S-derivative
+   stabilizer: calms hot loads, forgives rough seating, resists
+   cook-off), contract heat waves (thermal cook-off), and the
+   Act I boss — a seeded side-by-side FLY-OFF vs Vantage.
+
+   M3a — nomenclature (stockroom mil-spec designations, all
+   invented): FILLER 1A (F-1A), FILLER 2S (F-2S), FILLER 1X
+   (F-1X), ADDITIVE G-3 (G-3). Internal keys stay ember/frost/
+   emberx/glaze — display names carry the supply-chain fiction.
+   Plus: CATALOG WAVE 1 (ten new parts), BUILD PHASES metadata,
+   and RFP-066 "SKIPSTONE" (impact-fuze drop test).
    ============================================================ */
 'use strict';
 
@@ -65,7 +72,7 @@ var PG2 = (function () {
       meterMax: 50,
       timeOfDay: 'noon',
       wind: { dir: 200, speed: 0.7 },
-      clause: 'Raw EMBER will not do. The Authority suggests, without legally suggesting anything, that the contractor owns a refinery.',
+      clause: 'Raw FILLER 1A will not do. The Authority suggests, without legally suggesting anything, that the contractor owns a refinery.',
       needsRefinery: true
     },
     {
@@ -98,7 +105,7 @@ var PG2 = (function () {
       meterMax: 30,
       timeOfDay: 'noon',
       wind: { dir: 150, speed: 0.12 },
-      clause: 'Forecast for the pan: 47° in the shade, of which there is none. The Authority accepts no liability for what EMBER thinks about that.',
+      clause: 'Forecast for the pan: 47° in the shade, of which there is none. The Authority accepts no liability for what FILLER 1A thinks about that.',
       clause2: '11.3(d): devices that fire without being asked will be billed as "unscheduled demonstrations".',
       needsRefinery: true
     },
@@ -152,6 +159,25 @@ var PG2 = (function () {
       clause: 'SIDE-BY-SIDE DEMONSTRATION. Two pads, one contract, one column in the trade paper. Vantage Dynamics has filed, catered, and printed the commemorative pens.',
       clause2: '14.1(a): adjudication is line by line against the competing article. Ties go to the closer crater. Weeping is permitted after the board departs.',
       needsRefinery: true
+    },
+    {
+      idx: 8,
+      id: 'RFP-066',
+      title: 'SKIPSTONE',
+      form: 'FORM RD-1147-D',
+      craterMin: 15, craterMax: 18,
+      budget: 2600,
+      tSpec: 3.0, tTol: 0.4,            // T+3.0 is the RELEASE cue; the ground provides the rest
+      impact: { band: 2.2, missLimit: 4.5, drift: 5.5, scatter: 0.5 },
+      dropH: 12,                        // rig-arm height (presentation)
+      unlockAfter: 'RFP-057',           // a 9th folder, pinned once SHAPED is won
+      payout: 9500, bonusClean: 800,
+      meterMax: 24,
+      timeOfDay: 'dawn',
+      wind: { dir: 260, speed: 0.4 },
+      clause: 'The article shall be DROPPED, from the rig, onto the painted plate. The Authority has waived the timing spec: the ground will provide the cue, as the ground reliably does.',
+      clause2: '12.4(c): the crater shall centre on the plate band. The blast goes where the load leans, and the lean goes where you loaded it. Trim accordingly.',
+      needsRefinery: false
     }
   ];
   var CONTRACT_BY_ID = {};
@@ -165,43 +191,79 @@ var PG2 = (function () {
     compact:  { id: 'compact',  name: 'SMALL SHELL',    slots: 2, cost: 300, w: 12,
                 stab: 0.55, blurb: 'Two canister bays. Cheap, cosy, easily overwhelmed.' },
     standard: { id: 'standard', name: 'STANDARD SHELL', slots: 4, cost: 450, w: 20,
-                stab: 0.80, blurb: 'Four bays. The sensible one.' },
+                stab: 0.80, rated: true, blurb: 'Four bays. The sensible one.' },
     heavy:    { id: 'heavy',    name: 'BIG SHELL',      slots: 6, cost: 650, w: 30,
-                stab: 1.01, blurb: 'Six bays and the patience of a bank vault.' }
+                stab: 1.01, rated: true, blurb: 'Six bays and the patience of a bank vault.' },
+    /* CATALOG WAVE 1 (M3a) */
+    thinwall: { id: 'thinwall', name: 'THIN-WALL SHELL', slots: 4, cost: 340, w: 13,
+                stab: 0.62, fragile: true,
+                blurb: 'Four bays at featherweight prices. Handles like a soap bubble with opinions — cook-off and handling risks up.' },
+    segmented:{ id: 'segmented', name: 'SEGMENTED CASING', slots: 4, cost: 560, w: 24,
+                stab: 0.84, rated: true, frag: true,
+                blurb: 'Machine-scored squares vent a hot load a little — and join the blast as a visible frag spray.' }
   };
+  /* thin-wall handling physics: the shell passes shocks through, the sun through too */
+  var FRAGILE_SLAM_AMP = 1.3;
+  var FRAGILE_COOK_BIAS = 0.10;
+  /* fills wear stockroom designations (stencil = what's painted on the can);
+     the crew abbreviates ("run the one-alpha"). Colour bands stay: amber /
+     blue / violet — accessibility never depends on reading a stencil. */
   var COMPOUNDS = {
-    ember:   { id: 'ember',   name: 'EMBER',    energy: 10,  cost: 180, w: 6, heat: 1.0,  hue: 'amber',
-               blurb: 'More bang, less patience. Wants room.' },
-    frost:   { id: 'frost',   name: 'FROST',    energy: 3.5, cost: 120, w: 6, heat: 0,    hue: 'blue',
-               blurb: 'Calm, steady, quietly judging the EMBER.' },
-    emberx:  { id: 'emberx',  name: 'EMBER-X',  energy: 26,  cost: 0,   w: 6, heat: 1.25, hue: 'hot',
-               blurb: 'Refined in your own still. Brighter, bigger, twitchier.' },
-    emberxs: { id: 'emberxs', name: 'SCORCHED X', energy: 20, cost: 0,  w: 6, heat: 1.35, hue: 'scorched',
+    ember:   { id: 'ember',   name: 'FILLER 1A', stencil: 'F-1A', energy: 10,  cost: 180, w: 6, heat: 1.0,  hue: 'amber',
+               blurb: 'The workhorse fill. More bang, less patience. Wants room.' },
+    frost:   { id: 'frost',   name: 'FILLER 2S', stencil: 'F-2S', energy: 3.5, cost: 120, w: 6, heat: 0,    hue: 'blue',
+               blurb: 'The stabilized fill. Calm, steady, quietly judging the 1A.' },
+    emberx:  { id: 'emberx',  name: 'FILLER 1X', stencil: 'F-1X', energy: 26,  cost: 0,   w: 6, heat: 1.25, hue: 'hot',
+               blurb: 'The refined grade, from your own still. Brighter, bigger, twitchier.' },
+    emberxs: { id: 'emberxs', name: 'SCORCHED F-1X', stencil: 'F-1X', energy: 20, cost: 0,  w: 6, heat: 1.35, hue: 'scorched',
                blurb: 'A refinery batch that got away from you. Weaker AND angrier.' },
-    glaze:   { id: 'glaze',   name: 'GLAZE',    energy: 2,   cost: 0,   w: 6, heat: -0.9, hue: 'glaze',
-               blurb: 'FROST, poured slow over a line. Calms the load, forgives your hands, shrugs at the sun.' }
+    glaze:   { id: 'glaze',   name: 'ADDITIVE G-3', stencil: 'G-3', energy: 2,   cost: 0,   w: 6, heat: -0.9, hue: 'glaze',
+               blurb: 'F-2S, poured slow over a line. Calms the load, forgives your hands, shrugs at the sun.' },
+    /* CATALOG WAVE 1 (M3a) */
+    trimcell: { id: 'trimcell', name: 'TRIM CELL ×¼', stencil: 'F-1A/4', energy: 2.5, cost: 60, w: 1.5, heat: 0.25, hue: 'amber', quarter: true,
+               blurb: 'A quarter-can of 1A for the last half-metre. The precision doctrine, tinned.' },
+    densepack:{ id: 'densepack', name: 'DENSE-PACK CELL', stencil: 'DP-1', energy: 16, cost: 300, w: 11, heat: 1.15, hue: 'dense', needsRated: true,
+               blurb: 'Pressed fill. Twice the shove, none of the manners. Wants a STANDARD-rated shell under it.' },
+    ballast:  { id: 'ballast',  name: 'INERT BALLAST', stencil: 'BAL-9', energy: 0, cost: 80, w: 9, heat: 0, hue: 'inert', lean: 7,
+               blurb: 'Sand, certified. Moves the centre of mass and absolutely nothing else.' }
   };
   var PARTS = {
     timer:   { id: 'timer',   name: 'TIMER',       cost: 260, w: 2,  blurb: 'Counts to five. Unless you set the dial.' },
     battery: { id: 'battery', name: 'BATTERY',     cost: 140, w: 4,  blurb: 'Angry electrons, boxed.' },
     cap:     { id: 'cap',     name: 'WELL CAP',    cost: 90,  w: 1,  blurb: 'Keeps the desert out of the important hole.' },
     fins:    { id: 'fins',    name: 'FINS',        cost: 60,  w: 2,  blurb: 'Pure style. The device never flies.' },
-    panel:   { id: 'panel',   name: 'ARM SWITCH',  cost: 110, w: 1,  blurb: 'One switch, one guard cover, zero excuses.' }
+    panel:   { id: 'panel',   name: 'ARM SWITCH',  cost: 110, w: 1,  blurb: 'One switch, one guard cover, zero excuses.' },
+    /* CATALOG WAVE 1 (M3a) */
+    batteryl:   { id: 'batteryl',   name: 'BATTERY PACK L', cost: 220, w: 7,
+                  blurb: 'Twice the electrons, one spare AUX terminal. Dual-fuze ready, says the label. Eventually.' },
+    harness:    { id: 'harness',    name: 'SHIELDED HARNESS', cost: 180, w: 2,
+                  blurb: 'Braided sheath over every run. The inspector finds nothing to underline, and one continuity check rides free.' },
+    delayrelay: { id: 'delayrelay', name: 'DELAY RELAY', cost: 150, w: 1.5,
+                  blurb: 'Adds half a second. Exactly half a second. The only honest component in the drawer.' },
+    impactfuze: { id: 'impactfuze', name: 'IMPACT FUZE NOSE', cost: 320, w: 3,
+                  blurb: 'No countdown, no opinions. It fires when the ground asks it to.' }
   };
+  var DELAY_RELAY_S = 0.5;   // the delay relay's fixed stage, stacked after the dial
+  var PAINTS = [
+    { id: null,     name: 'SHOP STEEL' },
+    { id: 'grey2',  name: 'GOVERNMENT GREY No. 2', hex: 0x777f83 },
+    { id: 'oxide',  name: 'RANGE OXIDE RED',       hex: 0x8a4a34 },
+    { id: 'sand',   name: 'PAN SAND',              hex: 0xb9a06c }
+  ];
 
   /* ---------- REFINERY ---------- */
   var REFINERY = {
-    batchCost: 300,       // $ per run of the still (EMBER → EMBER-X)
+    batchCost: 300,       // $ per run of the still (F-1A → F-1X)
     batchYield: 2,        // canisters per run
     holdSeconds: 8,       // time-in-band required
     scorchLimit: 2.0,     // seconds spent too hot before the batch scorches
-    glazeCost: 220,       // $ per blend (FROST → GLAZE)
+    glazeCost: 220,       // $ per blend (F-2S → ADDITIVE G-3)
     glazeYield: 2,        // canisters per clean pour
     pourLo: 0.60,         // beaker target band (fraction of the line)
     pourHi: 0.72          // pour past this and the batch degrades
   };
 
-  /* GLAZE effects (per canister aboard) */
+  /* ADDITIVE G-3 effects (per canister aboard) */
   var GLAZE_SLAM_FORGIVE = 0.10;   // shaves recorded seating shock
   var GLAZE_COOK_SHIELD  = 0.10;   // extra cook-off resistance
 
@@ -277,6 +339,23 @@ var PG2 = (function () {
       ],
       decoys: []
     },
+    ti: {  // RFP-066 — the NOSE FUZE replaces the timer; the drop provides the cue. 5 runs.
+      key: 'ti',
+      comps: [
+        { id: 'bat', name: 'BATTERY PACK',    stamp: 'DC-9',  pins: ['+', '−'] },
+        { id: 'sw',  name: 'SAFETY SWITCH',   stamp: 'S-1',   pins: ['1', '2'] },
+        { id: 'nfz', name: 'NOSE FUZE',       stamp: 'NF-1',  pins: ['IN', 'OUT', 'GND'] },
+        { id: 'det', name: 'DETONATOR BLOCK', stamp: 'DET-2', pins: ['A', 'B'] }
+      ],
+      runs: [
+        { a: 'bat.0', b: 'sw.0',  color: 'red',    role: 'power',   label: 'BATTERY + → SAFETY SW 1' },
+        { a: 'sw.1',  b: 'nfz.0', color: 'red',    role: 'safety',  label: 'SAFETY SW 2 → NOSE FUZE IN' },
+        { a: 'nfz.2', b: 'bat.1', color: 'green',  role: 'clock',   label: 'NOSE FUZE GND → BATTERY −' },
+        { a: 'nfz.1', b: 'det.0', color: 'yellow', role: 'command', label: 'NOSE FUZE OUT → DET LEAD A' },
+        { a: 'det.1', b: 'bat.1', color: 'green',  role: 'return',  label: 'DET LEAD B → BATTERY −' }
+      ],
+      decoys: []
+    },
     t4: {  // RFP-063 — capacitor bank + junction block; one N.C. red-herring pair. 7 runs.
       key: 't4',
       comps: [
@@ -299,7 +378,7 @@ var PG2 = (function () {
       decoys: ['jct.2', 'jct.3']   // N.C. — printed on the schematic, tempting on the panel
     }
   };
-  var CIRCUIT_FOR_CONTRACT = ['t1', 't1', 't2', 't2', 't3', 't3', 't3', 't4'];
+  var CIRCUIT_FOR_CONTRACT = ['t1', 't1', 't2', 't2', 't3', 't3', 't3', 't4', 'ti'];
 
   /* run role → failure class + plain narration */
   var RUN_FAIL = {
@@ -347,6 +426,13 @@ var PG2 = (function () {
     return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
   }
   function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+  /* lot-number stencils (`LOT 214-C` style) — seeded, purely for flavour */
+  function lotNumber(seed, key) {
+    var r = stream(String(seed), 'lot:' + key);
+    var n = 100 + Math.floor(r() * 880);
+    var L = 'ABCDEFHJKMNPRSTVWX';
+    return 'LOT ' + n + '-' + L[Math.floor(r() * L.length)];
+  }
   function makeSeed(rng) {
     var A = 'ABCDEFGHJKMNPQRSTVWXYZ23456789';
     var r = rng || Math.random, s = '';
@@ -415,9 +501,11 @@ var PG2 = (function () {
   /* ---------- ASSEMBLY STATE (what the player physically did) ---------- */
   function makeAssembly() {
     return {
-      shell: null,                       // 'compact' | 'standard' | 'heavy'
+      shell: null,                       // shell id (see SHELLS)
       canisters: [],                     // per bay: compound id | null
       timer: false, battery: false, cap: false, fins: false, panel: false,
+      batteryl: false, harness: false, delayrelay: false, impactfuze: false,
+      paint: null,                       // cosmetic finish — zero mechanics, pure ownership
       timerSet: null,                    // seconds set on the dial; null = factory 5.0
       refine: { spend: 0, stock: { emberx: 0, emberxs: 0, glaze: 0 } },
       conns: [],                         // installed wires: {a, b, color, torqued} (b null while dangling)
@@ -444,7 +532,8 @@ var PG2 = (function () {
     for (var i = 0; i < n; i++) {
       var c = cans[i];
       if (!c) continue;
-      var e = Math.max(COMPOUNDS[c].energy, 1);   // even GLAZE weighs on the lean
+      var def = COMPOUNDS[c];
+      var e = def.lean != null ? def.lean : Math.max(def.energy, 1);   // even G-3 weighs on the lean; ballast weighs hardest
       var x = n === 1 ? 0 : -1 + 2 * i / (n - 1);
       sumE += e;
       mom += e * x;
@@ -466,12 +555,14 @@ var PG2 = (function () {
       heat += COMPOUNDS[c].heat;
     });
     if (a.refine) cost += a.refine.spend;
-    ['timer', 'battery', 'cap', 'fins', 'panel'].forEach(function (k) {
+    ['timer', 'battery', 'cap', 'fins', 'panel', 'batteryl', 'harness', 'delayrelay', 'impactfuze'].forEach(function (k) {
       if (a[k]) { cost += PARTS[k].cost; weight += PARTS[k].w; }
     });
+    // DENSE-PACK wants a STANDARD-rated shell under it — a mis-fit never trucks out
+    var badFit = !!(sh && !sh.rated && (a.canisters || []).some(function (c) { return c && COMPOUNDS[c].needsRated; }));
     var craterMean = filled > 0 ? CR_K * Math.pow(Y, CR_P) : 0;
     // instability: hot compounds loaded past the shell's calm allowance.
-    // GLAZE runs cold (negative heat); a contract heat wave multiplies the rest.
+    // ADDITIVE G-3 runs cold (negative heat); a contract heat wave multiplies the rest.
     var heatMult = rfp.heatMult || 1;
     var hotFrac = sh ? Math.max(heat, 0) / sh.slots : 0;
     var effHot = hotFrac * heatMult;
@@ -479,7 +570,7 @@ var PG2 = (function () {
     var glazeN = glazeCount(a);
     var cookRisk = 0;
     if (sh && heatMult > 1) {
-      cookRisk = clamp((effHot - sh.stab - 0.08 - GLAZE_COOK_SHIELD * glazeN) * 1.5, 0, 0.9);
+      cookRisk = clamp((effHot - sh.stab - 0.08 + (sh.fragile ? FRAGILE_COOK_BIAS : 0) - GLAZE_COOK_SHIELD * glazeN) * 1.5, 0, 0.9);
     }
     var comX = comOf(a);
     // HUD estimate is deliberately rough — the range decides
@@ -487,10 +578,12 @@ var PG2 = (function () {
     var missing = [];
     if (!a.shell) missing.push('shell');
     if (filled === 0) missing.push('canisters');
-    if (!a.timer) missing.push('timer');
-    if (!a.battery) missing.push('battery');
+    if (rfp.impact) { if (!a.impactfuze) missing.push('impact fuze nose'); }
+    else if (!a.timer) missing.push('timer');
+    if (!a.battery && !a.batteryl) missing.push('battery');
     if (!a.cap) missing.push('well cap');
     if (!a.panel) missing.push('arm switch');
+    if (badFit) missing.push('a STANDARD-rated shell (DENSE-PACK aboard)');
     return {
       cost: cost, weight: weight, yieldBd: Y,
       slots: sh ? sh.slots : 0, filled: filled, hotFrac: hotFrac,
@@ -498,6 +591,7 @@ var PG2 = (function () {
       comX: comX,
       offsetMean: comX * craterMean * OFFSET_GAIN,   // metres, negative = WEST
       craterMean: craterMean,
+      frag: !!(sh && sh.frag), badFit: badFit,
       bandLo: craterMean * (1 - spread),
       bandHi: craterMean * (1 + spread),
       severity: severity,
@@ -591,7 +685,11 @@ var PG2 = (function () {
   function verifiedRuns(a, rfp) {
     rfp = rfp || CONTRACTS[0];
     var v = a.verified || {};
-    return wireRuns(a, rfp).filter(function (r) { return r.status === 'ok' && v[r.idx]; }).length;
+    var okRuns = wireRuns(a, rfp).filter(function (r) { return r.status === 'ok'; });
+    var n = okRuns.filter(function (r) { return v[r.idx]; }).length;
+    // the SHIELDED HARNESS self-reports one run — one probe check rides free
+    if (a.harness && n < okRuns.length) n += 1;
+    return n;
   }
   /* electrically fine, stylistically noted: wrong-gauge runs draw an inspector aside */
   function wireStyle(a, rfp) {
@@ -624,12 +722,23 @@ var PG2 = (function () {
   }
 
   /* crater geometry from a resolved lean */
-  function applyLean(o, seed, d, a) {
+  function applyLean(o, seed, d, a, rfp) {
     var r = gauss(stream(seed, 'lean:' + loadKey(a)));
     var comXa = clamp(d.comX + r * 0.03, -1, 1);
     o.comX = comXa;
-    o.offsetM = o.craterActual != null ? comXa * o.craterActual * OFFSET_GAIN : 0;   // negative = WEST
+    if (rfp && rfp.impact) {
+      // the drop drifts with the lean: landing point = crater centre
+      o.offsetM = o.dropOff != null ? o.dropOff : 0;
+    } else {
+      o.offsetM = o.craterActual != null ? comXa * o.craterActual * OFFSET_GAIN : 0;   // negative = WEST
+    }
     o.ellipse = 1 + Math.abs(comXa) * ELLIPSE_GAIN;
+  }
+  /* SKIPSTONE: where the dropped article lands, relative to the plate centre */
+  function dropPlan(a, seed, d, rfp) {
+    var comXa = clamp(d.comX + gauss(stream(seed, 'lean:' + loadKey(a))) * 0.03, -1, 1);
+    var off = comXa * rfp.impact.drift + gauss(stream(seed, 'drop:' + loadKey(a))) * rfp.impact.scatter;
+    return { comX: comXa, off: off };
   }
 
   /* ---------- RESOLVE: assembly + seed (+ contract) → outcome ---------- */
@@ -637,9 +746,11 @@ var PG2 = (function () {
     rfp = rfp || CONTRACTS[0];
     var d = derive(a, rfp);
     var glazeN = d.glazeN;
-    var effSlam = Math.max(0, a.det.slam - GLAZE_SLAM_FORGIVE * glazeN);
-    var tSet = timerSetOf(a);
-    var dialErr = tSet - rfp.tSpec;
+    var shDef = a.shell ? SHELLS[a.shell] : null;
+    var rawSlam = a.det.slam * (shDef && shDef.fragile ? FRAGILE_SLAM_AMP : 1);   // thin walls pass the shock through
+    var effSlam = Math.max(0, rawSlam - GLAZE_SLAM_FORGIVE * glazeN);
+    var tSet = timerSetOf(a) + (a.delayrelay ? DELAY_RELAY_S : 0);   // the relay stacks its half-second after the dial
+    var dialErr = rfp.impact ? 0 : tSet - rfp.tSpec;   // impact articles take their cue from the plate
     var o = {
       type: 'clean', fired: false,
       detT: null,               // seconds relative to the contract cue (0 = on cue)
@@ -653,6 +764,9 @@ var PG2 = (function () {
     };
     var craterNoise = gauss(stream(seed, 'crater:' + loadKey(a)));
     var timerNoise = gauss(stream(seed, 'timer'));
+    /* SKIPSTONE: the drop is planned before anything fires — detT is relative to PLATE CONTACT */
+    var drop = rfp.impact ? dropPlan(a, seed, d, rfp) : null;
+    if (drop) o.dropOff = drop.off;
 
     /* 0 — Thermal cook-off: the sun does not read the paperwork. Hot-forecast
        contracts only; hot fill past the shell's rating can fire itself. */
@@ -662,18 +776,19 @@ var PG2 = (function () {
       o.detT = -(1.2 + stream(seed, 'cookoffT')() * 2.6);
       o.craterActual = d.craterMean * 0.85 * (1 + craterNoise * (CRATER_NOISE + d.severity * 0.16));
       o.quality = 'ragged';
-      applyLean(o, seed, d, a);
+      applyLean(o, seed, d, a, rfp);
       o.rootCause = {
+        phase: 'PAYLOAD',
         title: 'THERMAL COOK-OFF — THE SUN FIRED FIRST',
         cause: 'At pan temperature the fill reached its own conclusion ' + Math.abs(o.detT).toFixed(1) +
           ' seconds before the cue. The load ran ' + Math.round(d.effHot * 100) +
           '% hot against the ' + SHELLS[a.shell].name.toLowerCase() + '’s ' +
           Math.round(SHELLS[a.shell].stab * 100) + '% rating under the forecast. Nobody threw a switch. Nobody had to.',
         receipt: 'Root cause: hot fill under a ' + Math.round((rfp.heatMult || 1) * 100) +
-          '% heat forecast — canister bays, Assembly Bay. FROST or GLAZE buys shade.',
+          '% heat forecast — canister bays, Assembly Bay. FILLER 2S or ADDITIVE G-3 buys shade.',
         where: 'LOADOUT'
       };
-      o.hint = 'The heat cooked it off before the cue. Balance the load — swap EMBER for FROST or GLAZE from the still.';
+      o.hint = 'The heat cooked it off before the cue. Balance the load — swap F-1A for F-2S, or pour ADDITIVE G-3 at the still.';
       return o;
     }
 
@@ -681,6 +796,7 @@ var PG2 = (function () {
     if (!a.armed) {
       o.type = 'unarmed';
       o.rootCause = {
+        phase: 'CLOSE-OUT',
         title: 'DUD — DEVICE NEVER ARMED',
         cause: 'T+' + rfp.tSpec.toFixed(1) + ' came and went. The device listened politely to the entire countdown and did nothing. Post-test inspection found the arming switch in the position marked SAFE, which is, to its credit, exactly what the placard promises.',
         receipt: 'Root cause: arming switch never thrown — arming station, Assembly Bay.',
@@ -691,15 +807,34 @@ var PG2 = (function () {
     }
 
     /* 2 — Shock-sensitized detonator: chance of an off-cue pop once energized.
-       GLAZE aboard pads the shock — the stabilizer forgives a firm hand. */
+       ADDITIVE G-3 aboard pads the shock — the stabilizer forgives a firm hand. */
     if (o.pEarly > 0 && stream(seed, 'early')() < o.pEarly) {
       o.type = 'early';
       o.fired = true;
+      if (rfp.impact) {
+        // the shock-sensitized detonator lets go at the release jolt — a burst above the plate
+        o.detT = -(0.15 + stream(seed, 'earlyT')() * 0.75);        // contact−0.15 … contact−0.9 (mid-fall)
+        o.craterActual = d.craterMean * 0.55 * (1 + craterNoise * CRATER_NOISE);
+        o.quality = 'ragged';
+        applyLean(o, seed, d, a, rfp);
+        o.offsetM = o.offsetM * 0.6;   // it never finished its drift
+        o.rootCause = {
+          phase: 'CLOSE-OUT',
+          title: 'MID-AIR BURST — ' + Math.abs(o.detT).toFixed(1) + ' s ABOVE THE PLATE',
+          cause: 'The release jolt was all the invitation the detonator needed. The handling log shows a shock impulse of ' +
+            (a.det.slam * 9.8).toFixed(1) + ' brandt recorded at seating — the drop merely reminded it.',
+          receipt: 'Root cause: detonator seated with a recorded shock impulse — detonator insertion, Assembly Bay. Slow is smooth, especially before a drop test.',
+          where: 'DETONATOR INSERTION'
+        };
+        o.hint = 'It burst in the air, above the plate. Seat the detonator slowly — the release jolt wakes a slammed det.';
+        return o;
+      }
       o.detT = -(0.6 + stream(seed, 'earlyT')() * 3.0);            // cue−0.6 … cue−3.6
       o.craterActual = d.craterMean * (1 + craterNoise * (CRATER_NOISE + d.severity * 0.16)) * 0.96;
       o.quality = d.severity > 0.15 ? 'ragged' : 'clean';
-      applyLean(o, seed, d, a);
+      applyLean(o, seed, d, a, rfp);
       o.rootCause = {
+        phase: 'CLOSE-OUT',
         title: 'OFF-CUE DETONATION — T−' + Math.abs(o.detT).toFixed(1) + ' s',
         cause: 'The detonator functioned before it was told to. The handling log shows a shock impulse of ' +
           (a.det.slam * 9.8).toFixed(1) + ' brandt recorded at seating — a detonator remembers being slammed the way a cat remembers a bath.',
@@ -707,6 +842,26 @@ var PG2 = (function () {
         where: 'DETONATOR INSERTION'
       };
       o.hint = 'It went off early. Seat the detonator slowly and gently — it remembers.';
+      return o;
+    }
+
+    /* 2.5 — SKIPSTONE: a hard lean drops the article clean off the plate.
+       The nose fuze wants square plate contact; sand takes it on the shoulder. */
+    if (rfp.impact && Math.abs(drop.off) > rfp.impact.missLimit) {
+      o.type = 'nosemiss';
+      o.comX = drop.comX;
+      o.offsetM = drop.off;
+      o.rootCause = {
+        phase: 'PAYLOAD',
+        title: 'DUD — NOSE FUZE NEVER SAW THE PLATE',
+        cause: 'The article drifted with its lean and came down ' + Math.abs(drop.off).toFixed(1) +
+          ' m off the plate centre, shoulder first, in soft sand. The nose fuze never saw the plate — check the drop alignment. ' +
+          'The drop alignment is the load: energy centre at ' + (drop.comX >= 0 ? '+' : '') + drop.comX.toFixed(2) + '.',
+        receipt: 'Root cause: load arrangement — ' + describeLoad(a) +
+          ' leans the drop off the plate — canister bays, Assembly Bay. Trim cells exist for exactly this.',
+        where: 'DROP ALIGNMENT'
+      };
+      o.hint = 'It missed the plate and lay there. Ease the lean — rearrange the bays, or counterweight with TRIM CELLS.';
       return o;
     }
 
@@ -723,7 +878,8 @@ var PG2 = (function () {
       if (fm.type === 'nofire') {
         o.type = 'nofire';
         o.rootCause = {
-          title: 'NO-FIRE AT T+' + rfp.tSpec.toFixed(1),
+          phase: 'CLOSE-OUT',
+          title: rfp.impact ? 'NO-FIRE ON PLATE CONTACT' : 'NO-FIRE AT T+' + rfp.tSpec.toFixed(1),
           cause: fm.what + ' The device held its charge and its opinion. Post-test continuity found the break: ' + landed + '.',
           receipt: 'Root cause: ' + landed + ' — wiring, Assembly Bay. The schematic was enclosed with the device.',
           where: 'WIRING'
@@ -739,9 +895,10 @@ var PG2 = (function () {
         o.detT = sign * (1.2 + stream(seed, 'misfireT')() * 1.8);    // ±1.2 … ±3.0 s off cue
         o.craterActual = d.craterMean * 0.55 * (1 + craterNoise * CRATER_NOISE);
         o.quality = 'partial';
-        applyLean(o, seed, d, a);
+        applyLean(o, seed, d, a, rfp);
         o.rootCause = {
-          title: 'MISFIRE — DETONATION OFF-CUE',
+          phase: 'CLOSE-OUT',
+          title: rfp.impact ? 'MISFIRE — OFF THE CONTACT CUE' : 'MISFIRE — DETONATION OFF-CUE',
           cause: fm.what + ' — ' +
             (o.detT < 0 ? Math.abs(o.detT).toFixed(1) + ' seconds early' : o.detT.toFixed(1) + ' seconds late') +
             ' and at a fraction of its manners. ' + landed.charAt(0).toUpperCase() + landed.slice(1) + '.',
@@ -757,8 +914,9 @@ var PG2 = (function () {
       o.detT = dialErr + timerNoise * 0.10;
       o.craterActual = d.craterMean * 0.45 * (1 + craterNoise * CRATER_NOISE);
       o.quality = 'partial';
-      applyLean(o, seed, d, a);
+      applyLean(o, seed, d, a, rfp);
       o.rootCause = {
+        phase: 'CLOSE-OUT',
         title: 'WEAK FIRE — PARTIAL FUNCTION',
         cause: fm.what + ' A fraction of the contracted energy reached the fill. ' +
           landed.charAt(0).toUpperCase() + landed.slice(1) + '.',
@@ -777,10 +935,11 @@ var PG2 = (function () {
       o.detT = dialErr + timerNoise * 0.12;
       o.craterActual = d.craterMean * 0.30 * (1 + craterNoise * CRATER_NOISE);
       o.quality = 'low-order';
-      applyLean(o, seed, d, a);
+      applyLean(o, seed, d, a, rfp);
       var c0 = loose[0];
       var nums0 = termNumbers(seed, rfp);
       o.rootCause = {
+        phase: 'CLOSE-OUT',
         title: 'LOW-ORDER DETONATION (FIZZLE)',
         cause: 'Intermittent contact at terminal ' + nums0[c0.a] + ' starved the firing train. The fill deflagrated — a long, smoky sigh where a bang was contracted.',
         receipt: 'Root cause: the ' + c0.color + ' wire between terminals ' + nums0[c0.a] + ' and ' + nums0[c0.b] +
@@ -793,39 +952,42 @@ var PG2 = (function () {
 
     /* 5 — Clean circuit. Chemistry (and the dial, and the lean) decide. */
     o.fired = true;
-    o.detT = dialErr + timerNoise * 0.06;
+    o.detT = rfp.impact ? timerNoise * 0.04 : dialErr + timerNoise * 0.06;   // plate contact keeps its own time
     var spread = CRATER_NOISE + d.severity * 0.16;
     o.craterActual = d.craterMean * (1 + craterNoise * spread);
-    applyLean(o, seed, d, a);
+    applyLean(o, seed, d, a, rfp);
     var inBand = o.craterActual >= rfp.craterMin && o.craterActual <= rfp.craterMax;
     var timingOk = Math.abs(o.detT) <= rfp.tTol;
     var offOk = true, westOff = -o.offsetM;
     if (rfp.offsetSpec) {
       offOk = westOff >= rfp.offsetSpec.min && westOff <= rfp.offsetSpec.max;
     }
+    var plateOk = !rfp.impact || Math.abs(o.offsetM) <= rfp.impact.band;
     if (d.severity > 0.15) {
       o.type = 'ragged';
       o.quality = 'ragged';
       o.rootCause = {
+        phase: 'PAYLOAD',
         title: 'RAGGED DETONATION',
         cause: 'Hot fill loaded past the ' + SHELLS[a.shell].name.toLowerCase() +
           '’s calm allowance (' + Math.round(d.effHot * 100) + '% hot vs ' +
           Math.round(SHELLS[a.shell].stab * 100) + '% rated' +
           ((rfp.heatMult || 1) > 1 ? ', heat forecast included' : '') + '). The blast came out sideways, in installments.',
-        receipt: 'Root cause: fill loadout — canister bays, Assembly Bay. EMBER wants room' +
-          (rfp.needsRefinery ? ', or a GLAZE canister to hold its hand.' : '.'),
+        receipt: 'Root cause: fill loadout — canister bays, Assembly Bay. FILLER 1A wants room' +
+          (rfp.needsRefinery ? ', or an ADDITIVE G-3 canister to hold its hand.' : '.'),
         where: 'LOADOUT'
       };
-      o.hint = 'It blew ugly and lopsided. Hot canisters want room — a bigger shell, or swap some for FROST' +
-        (rfp.needsRefinery ? ' or GLAZE.' : '.');
+      o.hint = 'It blew ugly and lopsided. Hot canisters want room — a bigger shell, or swap some for F-2S' +
+        (rfp.needsRefinery ? ' or G-3.' : '.');
     } else {
       o.type = 'clean';
       o.quality = 'clean';
       if (!inBand) {
         var small = o.craterActual < rfp.craterMin;
-        var moreName = rfp.needsRefinery ? 'EMBER-X' : 'EMBER';
+        var moreName = rfp.needsRefinery ? 'FILLER 1X' : 'FILLER 1A';
         var anyHot = (a.canisters || []).some(function (c) { return c && COMPOUNDS[c].heat > 0; });
         o.rootCause = {
+          phase: 'PAYLOAD',
           title: small ? 'EFFECT BELOW SPECIFICATION' : 'EFFECT ABOVE SPECIFICATION',
           cause: 'Textbook detonation, wrong size: ' + o.craterActual.toFixed(1) + ' m against the ' +
             rfp.craterMin + '–' + rfp.craterMax + ' m band. ' +
@@ -837,10 +999,25 @@ var PG2 = (function () {
         o.hint = small
           ? 'Crater ' + o.craterActual.toFixed(1) + ' m — too small. More ' + moreName + ', or a bigger shell?'
           : 'Crater ' + o.craterActual.toFixed(1) + ' m — too big. ' +
-            (anyHot ? 'Ease off: swap some hot canisters for FROST.' : 'Ease off: take a canister out.');
+            (anyHot ? 'Ease off: swap some hot canisters for F-2S.' : 'Ease off: take a canister out.');
+      } else if (!plateOk && rfp.impact) {
+        o.rootCause = {
+          phase: 'PAYLOAD',
+          title: 'CRATER OFF THE PLATE BAND',
+          cause: 'Clean function, wrong postcode: the article drifted with its lean and cratered ' +
+            Math.abs(o.offsetM).toFixed(1) + ' m off the plate centre against a contracted ' +
+            rfp.impact.band.toFixed(1) + ' m band. The blast goes where the load leans.',
+          receipt: 'Root cause: load arrangement — ' + describeLoad(a) +
+            ', energy centre at ' + (o.comX >= 0 ? '+' : '') + o.comX.toFixed(2) +
+            ' — canister bays, Assembly Bay. Counterweight it: TRIM CELLS were invented for the last half-metre.',
+          where: 'DROP ALIGNMENT'
+        };
+        o.hint = 'Crater ' + Math.abs(o.offsetM).toFixed(1) + ' m off the plate — the band is ' +
+          rfp.impact.band.toFixed(1) + ' m. Balance the bays; a TRIM CELL opposite the heavy side buys the last metre.';
       } else if (!offOk && rfp.offsetSpec) {
         var wantDir = rfp.offsetSpec.dir === 'W' ? 'west' : 'east';
         o.rootCause = {
+          phase: 'PAYLOAD',
           title: 'CRATER IN THE WRONG PLACE',
           cause: 'Right size, wrong address: crater centre landed ' +
             (Math.abs(westOff) < 0.8 ? 'dead centre' : Math.abs(westOff).toFixed(1) + ' m ' + (westOff > 0 ? 'west' : 'east')) +
@@ -857,8 +1034,10 @@ var PG2 = (function () {
           : 'Crater ' + westOff.toFixed(1) + ' m west — past the band. Ease the lean: move a canister back east.';
       } else if (!timingOk && rfp.dial) {
         o.rootCause = {
+          phase: 'SYSTEMS',
           title: 'DETONATION OFF THE CONTRACT CUE',
           cause: 'The device fired precisely when its dial told it to — T+' + tSet.toFixed(2) +
+            (a.delayrelay ? ' (dial T+' + timerSetOf(a).toFixed(2) + ' + the relay\u2019s fixed ' + DELAY_RELAY_S.toFixed(1) + ' s)' : '') +
             ' against a contracted T+' + rfp.tSpec.toFixed(2) + ' ±' + rfp.tTol +
             '. The dial was set by hand. The hand is on file.',
           receipt: 'Root cause: timer dial set to T+' + tSet.toFixed(2) + ' — timer dial, close-out, Assembly Bay. Read the vernier twice.',
@@ -886,6 +1065,7 @@ var PG2 = (function () {
             : (o.type === 'misfire' ? 0.5 : o.type === 'weakfire' ? 0.45 : 0),
       fizzle: o.type === 'fizzle',
       dud: !o.fired,
+      frag: !!(o.fired && d.frag),
       dust: o.fired ? clamp((o.craterActual || 8) / ((o.rfp && o.rfp.craterMax) || 24), 0.15, 1.25) : 0.05,
       crater: o.craterActual || 0,
       offsetM: o.offsetM || 0,
@@ -973,6 +1153,7 @@ var PG2 = (function () {
     var d = o.d;
     var vis = visualFor(o);
     var shaped = !!rfp.offsetSpec;
+    var impact = !!rfp.impact;
 
     var sizeOk = o.fired && o.craterActual != null &&
                  o.craterActual >= rfp.craterMin && o.craterActual <= rfp.craterMax;
@@ -981,6 +1162,9 @@ var PG2 = (function () {
     var westOff = -(o.offsetM || 0);
     var offsetOk = shaped && o.fired &&
                    westOff >= rfp.offsetSpec.min && westOff <= rfp.offsetSpec.max;
+    /* SKIPSTONE: PLACEMENT is distance off the plate; FUNCTION replaces the timing spec */
+    var plateOk = impact && o.fired && Math.abs(o.offsetM || 0) <= rfp.impact.band;
+    var funcOk = impact && o.fired && o.detT != null && Math.abs(o.detT) <= 0.25;
 
     var stamps = {
       size:   { key: 'size', label: 'SIZE', ok: sizeOk,
@@ -1004,10 +1188,24 @@ var PG2 = (function () {
           : Math.abs(westOff).toFixed(1) + ' m ' + (westOff > 0 ? 'W' : 'E'),
         spec: rfp.offsetSpec.min + '–' + rfp.offsetSpec.max + ' m ' + rfp.offsetSpec.dir };
     }
-    var stampList = shaped ? [stamps.size, stamps.offset, stamps.timing]
+    if (impact) {
+      stamps.place = { key: 'place', label: 'PLACEMENT', ok: plateOk,
+        value: !o.fired ? (o.type === 'nosemiss' ? Math.abs(o.offsetM).toFixed(1) + ' m OFF PLATE' : 'NO CRATER')
+          : Math.abs(o.offsetM || 0) < 0.8 ? 'PLATE CENTRE'
+          : Math.abs(o.offsetM).toFixed(1) + ' m OFF',
+        spec: '≤ ' + rfp.impact.band.toFixed(1) + ' m OF PLATE CENTRE' };
+      stamps.func = { key: 'func', label: 'FUNCTION', ok: funcOk,
+        value: !o.fired ? 'NO FUNCTION'
+          : Math.abs(o.detT) <= 0.25 ? 'ON CONTACT'
+          : o.detT < 0 ? 'MID-AIR' : 'LATE — T+' + o.detT.toFixed(1) + ' s',
+        spec: 'DETONATE ON PLATE CONTACT' };
+    }
+    var stampList = impact ? [stamps.size, stamps.place, stamps.func]
+                  : shaped ? [stamps.size, stamps.offset, stamps.timing]
                            : [stamps.size, stamps.timing, stamps.clean];
 
-    var specMet = shaped ? (sizeOk && offsetOk && timingOk) : (sizeOk && timingOk);
+    var specMet = impact ? (sizeOk && plateOk && funcOk)
+                : shaped ? (sizeOk && offsetOk && timingOk) : (sizeOk && timingOk);
     var stars = stampList.reduce(function (n, s) { return n + (s.ok ? 1 : 0); }, 0);
 
     /* fly-off: their article resolves from the same series seed */
@@ -1035,12 +1233,21 @@ var PG2 = (function () {
     /* wrong-gauge runs: electrically fine, stylistically immortal */
     var styleRuns = wireStyle(a, rfp);
     var inspectorNote = null;
-    if (styleRuns.length) {
+    if (styleRuns.length && !a.harness) {
       var s0 = styleRuns[0];
       inspectorNote = 'Run ' + (s0.idx + 1) + ' (' + s0.run.label + ') pulled in ' + SPOOLS[s0.conn.color].name +
         ' where the schematic calls for ' + SPOOLS[s0.run.color].name +
         (styleRuns.length > 1 ? ', and ' + (styleRuns.length - 1) + ' more run' + (styleRuns.length > 2 ? 's' : '') + ' besides' : '') +
         '. Electrically sound. Noted in the margin anyway — “COLOUR CODE, GENTLEMEN.” No action taken.';
+    }
+
+    /* segmented casing: the scored shell joins the blast — noted by survey */
+    var fragNote = null;
+    if (o.fired && d.frag) {
+      var fragR = stream(seed, 'fragnote');
+      fragNote = 'SEGMENTED CASING — the scoring let go as designed. Survey flags a spall ring of ' +
+        (34 + Math.floor(fragR() * 30)) + ' fragments to ' + (o.craterActual ? (o.craterActual * (1.6 + fragR() * 0.5)).toFixed(0) : '40') +
+        ' m. The board is impressed and stands well back.';
     }
 
     var hint = o.hint;
@@ -1055,6 +1262,7 @@ var PG2 = (function () {
       var rc = o.rootCause;
       if (!rc && rfp.flyoff && specMet) {
         rc = {
+          phase: null,
           title: 'OUTBID AT THE PAD',
           cause: 'Both articles performed to specification. Theirs performed to it ' +
             (flyoff.theirScore > stars ? 'on more lines' : 'fractionally closer') +
@@ -1065,6 +1273,7 @@ var PG2 = (function () {
         };
       }
       if (!rc) rc = {
+        phase: null,
         title: 'RESULT OUTSIDE SPECIFICATION',
         cause: 'The graph and the contract disagreed.',
         receipt: 'Root cause: see attached telemetry — Assembly Bay.',
@@ -1074,6 +1283,7 @@ var PG2 = (function () {
         form: 'FORM IR-3 (REV. 12)',
         series: 'TEST SERIES ' + seed,
         contractId: rfp.id,
+        phase: rc.phase || null,
         outcome: rc.title,
         cause: rc.cause,
         receipt: rc.receipt,
@@ -1087,7 +1297,7 @@ var PG2 = (function () {
     return {
       outcome: o, visual: vis, stamps: stamps, stampList: stampList,
       win: win, specMet: specMet, stars: stars, hint: hint,
-      inspectorNote: inspectorNote,
+      inspectorNote: inspectorNote, fragNote: fragNote,
       wiring: { verified: verifiedRuns(a, rfp), total: wiringSpec(rfp).runs.length },
       payout: { award: award, bonus: bonus, cost: d.cost, net: net },
       vantage: v, flyoff: flyoff, incident: incident, seed: seed, rfp: rfp
@@ -1132,7 +1342,7 @@ var PG2 = (function () {
         a.canisters = ['ember', 'ember', 'frost', 'frost'];
         a.timerSet = 7.52;
         break;
-      case 4:   // HOT PLATE: GLAZE holds EMBER's hand under the sun
+      case 4:   // HOT PLATE: ADDITIVE G-3 holds FILLER 1A's hand under the sun
         a.shell = 'standard';
         a.canisters = ['ember', 'ember', 'ember', 'glaze'];
         a.refine = { spend: REFINERY.glazeCost, stock: { emberx: 0, emberxs: 0, glaze: 1 } };
@@ -1141,7 +1351,7 @@ var PG2 = (function () {
         a.shell = 'standard';
         a.canisters = ['ember', 'ember', null, 'frost'];
         break;
-      case 6:   // FEATHERWEIGHT: X + GLAZE in the standard shell, under the cap
+      case 6:   // FEATHERWEIGHT: 1X + G-3 in the standard shell, under the cap
         a.shell = 'standard';
         a.canisters = ['emberx', 'emberx', 'emberx', 'glaze'];
         a.refine = { spend: REFINERY.batchCost * 2 + REFINERY.glazeCost, stock: { emberx: 1, emberxs: 0, glaze: 1 } };
@@ -1152,8 +1362,14 @@ var PG2 = (function () {
         a.refine = { spend: REFINERY.batchCost, stock: { emberx: 0, emberxs: 0, glaze: 0 } };
         a.timerSet = 6.02;
         break;
+      case 8:   // SKIPSTONE: a trim cell counterweights the drop; the nose fuze takes the cue
+        a.shell = 'standard';
+        a.canisters = ['trimcell', 'ember', null, 'frost'];
+        break;
     }
-    return finish(a, seed, CONTRACTS[idx]);
+    finish(a, seed, CONTRACTS[idx]);
+    if (CONTRACTS[idx].impact) { a.timer = false; a.impactfuze = true; }
+    return a;
   }
   function cannedClean(seed) { return cannedFor(0, seed); }
   function cannedClean2(seed) { return cannedFor(2, seed); }
@@ -1161,12 +1377,13 @@ var PG2 = (function () {
   return {
     CONTRACTS: CONTRACTS, CONTRACT_BY_ID: CONTRACT_BY_ID,
     RFP: CONTRACTS[0], CAMERA: CAMERA, SOUND_DELAY: SOUND_DELAY,
-    SHELLS: SHELLS, COMPOUNDS: COMPOUNDS, PARTS: PARTS, REFINERY: REFINERY,
+    SHELLS: SHELLS, COMPOUNDS: COMPOUNDS, PARTS: PARTS, REFINERY: REFINERY, PAINTS: PAINTS,
+    DELAY_RELAY_S: DELAY_RELAY_S, FRAGILE_SLAM_AMP: FRAGILE_SLAM_AMP, FRAGILE_COOK_BIAS: FRAGILE_COOK_BIAS,
     SPOOLS: SPOOLS, SPOOL_ORDER: SPOOL_ORDER, RUN_FAIL: RUN_FAIL,
     SLAM_THRESHOLD: SLAM_THRESHOLD,
     GLAZE_SLAM_FORGIVE: GLAZE_SLAM_FORGIVE, GLAZE_COOK_SHIELD: GLAZE_COOK_SHIELD,
     OFFSET_GAIN: OFFSET_GAIN, ELLIPSE_GAIN: ELLIPSE_GAIN,
-    stream: stream, gauss: gauss, clamp: clamp, makeSeed: makeSeed,
+    stream: stream, gauss: gauss, clamp: clamp, makeSeed: makeSeed, lotNumber: lotNumber,
     wiringSpec: wiringSpec, pinIds: pinIds, pinLabel: pinLabel,
     termNumbers: termNumbers, panelPlan: panelPlan,
     makeAssembly: makeAssembly, derive: derive, describeLoad: describeLoad,

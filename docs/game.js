@@ -58,7 +58,9 @@
     contracts: {},                                   // per-contract id: { won, stars, net, wonOn, tests }
     stock: { emberx: 0, emberxs: 0, glaze: 0 },      // the batch ledger — a stocked shelf is a war chest
     museum: { irs: [], firsts: {}, plaques: {} },    // framed disasters, brass firsts, best-crater plaques
-    scars: {}                                        // per-contract id: [{x,z,r,e}] — the range remembers
+    scars: {},                                       // per-contract id: [{x,z,r,e}] — the range remembers
+    ui: { drawerCat: 'shells' },                     // the drawer remembers your last category
+    paint: null                                      // the paint locker's finish — ownership persists
   };
   function migrateSave(s) {
     // v1 → v2: everything old is kept; the new rooms start empty.
@@ -69,6 +71,8 @@
     if (!s.museum.firsts) s.museum.firsts = {};
     if (!s.museum.plaques) s.museum.plaques = {};
     if (!s.scars) s.scars = {};
+    if (!s.ui) s.ui = { drawerCat: 'shells' };
+    if (s.paint === undefined) s.paint = null;
     s.v = 2;
     return s;
   }
@@ -86,13 +90,16 @@
       SAVE.stock = s.stock;
       SAVE.museum = s.museum;
       SAVE.scars = s.scars;
+      SAVE.ui = s.ui;
+      SAVE.paint = s.paint || null;
+      if (SAVE.ui && SAVE.ui.drawerCat) drawer.cat = SAVE.ui.drawerCat;
     } catch (e) { /* private mode etc — play in-memory */ }
   }
   function persist() {
     try {
       localStorage.setItem(SAVE_KEY, JSON.stringify({
         v: 2, settings: SETTINGS, contracts: SAVE.contracts,
-        stock: SAVE.stock, museum: SAVE.museum, scars: SAVE.scars
+        stock: SAVE.stock, museum: SAVE.museum, scars: SAVE.scars, ui: SAVE.ui, paint: SAVE.paint
       }));
     } catch (e) {}
   }
@@ -106,7 +113,10 @@
     // grandfather clause: anything you already played (v1 saves) stays open
     var rec = SAVE.contracts[PG2.CONTRACTS[idx].id];
     if (rec && (rec.won || rec.tests > 0)) return true;
-    return contractRec(idx - 1).won || (urlContractForced && urlContract === idx);
+    if (urlContractForced && urlContract === idx) return true;
+    var after = PG2.CONTRACTS[idx].unlockAfter;   // RFP-066 pins up once SHAPED is won
+    if (after) return !!(SAVE.contracts[after] && SAVE.contracts[after].won);
+    return contractRec(idx - 1).won;
   }
   /* ---- the batch ledger: refined stock persists across contracts ---- */
   function syncStock() {
@@ -133,6 +143,7 @@
     SAVE.museum.irs.push({
       t: Date.now(), c: inc.contractId || r.rfp.id, seed: r.seed, attempt: S.attempt,
       outcome: inc.outcome, cause: inc.cause, receipt: inc.receipt, where: inc.where,
+      phase: inc.phase || null,
       disposition: inc.disposition
     });
     if (SAVE.museum.irs.length > 24) SAVE.museum.irs.splice(1, SAVE.museum.irs.length - 24); // keep the first, trim the middle
@@ -251,7 +262,14 @@
     fin: 0x74838f, panel: 0x424d57, wireR: 0xd9402e, wireY: 0xe0b52e, wireG: 0x3d9e57
   };
   function casingDims(id) {
-    return { compact: { L: 1.5, r: 0.34 }, standard: { L: 2.1, r: 0.42 }, heavy: { L: 2.7, r: 0.5 } }[id];
+    return { compact: { L: 1.5, r: 0.34 }, standard: { L: 2.1, r: 0.42 }, heavy: { L: 2.7, r: 0.5 },
+             thinwall: { L: 2.1, r: 0.40 }, segmented: { L: 2.2, r: 0.44 } }[id];
+  }
+  /* the paint locker's finish — cosmetic, zero mechanics */
+  function bodyColor() {
+    var hex = COL.steel;
+    PG2.PAINTS.forEach(function (p) { if (p.id === S.assembly.paint && p.hex) hex = p.hex; });
+    return hex;
   }
   function slotXs(id) {
     var d = casingDims(id), n = PG2.SHELLS[id].slots;
@@ -264,12 +282,37 @@
   function buildCasing(id) {
     var d = casingDims(id);
     var g = new THREE.Group();
-    var body = new THREE.Mesh(new THREE.CylinderGeometry(d.r, d.r, d.L, 20, 1, false), mat(COL.steel));
+    var skin = id === 'thinwall' ? 0xa6b5c2 : bodyColor();
+    var body = new THREE.Mesh(new THREE.CylinderGeometry(d.r, d.r, d.L, 20, 1, false), mat(skin));
     body.rotation.z = Math.PI / 2;
     body.castShadow = true;
     g.add(body);
+    if (id === 'segmented') {
+      // machine-scored frag squares: rings + longitudinal scoring
+      for (var ri = -2; ri <= 2; ri++) {
+        var score = new THREE.Mesh(new THREE.TorusGeometry(d.r + 0.004, 0.008, 6, 26), mat(0x39434c, { shin: 4 }));
+        score.rotation.y = Math.PI / 2;
+        score.position.x = ri * d.L * 0.17;
+        g.add(score);
+      }
+      for (var li = 0; li < 8; li++) {
+        var strip = new THREE.Mesh(new THREE.BoxGeometry(d.L * 0.86, 0.014, 0.014), mat(0x39434c, { shin: 4 }));
+        var ang = li * Math.PI / 4 + Math.PI / 8;
+        strip.position.set(0, Math.cos(ang) * (d.r + 0.004), Math.sin(ang) * (d.r + 0.004));
+        strip.rotation.x = -ang;
+        g.add(strip);
+      }
+    }
+    if (id === 'thinwall') {
+      for (var wi = -1; wi <= 1; wi++) {   // stiffening ribs — it needs them
+        var rib = new THREE.Mesh(new THREE.TorusGeometry(d.r + 0.008, 0.012, 6, 22), mat(0x77899a));
+        rib.rotation.y = Math.PI / 2;
+        rib.position.x = wi * d.L * 0.3;
+        g.add(rib);
+      }
+    }
     [-1, 1].forEach(function (s) {
-      var dome = new THREE.Mesh(new THREE.SphereGeometry(d.r, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2), mat(COL.steel));
+      var dome = new THREE.Mesh(new THREE.SphereGeometry(d.r, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2), mat(skin));
       dome.rotation.z = s * -Math.PI / 2;
       dome.position.x = s * d.L / 2;
       dome.castShadow = true;
@@ -281,7 +324,8 @@
     band.position.x = d.L / 2 - 0.10;
     g.add(band);
     // stencil
-    var st = textPlane('RD-047', 0.6, 0.18, { color: '#2e2b26', px: 72 });
+    var st = textPlane({ thinwall: 'RD-047T', segmented: 'RD-051F', compact: 'RD-045', heavy: 'RD-049' }[id] || 'RD-047',
+      0.6, 0.18, { color: '#2e2b26', px: 72 });
     st.position.set(-d.L * 0.12, -0.02, d.r + 0.005);
     g.add(st);
     // slot rims + dark bores
@@ -313,7 +357,7 @@
     // door (hinged at top) — pivot group
     var doorPivot = new THREE.Group();
     doorPivot.position.set(0, 0.19, d.r + 0.015);
-    var door = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.34, 0.022), mat(COL.steel));
+    var door = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.34, 0.022), mat(skin));
     door.position.y = -0.17;
     doorPivot.add(door);
     [-0.21, 0.21].forEach(function (dx) {
@@ -331,21 +375,51 @@
   }
   function buildCanister(comp) {
     var g = new THREE.Group();
-    var HUES = { ember: COL.amber, frost: COL.blue, emberx: 0xff7a2e, emberxs: 0x7a5030, glaze: 0x7fe0c3 };
+    var HUES = { ember: COL.amber, frost: COL.blue, emberx: 0xff7a2e, emberxs: 0x7a5030, glaze: 0x8f6fd8,
+                 trimcell: COL.amber, densepack: 0xcf7a2a, ballast: 0x6d7a85 };
     var hue = HUES[comp] || COL.amber;
-    var glow = comp === 'emberx' ? 0.5 : comp === 'emberxs' ? 0.08 : comp === 'glaze' ? 0.35 : 0.22;
-    var body = new THREE.Mesh(new THREE.CylinderGeometry(0.115, 0.115, 0.26, 14), mat(0xb9c2c9));
+    var glow = comp === 'emberx' ? 0.5 : comp === 'emberxs' ? 0.08 : comp === 'glaze' ? 0.35
+             : comp === 'ballast' ? 0 : comp === 'densepack' ? 0.14 : 0.22;
+    // quarter-size trim cells; stout dense-pack; plain certified sand
+    var dm = comp === 'trimcell' ? { r: 0.085, h: 0.15, band: 0.05, topY: 0.075, valveY: 0.14 }
+           : comp === 'densepack' ? { r: 0.13, h: 0.24, band: 0.1, topY: 0.12, valveY: 0.22 }
+           : { r: 0.115, h: 0.26, band: 0.09, topY: 0.13, valveY: 0.24 };
+    var bodyCol = comp === 'densepack' ? 0x4b5157 : comp === 'ballast' ? 0x9aa1a7 : 0xb9c2c9;
+    var body = new THREE.Mesh(new THREE.CylinderGeometry(dm.r, dm.r, dm.h, 14), mat(bodyCol));
     body.castShadow = true;
     g.add(body);
-    var band = new THREE.Mesh(new THREE.CylinderGeometry(0.118, 0.118, 0.09, 14), mat(hue, { emissive: hue, ei: glow }));
+    var band = new THREE.Mesh(new THREE.CylinderGeometry(dm.r + 0.003, dm.r + 0.003, dm.band, 14),
+      glow > 0 ? mat(hue, { emissive: hue, ei: glow }) : mat(hue));
     band.position.y = 0.02;
     g.add(band);
-    var top = new THREE.Mesh(new THREE.SphereGeometry(0.115, 14, 7, 0, Math.PI * 2, 0, Math.PI / 2), mat(hue));
-    top.position.y = 0.13;
+    var top = new THREE.Mesh(new THREE.SphereGeometry(dm.r, 14, 7, 0, Math.PI * 2, 0, Math.PI / 2),
+      mat(comp === 'ballast' ? bodyCol : hue));
+    top.position.y = dm.topY;
     g.add(top);
-    var valve = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.05, 8), mat(COL.brass, { shin: 60 }));
-    valve.position.y = 0.24;
-    g.add(valve);
+    if (comp === 'densepack') {   // pressed fill: hex bolts around the crown
+      for (var bi = 0; bi < 6; bi++) {
+        var bolt = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.03, 6), mat(COL.brass, { shin: 50 }));
+        var ba = bi * Math.PI / 3;
+        bolt.position.set(Math.cos(ba) * dm.r * 0.7, dm.topY + 0.02, Math.sin(ba) * dm.r * 0.7);
+        g.add(bolt);
+      }
+    }
+    if (comp !== 'ballast') {
+      var valve = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.05, 8), mat(COL.brass, { shin: 60 }));
+      valve.position.y = dm.valveY;
+      g.add(valve);
+    }
+    // stockroom stencil: designation + seeded lot number, painted on the can
+    var def = PG2.COMPOUNDS[comp];
+    if (def && def.stencil) {
+      var sc2 = dm.r / 0.115;
+      var st = textPlane(def.stencil, 0.16 * sc2, 0.062 * sc2, { color: '#241f18', px: 76 });
+      st.position.set(0, -0.035 * sc2, dm.r + 0.002);
+      g.add(st);
+      var lot = textPlane(PG2.lotNumber(S.seed, comp), 0.17 * sc2, 0.045 * sc2, { color: '#3a332a', px: 46 });
+      lot.position.set(0, -0.095 * sc2, dm.r + 0.002);
+      g.add(lot);
+    }
     return g;
   }
   function buildTimer() {
@@ -454,11 +528,103 @@
     g.add(ring);
     return g;
   }
+  function buildBatteryL() {
+    var g = new THREE.Group();
+    var box = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.3, 0.3), mat(0x33503e));
+    box.castShadow = true;
+    g.add(box);
+    [-0.1, 0, 0.1].forEach(function (dz, i) {
+      var post = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.06, 8),
+        mat(i === 2 ? 0x8a929a : i ? COL.brass : 0xb0b6bb, { shin: 70 }));
+      post.position.set(-0.1, 0.17, dz);
+      g.add(post);
+    });
+    var strap = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.03, 0.05), mat(0x22303c));
+    strap.position.y = 0.12;
+    g.add(strap);
+    var lbl = textPlane('DC-12 L · AUX', 0.26, 0.08, { color: '#e8ddc0', px: 70 });
+    lbl.position.set(0, 0, 0.155);
+    g.add(lbl);
+    return g;
+  }
+  function buildHarness() {
+    var g = new THREE.Group();
+    var coil = new THREE.Mesh(new THREE.TorusGeometry(0.13, 0.032, 8, 20), mat(0x2c3238, { shin: 30 }));
+    coil.rotation.x = Math.PI / 2;
+    g.add(coil);
+    var braid = new THREE.Mesh(new THREE.TorusGeometry(0.13, 0.036, 8, 20, Math.PI * 1.2), mat(0x5a6672, { shin: 45 }));
+    braid.rotation.x = Math.PI / 2;
+    g.add(braid);
+    [-0.09, 0.09].forEach(function (dx) {
+      var clipM = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.03, 0.07), mat(COL.brass, { shin: 60 }));
+      clipM.position.set(dx, 0.01, 0);
+      g.add(clipM);
+    });
+    return g;
+  }
+  function buildDelayRelay() {
+    var g = new THREE.Group();
+    var box = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.13, 0.1), mat(0x4a3527, { shin: 40 }));
+    box.castShadow = true;
+    g.add(box);
+    var can = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.07, 10), mat(0xb9c2c9, { shin: 60 }));
+    can.position.set(0.04, 0.09, 0);
+    g.add(can);
+    var lbl = textPlane('K-DLY +0.5s', 0.15, 0.05, { color: '#f0d9a8', px: 60 });
+    lbl.position.set(0, -0.01, 0.055);
+    g.add(lbl);
+    return g;
+  }
+  function buildImpactFuze() {
+    var g = new THREE.Group();
+    var cone = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.44, 14), mat(COL.nose));
+    cone.rotation.z = -Math.PI / 2;
+    cone.position.x = 0.2;
+    cone.castShadow = true;
+    g.add(cone);
+    var pin = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.02, 0.14, 8), mat(0xd8dde2, { shin: 80 }));
+    pin.rotation.z = -Math.PI / 2;
+    pin.position.x = 0.46;
+    g.add(pin);
+    var ring = new THREE.Mesh(new THREE.CylinderGeometry(0.23, 0.23, 0.06, 14), mat(0xd8dde2, { shin: 50 }));
+    ring.rotation.z = Math.PI / 2;
+    ring.position.x = 0.0;
+    g.add(ring);
+    var lbl = textPlane('NF-1', 0.14, 0.06, { color: '#f3ede0', px: 80 });
+    lbl.position.set(0.14, 0.1, 0.14);
+    lbl.rotation.y = 0.35;
+    g.add(lbl);
+    return g;
+  }
+  function buildPaintTin() {
+    var g = new THREE.Group();
+    var tin = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 0.22, 16), mat(0x777f83, { shin: 40 }));
+    tin.castShadow = true;
+    g.add(tin);
+    var lid = new THREE.Mesh(new THREE.CylinderGeometry(0.165, 0.165, 0.02, 16), mat(0x9aa1a7, { shin: 60 }));
+    lid.position.y = 0.12;
+    g.add(lid);
+    var handle = new THREE.Mesh(new THREE.TorusGeometry(0.13, 0.012, 6, 16, Math.PI), mat(0xb9c2c9, { shin: 70 }));
+    handle.position.y = 0.13;
+    g.add(handle);
+    var drip = new THREE.Mesh(new THREE.SphereGeometry(0.03, 8, 6), mat(0x8a4a34));
+    drip.position.set(0.12, 0.11, 0.05);
+    g.add(drip);
+    var lbl = textPlane('GG No.2', 0.2, 0.07, { color: '#241f18', px: 64 });
+    lbl.position.set(0, 0, 0.162);
+    g.add(lbl);
+    return g;
+  }
   function partBuilder(id) {
     if (PG2.SHELLS[id]) return buildCasing(id);
     if (PG2.COMPOUNDS[id]) return buildCanister(id);
     if (id === 'timer') return buildTimer();
     if (id === 'battery') return buildBattery();
+    if (id === 'batteryl') return buildBatteryL();
+    if (id === 'harness') return buildHarness();
+    if (id === 'delayrelay') return buildDelayRelay();
+    if (id === 'impactfuze') return buildImpactFuze();
+    if (id === 'paintlocker') return buildPaintTin();
     if (id === 'cap') return buildCap();
     if (id === 'fins') return buildFins();
     if (id === 'panel') return buildArmPanel();
@@ -671,11 +837,13 @@
     slotXs(a.shell).forEach(function (x, i) {
       if (!a.canisters[i]) nodes.push({ id: 'slot' + i, pos: V3(x, d.r + 0.1, 0), accepts: Object.keys(PG2.COMPOUNDS), slot: i });
     });
-    if (!a.timer) nodes.push({ id: 'nose', pos: V3(d.L / 2 + 0.05, 0, 0), accepts: ['timer'] });
-    if (!a.battery) nodes.push({ id: 'tail', pos: V3(-d.L / 2 - 0.18, 0, 0), accepts: ['battery'] });
+    if (!a.timer && !a.impactfuze) nodes.push({ id: 'nose', pos: V3(d.L / 2 + 0.05, 0, 0), accepts: ['timer', 'impactfuze'] });
+    if (!a.battery && !a.batteryl) nodes.push({ id: 'tail', pos: V3(-d.L / 2 - 0.18, 0, 0), accepts: ['battery', 'batteryl'] });
     if (!a.cap) nodes.push({ id: 'well', pos: V3(wellX(a.shell), d.r + 0.12, 0), accepts: ['cap'] });
     if (!a.fins) nodes.push({ id: 'finring', pos: V3(-d.L / 2 + 0.3, 0, 0), accepts: ['fins'] });
     if (!a.panel) nodes.push({ id: 'side', pos: V3(-d.L * 0.31, 0.05, d.r + 0.02), accepts: ['panel'] });
+    if (!a.delayrelay) nodes.push({ id: 'relaymount', pos: V3(d.L * 0.28, -0.13, d.r - 0.02), accepts: ['delayrelay'] });
+    if (!a.harness) nodes.push({ id: 'harnessmount', pos: V3(-d.L * 0.05, -d.r - 0.04, 0), accepts: ['harness'] });
     return nodes;
   }
   function nodePose(nodeId, partId) {
@@ -692,6 +860,8 @@
     if (nodeId === 'well') return { pos: V3(wellX(a.shell), d.r + 0.055, 0), rot: V3(0, 0, 0) };
     if (nodeId === 'finring') return { pos: V3(-d.L / 2 + 0.28, 0, 0), rot: V3(0, 0, 0) };
     if (nodeId === 'side') return { pos: V3(-d.L * 0.31, 0.05, d.r + 0.02), rot: V3(0, 0, 0) };
+    if (nodeId === 'relaymount') return { pos: V3(d.L * 0.28, -0.13, d.r - 0.02), rot: V3(0, 0, 0) };
+    if (nodeId === 'harnessmount') return { pos: V3(-d.L * 0.05, -d.r - 0.02, 0), rot: V3(0, 0, 0) };
     return { pos: V3(0, 0, 0), rot: V3(0, 0, 0) };
   }
 
@@ -725,7 +895,11 @@
       dev.add(m);
     });
     if (a.timer) addPart(buildTimer(), 'nose', { kind: 'timer' });
+    if (a.impactfuze) addPart(buildImpactFuze(), 'nose', { kind: 'impactfuze' });
     if (a.battery) addPart(buildBattery(), 'tail', { kind: 'battery' });
+    if (a.batteryl) addPart(buildBatteryL(), 'tail', { kind: 'batteryl' });
+    if (a.delayrelay) addPart(buildDelayRelay(), 'relaymount', { kind: 'delayrelay' });
+    if (a.harness) addPart(buildHarness(), 'harnessmount', { kind: 'harness' });
     if (a.cap) {
       var capPivot = new THREE.Group();
       var pp = nodePose('well');
@@ -792,38 +966,90 @@
     });
   }
 
-  /* ================= SHELF ================= */
-  var ALL_PART_IDS = ['compact', 'standard', 'heavy', 'ember', 'frost', 'emberx', 'emberxs', 'glaze',
-                      'timer', 'battery', 'cap', 'panel', 'fins'];
-  function shelfList() {
-    var list = [
-      { id: 'compact', name: 'SMALL SHELL', group: 'shell' },
-      { id: 'standard', name: 'STANDARD SHELL', group: 'shell' },
-      { id: 'heavy', name: 'BIG SHELL', group: 'shell' },
-      { id: 'ember', name: 'EMBER CANISTER', group: 'fill' },
-      { id: 'frost', name: 'FROST CANISTER', group: 'fill' }
-    ];
+  /* ================= THE PARTS DRAWER (M3a) =================
+     The bottom scroll strip is retired. Parts live in a KSP-style
+     slide-out drawer on the thumb edge: category tabs down the spine,
+     a 2-column grid per tab, spring slide, auto-collapse on grab.
+     Locked parts show as dark silhouettes — the catalog is the
+     progression brochure. Mirrors under the left-handed setting. */
+  var ALL_PART_IDS = ['compact', 'standard', 'heavy', 'thinwall', 'segmented',
+                      'ember', 'frost', 'emberx', 'emberxs', 'glaze', 'trimcell', 'densepack', 'ballast',
+                      'timer', 'battery', 'batteryl', 'harness', 'delayrelay', 'impactfuze',
+                      'cap', 'panel', 'fins', 'paintlocker'];
+  var DRAWER_CATS = [
+    { id: 'shells',   name: 'SHELLS' },
+    { id: 'payload',  name: 'PAYLOAD' },
+    { id: 'fuzing',   name: 'FUZING' },
+    { id: 'power',    name: 'POWER' },
+    { id: 'trim',     name: 'TRIM' },
+    { id: 'guidance', name: 'GUIDANCE', sealed: 'SEALED — ACT II' }   // the tease
+  ];
+  /* the catalog: category, one effect line, unlock contract (locked = silhouette) */
+  var CATALOG = [
+    { id: 'compact',  cat: 'shells',  name: 'SMALL SHELL',    fx: '2 BAYS · EASILY OVERWHELMED', group: 'shell' },
+    { id: 'standard', cat: 'shells',  name: 'STANDARD SHELL', fx: '4 BAYS · THE SENSIBLE ONE',   group: 'shell' },
+    { id: 'heavy',    cat: 'shells',  name: 'BIG SHELL',      fx: '6 BAYS · VAULT-PATIENT',      group: 'shell' },
+    { id: 'thinwall', cat: 'shells',  name: 'THIN-WALL SHELL', fx: '4 BAYS · LIGHT & FRAGILE',   group: 'shell', unlock: 'RFP-048' },
+    { id: 'segmented', cat: 'shells', name: 'SEGMENTED CASING', fx: '4 BAYS · SCORED FRAG SPRAY', group: 'shell', unlock: 'RFP-060' },
+    { id: 'ember',    cat: 'payload', name: 'FILLER 1A',      fx: '10 Bd · RUNS HOT',            group: 'fill' },
+    { id: 'frost',    cat: 'payload', name: 'FILLER 2S',      fx: '3.5 Bd · RUNS COLD',          group: 'fill' },
+    { id: 'emberx',   cat: 'payload', name: 'FILLER 1X',      fx: '26 Bd · TWITCHY',             group: 'refined' },
+    { id: 'emberxs',  cat: 'payload', name: 'SCORCHED F-1X',  fx: '20 Bd · ANGRIER',             group: 'refined' },
+    { id: 'glaze',    cat: 'payload', name: 'ADDITIVE G-3',   fx: 'STABILIZER · COOLS THE LOAD', group: 'refined' },
+    { id: 'trimcell', cat: 'payload', name: 'TRIM CELL ×¼',   fx: '2.5 Bd · FINE CoM & YIELD',   group: 'fill', unlock: 'RFP-044' },
+    { id: 'densepack', cat: 'payload', name: 'DENSE-PACK CELL', fx: '16 Bd · NEEDS STANDARD+',   group: 'fill', unlock: 'RFP-060' },
+    { id: 'ballast',  cat: 'payload', name: 'INERT BALLAST',  fx: 'ZERO YIELD · SHIFTS CoM',     group: 'fill', unlock: 'RFP-057' },
+    { id: 'timer',    cat: 'fuzing',  name: 'TIMER',          fx: 'FIRES AT T+5.0 · DIAL SETS IT', group: 'unique', excl: ['impactfuze'] },
+    { id: 'delayrelay', cat: 'fuzing', name: 'DELAY RELAY',   fx: '+0.5 s AFTER THE DIAL',       group: 'unique', unlock: 'RFP-052' },
+    { id: 'impactfuze', cat: 'fuzing', name: 'IMPACT FUZE NOSE', fx: 'FIRES ON GROUND CONTACT',  group: 'unique', unlock: 'RFP-066', excl: ['timer'] },
+    { id: 'battery',  cat: 'power',   name: 'BATTERY',        fx: 'POWERS THE FIRING TRAIN',     group: 'unique', excl: ['batteryl'] },
+    { id: 'batteryl', cat: 'power',   name: 'BATTERY PACK L', fx: 'HEAVY · SPARE AUX TERMINAL',  group: 'unique', unlock: 'RFP-063', excl: ['battery'] },
+    { id: 'harness',  cat: 'power',   name: 'SHIELDED HARNESS', fx: 'NO COLOUR ASIDE · +1 PROBE FREE', group: 'unique', unlock: 'RFP-055' },
+    { id: 'panel',    cat: 'power',   name: 'ARM SWITCH',     fx: 'ONE GUARD · ONE SWITCH',      group: 'unique' },
+    { id: 'cap',      cat: 'trim',    name: 'WELL CAP',       fx: 'SEALS THE DET WELL',          group: 'unique' },
+    { id: 'fins',     cat: 'trim',    name: 'FINS',           fx: 'ZERO EFFECT · MORALE',        group: 'unique' },
+    { id: 'paintlocker', cat: 'trim', name: 'PAINT LOCKER',   fx: '3 FINISHES · ZERO MECHANICS', group: 'unique', unlock: 'RFP-063', free: true,
+      tap: function () { cyclePaint(); } }
+  ];
+  /* the PAINT LOCKER — pure ownership; the finish follows you between contracts */
+  function cyclePaint() {
+    var a = S.assembly;
+    if (!a.shell) { toast('Paint wants a shell to land on.'); return; }
+    var idx = 0;
+    PG2.PAINTS.forEach(function (p, i) { if (p.id === a.paint) idx = i; });
+    var next = PG2.PAINTS[(idx + 1) % PG2.PAINTS.length];
+    a.paint = next.id;
+    SAVE.paint = next.id;
+    persist();
+    PGAudio.thunk(0.25);
+    toast('PAINT LOCKER — ' + next.name + '. Zero mechanics. Pure ownership.');
+    rebuildDevice();
+    refreshHUD();
+  }
+  var drawer = { open: false, cat: 'shells', wasOpenForDrag: false, built: null };
+  function partLocked(entry) {
+    if (!entry.unlock) return false;
+    var idx = -1;
+    PG2.CONTRACTS.forEach(function (c, i) { if (c.id === entry.unlock) idx = i; });
+    if (idx < 0) return false;
+    return !contractUnlocked(idx);
+  }
+  function catalogList(cat) {
     var st = S.assembly.refine.stock;
-    if (rfp().needsRefinery || st.emberx > 0 || st.emberxs > 0 || st.glaze > 0) {
-      list.push({ id: 'emberx', name: 'EMBER-X CANISTER', group: 'refined' });
-      list.push({ id: 'emberxs', name: 'SCORCHED X', group: 'refined' });
-      list.push({ id: 'glaze', name: 'GLAZE CANISTER', group: 'refined' });
-    }
-    list.push(
-      { id: 'timer', name: 'TIMER', group: 'unique' },
-      { id: 'battery', name: 'BATTERY', group: 'unique' },
-      { id: 'cap', name: 'WELL CAP', group: 'unique' },
-      { id: 'panel', name: 'ARM SWITCH', group: 'unique' },
-      { id: 'fins', name: 'FINS', group: 'unique' }
-    );
-    return list;
+    var refinedVisible = rfp().needsRefinery || st.emberx > 0 || st.emberxs > 0 || st.glaze > 0;
+    return CATALOG.filter(function (p) {
+      if (p.cat !== cat) return false;
+      if (p.group === 'refined' && !refinedVisible) return false;
+      return true;
+    });
   }
   function partCost(id) {
     if (PG2.SHELLS[id]) return PG2.SHELLS[id].cost;
     if (PG2.COMPOUNDS[id]) return PG2.COMPOUNDS[id].cost;
-    return PG2.PARTS[id].cost;
+    return PG2.PARTS[id] ? PG2.PARTS[id].cost : 0;
   }
   function costLabel(p) {
+    if (p.free) return 'SHOP COURTESY';
     if (p.group === 'refined') return 'FROM THE STILL';
     return '$' + partCost(p.id).toLocaleString('en-US') + (p.group === 'fill' ? ' ea' : '');
   }
@@ -857,46 +1083,203 @@
       r2.forceContextLoss && r2.forceContextLoss();
     } catch (e) { /* icons stay blank; tiles still labeled */ }
   }
-  function buildShelf() {
-    var sc = $('shelf-scroll');
-    sc.innerHTML = '';
-    shelfList().forEach(function (p) {
+  function setDrawerOpen(open, silent) {
+    drawer.open = !!open;
+    $('drawer').classList.toggle('collapsed', !drawer.open);
+    if (!silent) PGAudio.tap();
+  }
+  function setDrawerCat(cat, silent) {
+    drawer.cat = cat;
+    if (SAVE.ui) { SAVE.ui.drawerCat = cat; persist(); }   // the drawer remembers
+    buildDrawerGrid();
+    refreshDrawerSpine();
+    if (!silent) PGAudio.tick();
+  }
+  function refreshDrawerSpine() {
+    document.querySelectorAll('.spine-tab').forEach(function (el) {
+      el.classList.toggle('on', el.dataset.cat === drawer.cat);
+    });
+  }
+  function buildDrawerSpine() {
+    var sp = $('drawer-spine');
+    sp.innerHTML = '';
+    DRAWER_CATS.forEach(function (c) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'spine-tab' + (c.sealed ? ' sealed' : '');
+      b.dataset.cat = c.id;
+      b.innerHTML = c.sealed ? '<span class="st-lock">🔒</span> ' + c.name : c.name;
+      b.addEventListener('click', function () {
+        PGAudio.init();
+        if (c.sealed) { PGAudio.buzz(); toast(c.name + ' — ' + c.sealed + '. The Authority is still stamping the folders.'); return; }
+        setDrawerCat(c.id);
+      });
+      sp.appendChild(b);
+    });
+    refreshDrawerSpine();
+  }
+  /* tile input: drag OUT to grab (drawer collapses), drag UP/DOWN to scroll the grid */
+  function bindTilePointer(t, entry) {
+    t.addEventListener('pointerdown', function (e) {
+      if (S.phase !== 'build') return;
+      e.preventDefault();
+      PGAudio.init();
+      if (partLocked(entry)) { PGAudio.buzz(); toast(entry.name + ' — UNLOCKS · ' + entry.unlock + '. The catalog is the brochure.'); return; }
+      if (t.classList.contains('disabled')) return;
+      if (entry.tap) { entry.tap(); return; }        // tap-action tiles (e.g. the paint locker)
+      var grid = $('drawer-grid');
+      var st = { pid: e.pointerId, x0: e.clientX, y0: e.clientY, lastY: e.clientY, mode: null };
+      function mv(e2) {
+        if (e2.pointerId !== st.pid) return;
+        var dx = e2.clientX - st.x0, dy = e2.clientY - st.y0;
+        if (!st.mode) {
+          if (Math.abs(dx) < 7 && Math.abs(dy) < 7) return;
+          // grab by default (the stand is down-and-right of the drawer);
+          // a steep vertical pull scrolls the grid — only when there is more to see
+          var overflows = grid.scrollHeight > grid.clientHeight + 4;
+          st.mode = (overflows && Math.abs(dy) > 2.5 * Math.abs(dx)) ? 'scroll' : 'grab';
+          if (st.mode === 'grab') {
+            cleanup();
+            drawer.wasOpenForDrag = drawer.open;
+            setDrawerOpen(false, true);              // build zone gets the whole screen
+            beginPartDrag(entry.id, e2);
+            return;
+          }
+        }
+        if (st.mode === 'scroll') {
+          grid.scrollTop -= (e2.clientY - st.lastY);
+          st.lastY = e2.clientY;
+        }
+      }
+      function up(e2) { if (e2.pointerId === st.pid) cleanup(); }
+      function cleanup() {
+        window.removeEventListener('pointermove', mv);
+        window.removeEventListener('pointerup', up);
+        window.removeEventListener('pointercancel', up);
+      }
+      window.addEventListener('pointermove', mv);
+      window.addEventListener('pointerup', up);
+      window.addEventListener('pointercancel', up);
+    });
+  }
+  function buildDrawerGrid() {
+    var grid = $('drawer-grid');
+    grid.innerHTML = '';
+    var catDef = null;
+    DRAWER_CATS.forEach(function (c) { if (c.id === drawer.cat) catDef = c; });
+    $('drawer-title').textContent = 'PARTS · ' + (catDef ? catDef.name : '');
+    catalogList(drawer.cat).forEach(function (p) {
       var t = document.createElement('div');
-      t.className = 'tile';
+      var locked = partLocked(p);
+      t.className = 'tile' + (locked ? ' locked' : '');
       t.id = 'tile-' + p.id;
-      var badge = p.group === 'shell' ? '<span class="t-badge">PICK 1</span>'
-                : p.group === 'refined' ? '<span class="t-badge" id="badge-' + p.id + '">×0</span>' : '';
+      var badge = !locked && p.group === 'shell' ? '<span class="t-badge">PICK 1</span>'
+                : !locked && p.group === 'refined' ? '<span class="t-badge" id="badge-' + p.id + '">×0</span>' : '';
       t.innerHTML = badge +
         '<img alt="" draggable="false"' + (iconCache[p.id] ? ' src="' + iconCache[p.id] + '"' : '') + '>' +
         '<div class="t-name">' + p.name + '</div>' +
-        '<div class="t-cost">' + costLabel(p) + '</div>';
-      t.addEventListener('pointerdown', function (e) {
-        if (S.phase !== 'build') return;
-        e.preventDefault();
-        beginPartDrag(p.id, e);
-      });
-      sc.appendChild(t);
+        (locked
+          ? '<div class="t-unlock">UNLOCKS · ' + p.unlock + '</div>'
+          : '<div class="t-cost">' + costLabel(p) + '</div><div class="t-fx">' + p.fx + '</div>');
+      bindTilePointer(t, p);
+      grid.appendChild(t);
     });
-    refreshShelf();
+    refreshDrawer();
   }
-  function refreshShelf() {
+  function buildDrawer() {
+    buildDrawerSpine();
+    buildDrawerGrid();
+  }
+  function refreshDrawer() {
     var a = S.assembly;
     var d = PG2.derive(a, rfp());
-    shelfList().forEach(function (p) {
+    catalogList(drawer.cat).forEach(function (p) {
       var t = $('tile-' + p.id);
-      if (!t) return;
+      if (!t || partLocked(p)) return;
       var dis = false;
-      if (p.group === 'shell') dis = !!a.shell;
+      if (p.tap) dis = !a.shell;
+      else if (p.group === 'shell') dis = !!a.shell;
       else if (p.group === 'fill') dis = !a.shell || d.filled >= d.slots;
       else if (p.group === 'refined') {
         dis = !a.shell || d.filled >= d.slots || !(a.refine.stock[p.id] > 0);
         var b = $('badge-' + p.id);
         if (b) b.textContent = '×' + a.refine.stock[p.id];
       }
-      else dis = !a.shell || !!a[p.id];
+      else dis = !a.shell || !!a[p.id] || (p.excl && p.excl.some(function (x) { return !!a[x]; }));
       t.classList.toggle('disabled', dis);
     });
   }
+  $('drawer-tab').addEventListener('click', function () {
+    PGAudio.init();
+    setDrawerOpen(!drawer.open);
+  });
+
+  /* ================= BUILD PHASE RAIL (M3a) =================
+     1 STRUCTURE · 2 PAYLOAD · 3 SYSTEMS · 4 CLOSE-OUT.
+     Tapping a phase focuses the camera and filters the drawer to the
+     phase's categories. Navigation, never a lock — free movement until
+     the truck rolls. CLOSE-OUT enters the existing close-out flow. */
+  var buildPhase = 'structure';
+  var PHASE_DEF = {
+    structure: { label: 'STRUCTURE', cats: ['shells', 'trim'],
+                 view: { theta: 0.7, phi: 1.18, radius: 4.4, target: [0, 1.25, 0] } },
+    payload:   { label: 'PAYLOAD', cats: ['payload'],
+                 view: { theta: 0.7, phi: 0.52, radius: 3.1, target: [0, 1.35, 0] } },
+    systems:   { label: 'SYSTEMS', cats: ['fuzing', 'power'],
+                 view: { theta: 1.25, phi: 1.02, radius: 2.7, target: [0.45, 1.3, 0] } },
+    closeout:  { label: 'CLOSE-OUT', cats: [] }
+  };
+  function refreshPhaseRail() {
+    var d = PG2.derive(S.assembly, rfp());
+    document.querySelectorAll('.pr-step').forEach(function (el) {
+      el.classList.toggle('on', el.dataset.phase === buildPhase);
+      if (el.dataset.phase === 'closeout') {
+        el.classList.toggle('dim', !(d.complete && !d.overBudget && !d.overWeight));
+      }
+    });
+  }
+  function tweenPhaseView(v) {
+    var o = bay.orbit;
+    var t0 = o.theta, p0 = o.phi, r0 = o.radius, tg0 = o.target.clone();
+    var tg1 = V3(v.target[0], v.target[1], v.target[2]);
+    bay.velTheta = bay.velPhi = 0;
+    tween(680, function (t) {
+      o.theta = lerp(t0, v.theta, t);
+      o.phi = lerp(p0, v.phi, t);
+      o.radius = lerp(r0, v.radius, t);
+      o.target.lerpVectors(tg0, tg1, t);
+    });
+  }
+  function setBuildPhase(phase) {
+    if (S.phase !== 'build') return;
+    var def = PHASE_DEF[phase];
+    if (!def) return;
+    if (phase === 'closeout') {
+      var d = PG2.derive(S.assembly, rfp());
+      if (!(d.complete && !d.overBudget && !d.overWeight)) {
+        PGAudio.buzz();
+        toast(d.missing.length ? 'Close-out wants a complete article — still missing: ' + d.missing.join(', ') + '.'
+              : d.overBudget ? 'Close-out refused: over budget.' : 'Close-out refused: over the weight cap.');
+        return;
+      }
+      PGAudio.tap();
+      enterWiring();
+      return;
+    }
+    buildPhase = phase;
+    PGAudio.tick();
+    tweenPhaseView(def.view);
+    // filter the drawer to the phase's categories (soft — spine stays free)
+    if (def.cats.length && def.cats.indexOf(drawer.cat) < 0) setDrawerCat(def.cats[0], true);
+    setDrawerOpen(true, true);
+    refreshPhaseRail();
+  }
+  document.querySelectorAll('.pr-step').forEach(function (el) {
+    el.addEventListener('click', function () {
+      PGAudio.init();
+      setBuildPhase(el.dataset.phase);
+    });
+  });
 
   /* ================= HUD ================= */
   function closeoutReady() {
@@ -943,7 +1326,8 @@
     $('btn-refinery').classList.toggle('hidden', !(S.phase === 'build' && R.needsRefinery));
     refreshComMarker(d);
     refreshHint(d);
-    refreshShelf();
+    refreshDrawer();
+    refreshPhaseRail();
   }
   function refreshHint(d) {
     var h = $('bay-hint');
@@ -951,14 +1335,14 @@
     h.style.opacity = 1;
     var R = rfp();
     var msg;
-    if (!S.assembly.shell) msg = 'Drag a <b>shell</b> from the shelf onto the glowing stand.<br>One finger orbits · pinch zooms.';
+    if (!S.assembly.shell) msg = 'Pull the <b>PARTS</b> drawer and drag a <b>shell</b> onto the glowing stand.<br>One finger orbits · pinch zooms.';
     else if (d.filled === 0) msg = R.needsRefinery
       ? 'This job wants the still. Fire up <b>⚗ THE STILL</b>, then load the bays.'
-      : 'Load <b>canisters</b> into the open bays.<br>Amber EMBER = more bang · blue FROST = calmer.';
+      : 'Load <b>canisters</b> into the open bays.<br>Amber F-1A = more bang · blue F-2S = calmer.';
     else if (d.missing.length) msg = 'Still missing: <b>' + d.missing.join(' · ') + '</b>.<br>Tap a placed part to take it back off.';
     else if (d.overBudget) msg = '<b style="color:#ff8d7e">Over budget.</b> Take something off — the Authority won’t pay a penny past $' + R.budget.toLocaleString('en-US') + '.';
     else if (d.overWeight) msg = '<b style="color:#ff8d7e">Over weight.</b> ' + Math.round(d.weight) + ' kg on a ' + R.weightCap + ' kg crane. The scale does not negotiate.';
-    else if (d.cookRisk > 0) msg = '<b style="color:#ff8d7e">Heat warning.</b> This load may <b>cook off</b> under the forecast. FROST or GLAZE buys shade.';
+    else if (d.cookRisk > 0) msg = '<b style="color:#ff8d7e">Heat warning.</b> This load may <b>cook off</b> under the forecast. F-2S or ADDITIVE G-3 buys shade.';
     else if (closeoutReady()) msg = 'Ready. <b>REFIRE</b> as-is — or run <b>CLOSE-OUT</b> to change wiring, seating or arming.';
     else msg = 'Looks right. Hit <b>CLOSE-OUT</b> to wire it up by hand.';
     if (R.offsetSpec && d.filled > 0 && !d.missing.length && !d.overBudget) {
@@ -1115,6 +1499,10 @@
     bay.scene.remove(dp.ghost);
     if (dp.node) placePart(dp.id, dp.node);
     else refreshNodes(null);
+    if (drawer.wasOpenForDrag) {           // the drawer slides back where you left it
+      drawer.wasOpenForDrag = false;
+      setDrawerOpen(true, true);
+    }
   }
   function findPlacedRoot(kind, slot) {
     var found = null;
@@ -1143,6 +1531,13 @@
     if (/^slot/.test(node.id) && PG2.COMPOUNDS[id] && PG2.COMPOUNDS[id].cost === 0 &&
         !(a.refine.stock[id] > 0)) {   // refined — comes from stock
       toast('No ' + PG2.COMPOUNDS[id].name + ' in stock — run ⚗ THE STILL.');
+      refreshNodes(null);
+      return;
+    }
+    if (/^slot/.test(node.id) && PG2.COMPOUNDS[id] && PG2.COMPOUNDS[id].needsRated &&
+        a.shell && !PG2.SHELLS[a.shell].rated) {
+      PGAudio.buzz();
+      toast('DENSE-PACK wants a STANDARD-rated shell under it. This one is not.');
       refreshNodes(null);
       return;
     }
@@ -1235,11 +1630,11 @@
     compact: 'Two bays and big dreams. Rated for polite explosions only.',
     standard: 'The catalog calls it “dependable”, which is catalog for “blameless”.',
     heavy: 'The patience of a bank vault and the appetite of a quarry.',
-    ember: 'Sloshes if you shake it. Kindly do not shake it.',
-    frost: 'Smells faintly of winter and disapproval.',
-    emberx: 'From your own still. It hums when nobody is listening.',
+    ember: 'The one-alpha. Sloshes if you shake it. Kindly do not shake it.',
+    frost: 'The two-sierra. Smells faintly of winter and disapproval.',
+    emberx: 'The one-x-ray, from your own still. It hums when nobody is listening.',
     emberxs: 'Left the still angry. Holds a grudge, loses a contest.',
-    glaze: 'FROST poured slow over a line. Calms the load, pads the shocks, ignores the forecast.',
+    glaze: 'F-2S poured slow over a line. Calms the load, pads the shocks, ignores the forecast.',
     timer: 'Counts to five. Never wrong — only ever wired wrong.',
     battery: 'DC-9 cells. The label says DO NOT LICK because somebody asked.',
     cap: 'A hat for the important hole. Fits like bureaucracy: snugly.',
@@ -1421,6 +1816,10 @@
   var rfpTimers = [];
   function bigNum3(R) {
     // the third headline number is whatever this contract is ABOUT
+    if (R.impact) {
+      return '<div class="bignum"><div class="bn-lbl">PLATE BAND</div><div class="bn-val">≤' +
+        R.impact.band.toFixed(1) + '</div><div class="bn-unit">METRES OFF CENTRE · DROPPED</div></div>';
+    }
     if (R.offsetSpec) {
       return '<div class="bignum"><div class="bn-lbl">BREACH OFFSET</div><div class="bn-val">' +
         R.offsetSpec.min + '–' + R.offsetSpec.max + '</div><div class="bn-unit">METRES ' +
@@ -1437,7 +1836,10 @@
   function buildRFP() {
     var R = rfp();
     var doc = $('rfp-doc');
-    var finePrint = (R.offsetSpec || R.weightCap)
+    var finePrint = R.impact
+      ? '<p class="spec-clause fine">Timing spec WAIVED. Release at T+' + R.tSpec.toFixed(1) +
+        ' s; detonation on plate contact. IMPACT RELIABILITY is adjudicated in its place. The nose fuze is mandatory and sold separately.</p>'
+      : (R.offsetSpec || R.weightCap)
       ? '<p class="spec-clause fine">Detonation at T+' + R.tSpec.toFixed(1) + ' s ±' + R.tTol +
         (R.offsetSpec ? ' · crater centre measured from pad datum.' : ' · weighed at the gate, argued about after.') + '</p>'
       : '';
@@ -1508,6 +1910,7 @@
     if (!keepAssembly) {
       S.assembly = PG2.makeAssembly();
       S.assembly.refine.stock = JSON.parse(JSON.stringify(SAVE.stock));   // the war chest follows you
+      S.assembly.paint = SAVE.paint || null;                              // so does the paint job
       clearHistory();
     }
     histUI();
@@ -1516,7 +1919,10 @@
     $('ui-bay').classList.remove('closeout');
     $('bay-brand-txt').textContent = 'REDSKY INC · ' + rfp().id;
     $('bay-attempt').textContent = 'TEST #' + (S.attempt + 1);
-    buildShelf();
+    buildPhase = S.assembly.shell ? buildPhase : 'structure';   // a fresh stand starts at STRUCTURE
+    buildDrawer();
+    refreshPhaseRail();
+    setDrawerOpen(true, true);        // the drawer presents itself; grabbing a part folds it away
     $('stage-build').classList.remove('hidden');
     $('stage-bar').classList.add('hidden');
     $('wiring-ui').classList.add('hidden');
@@ -1574,7 +1980,7 @@
   }
 
   /* ---------- build the board ---------- */
-  var COMP_SKIN = { bat: 'wc-painted', tmr: 'wc-metal', det: 'wc-bakelite', rly: 'wc-bakelite', sw: 'wc-metal', cap: 'wc-metal', jct: 'wc-bakelite' };
+  var COMP_SKIN = { bat: 'wc-painted', tmr: 'wc-metal', det: 'wc-bakelite', rly: 'wc-bakelite', sw: 'wc-metal', cap: 'wc-metal', jct: 'wc-bakelite', nfz: 'wc-metal' };
   function buildCompDiv(comp, x, y, w, h, nums) {
     var el = document.createElement('div');
     el.className = 'wcomp ' + (COMP_SKIN[comp.id] || 'wc-metal');
@@ -1584,6 +1990,7 @@
     if (comp.id === 'bat') art = '';
     else if (comp.id === 'tmr') art = '<span class="wtmr-face"></span>';
     else if (comp.id === 'det') art = '<span class="wdet-dome"></span>';
+    else if (comp.id === 'nfz') art = '<span class="wdet-dome"></span>';
     else if (comp.id === 'sw') art = '<span class="wsw-lever"></span>';
     else if (comp.id === 'jct') art = '<span class="wjct-bus"></span>';
     else if (comp.id === 'cap') art = '<span class="wcap-cyl" style="left:14%"></span><span class="wcap-cyl" style="left:41%"></span><span class="wcap-cyl" style="left:68%"></span>';
@@ -1618,6 +2025,18 @@
       }
       wst.pinLocal[pin] = { el: term, px: px, py: stripY };
     });
+    if (comp.id === 'bat' && S.assembly.batteryl) {
+      // BATTERY PACK L ships one more terminal on its block — stamped N.C.
+      var aux = document.createElement('div');
+      aux.className = 'wterm aux';
+      aux.style.left = (w - 16) + 'px'; aux.style.top = stripY + 'px';
+      el.appendChild(aux);
+      var albl = document.createElement('div');
+      albl.className = 'wpol aux';
+      albl.style.left = (w - 30) + 'px'; albl.style.top = (stripY - 44) + 'px';
+      albl.textContent = 'AUX N.C.';
+      el.appendChild(albl);
+    }
     return el;
   }
   function buildWiringStation() {
@@ -1871,7 +2290,8 @@
     t1: { h: 158, comps: { bat: [58, 104], tmr: [160, 52], det: [258, 104] } },
     t2: { h: 190, comps: { bat: [50, 128], sw: [132, 46], tmr: [222, 46], det: [262, 138] } },
     t3: { h: 212, comps: { bat: [44, 152], sw: [118, 42], tmr: [204, 42], rly: [268, 108], det: [168, 168] } },
-    t4: { h: 236, comps: { bat: [42, 148], tmr: [122, 40], rly: [208, 92], cap: [106, 192], jct: [226, 196], det: [288, 40] } }
+    t4: { h: 236, comps: { bat: [42, 148], tmr: [122, 40], rly: [208, 92], cap: [106, 192], jct: [226, 196], det: [288, 40] } },
+    ti: { h: 190, comps: { bat: [50, 128], sw: [132, 46], nfz: [222, 46], det: [262, 138] } }
   };
   function schemSymbol(comp, cx, cy, nums, rfpRef) {
     var ink = '#33291a';
@@ -1882,7 +2302,13 @@
       for (var i = 0; i < n; i++) out.push({ x: cx - span / 2 + (n === 1 ? span / 2 : span * i / (n - 1)), y: cy + y });
       return out;
     }
-    if (comp.id === 'bat') {
+    if (comp.id === 'nfz') {
+      // the nose fuze: a cone with a striker dot — no clock face, no apologies
+      s += '<path d="M' + (cx - 14) + ' ' + (cy - 12) + ' L' + (cx + 16) + ' ' + cy + ' L' + (cx - 14) + ' ' + (cy + 12) + ' Z" fill="none" stroke="' + ink + '" stroke-width="1.6"/>';
+      s += '<circle cx="' + (cx + 16) + '" cy="' + cy + '" r="2.6" fill="' + ink + '"/>';
+      s += '<line x1="' + (cx - 14) + '" y1="' + cy + '" x2="' + (cx - 22) + '" y2="' + cy + '" stroke="' + ink + '" stroke-width="1.2"/>';
+      pinPos = [{ x: cx - 22, y: cy }, { x: cx + 22, y: cy }, { x: cx, y: cy + 23 }];
+    } else if (comp.id === 'bat') {
       s += '<rect x="' + (cx - 26) + '" y="' + (cy - 14) + '" width="52" height="28" rx="2" fill="none" stroke="' + ink + '" stroke-width="1.6"/>';
       s += '<line x1="' + (cx - 8) + '" y1="' + (cy - 8) + '" x2="' + (cx - 8) + '" y2="' + (cy + 8) + '" stroke="' + ink + '" stroke-width="2.2"/>';
       s += '<line x1="' + (cx + 8) + '" y1="' + (cy - 4) + '" x2="' + (cx + 8) + '" y2="' + (cy + 4) + '" stroke="' + ink + '" stroke-width="1.2"/>';
@@ -2000,6 +2426,7 @@
   function enterWiring() {
     S.phase = 'wiring';
     S.closeoutStep = 0;
+    setDrawerOpen(false, true);
     $('ui-bay').classList.add('closeout');
     $('stage-build').classList.add('hidden');
     $('stage-bar').classList.remove('hidden');
@@ -3158,6 +3585,55 @@
     range.scarG = g;
   }
 
+  /* ---------- SKIPSTONE: the drop rig and the painted plate ---------- */
+  function buildDropRig() {
+    if (range.dropRig) {
+      range.dropRig.visible = true;
+      if (range.dropCable) range.dropCable.visible = true;
+      return;
+    }
+    var g = new THREE.Group();
+    [-5, 5].forEach(function (x) {
+      var post = new THREE.Mesh(new THREE.BoxGeometry(0.7, 13, 0.7), mat(0x6b4a2a));
+      post.position.set(x, 6.5, 0);
+      post.castShadow = true;
+      g.add(post);
+      var foot = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.4, 1.7), mat(0x22303c));
+      foot.position.set(x, 0.2, 0);
+      g.add(foot);
+      var brace = new THREE.Mesh(new THREE.BoxGeometry(0.28, 7.2, 0.28), mat(0x5c4a30));
+      brace.position.set(x * 0.72, 3.3, x > 0 ? -0.9 : 0.9);
+      brace.rotation.z = x > 0 ? 0.34 : -0.34;
+      g.add(brace);
+    });
+    var beam = new THREE.Mesh(new THREE.BoxGeometry(11.2, 0.6, 0.8), mat(0x6b4a2a));
+    beam.position.set(0, 13.1, 0);
+    beam.castShadow = true;
+    g.add(beam);
+    var winch = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.8, 1.0), mat(0x2f3b46));
+    winch.position.set(0, 13.0, 0);
+    g.add(winch);
+    var cable = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 1.6, 6), mat(0x22262b));
+    cable.position.set(0, 12.4, 0);
+    g.add(cable);
+    range.dropCable = cable;
+    // the plate: dark steel, a painted band at the contract's placement spec
+    var plate = new THREE.Mesh(new THREE.CylinderGeometry(4.4, 4.6, 0.3, 36), mat(0x3c4450, { shin: 40 }));
+    plate.position.y = 0.16;
+    plate.receiveShadow = true;
+    g.add(plate);
+    var bandR = (rfp().impact && rfp().impact.band) || 2.2;
+    var band = new THREE.Mesh(new THREE.TorusGeometry(bandR, 0.16, 8, 44), mat(COL.amber, { emissive: COL.amber, ei: 0.35 }));
+    band.rotation.x = Math.PI / 2;
+    band.position.y = 0.33;
+    g.add(band);
+    var dot = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 0.06, 20), mat(0xd8dde2, { shin: 30 }));
+    dot.position.y = 0.34;
+    g.add(dot);
+    range.scene.add(g);
+    range.dropRig = g;
+  }
+
   /* ---------- THE FLY-OFF: Pad B, dressed and occupied ---------- */
   function buildVantagePad() {
     var g = new THREE.Group();
@@ -3271,7 +3747,9 @@
     range.fx = null;
     if (range.craterG) { range.scene.remove(range.craterG); range.craterG = null; }
     if (range.vantageG) { range.scene.remove(range.vantageG); range.vantageG = null; }
+    if (range.dropRig) range.dropRig.visible = false;
     range.vBeatSkip = null;
+    range.deviceHolder.rotation.z = 0;
     msr.active = false;
     rebuildScars();
     range.wind = windOf(rfp());
@@ -3332,7 +3810,11 @@
       g.add(m);
     });
     if (a.timer) { var t = buildTimer(); t.position.set(d.L / 2 + 0.02, 0, 0); g.add(t); }
+    if (a.impactfuze) { var nf = buildImpactFuze(); nf.position.set(d.L / 2 + 0.02, 0, 0); g.add(nf); }
     if (a.battery) { var b = buildBattery(); b.position.set(-d.L / 2 - 0.16, 0, 0); g.add(b); }
+    if (a.batteryl) { var bl = buildBatteryL(); bl.position.set(-d.L / 2 - 0.16, 0, 0); g.add(bl); }
+    if (a.delayrelay) { var dr = buildDelayRelay(); dr.position.set(d.L * 0.28, -0.13, d.r - 0.02); g.add(dr); }
+    if (a.harness) { var hn = buildHarness(); hn.position.set(-d.L * 0.05, -d.r - 0.02, 0); g.add(hn); }
     if (a.cap) { var c2 = buildCap(); c2.position.set(wellX(a.shell), d.r + 0.055, 0); g.add(c2); }
     if (a.fins) { var f = buildFins(); f.position.set(-d.L / 2 + 0.28, 0, 0); g.add(f); }
     if (a.panel) { var p = buildArmPanel(); p.position.set(-d.L * 0.31, 0.05, d.r + 0.02); p.userData.leverPivot.rotation.x = a.armed ? 0.6 : -0.5; g.add(p); }
@@ -3355,25 +3837,35 @@
     var dh = range.deviceHolder;
     range.truck.remove(dh);
     range.scene.add(dh);
-    dh.position.set(0, 2.1, 0);
     dh.scale.set(1.7, 1.7, 1.7);
-    // trestle
-    if (!range.trestle) {
-      var tr = new THREE.Group();
-      [-0.9, 0.9].forEach(function (x) {
-        var leg = new THREE.Mesh(new THREE.BoxGeometry(0.28, 1.5, 1.6), mat(0x6b4a2a));
-        leg.position.set(x, 0.75, 0);
-        tr.add(leg);
-      });
-      range.scene.add(tr);
-      range.trestle = tr;
+    dh.rotation.z = 0;
+    dh.visible = true;
+    if (rfp().impact) {
+      // SKIPSTONE: the article hangs from the rig arm over the painted plate
+      buildDropRig();
+      dh.position.set(0, 12, 0);
+      if (range.trestle) range.trestle.visible = false;
+    } else {
+      dh.position.set(0, 2.1, 0);
+      if (range.dropRig) range.dropRig.visible = false;
+      // trestle
+      if (!range.trestle) {
+        var tr = new THREE.Group();
+        [-0.9, 0.9].forEach(function (x) {
+          var leg = new THREE.Mesh(new THREE.BoxGeometry(0.28, 1.5, 1.6), mat(0x6b4a2a));
+          leg.position.set(x, 0.75, 0);
+          tr.add(leg);
+        });
+        range.scene.add(tr);
+        range.trestle = tr;
+      }
+      range.trestle.visible = true;
     }
-    range.trestle.visible = true;
     // Station 7 long lens
     range.camera.position.set(60, 14, 1600);
     range.camera.fov = 7;
     range.camera.updateProjectionMatrix();
-    range.camera.lookAt(0, 3, 0);
+    range.camera.lookAt(0, rfp().impact ? 6.5 : 3, 0);
     $('cam-overlay').classList.remove('hidden');
     $('cam-station').textContent = PG2.CAMERA.id + ' — ' + PG2.CAMERA.km.toFixed(1) + ' KM';
     var cue = rfp().tSpec;
@@ -3382,7 +3874,12 @@
     var todLine = { noon: 'The review board raises its binoculars. Heat swims over the pan.',
                     dusk: 'The review board raises its binoculars. The sun is going down on somebody’s contract.',
                     dawn: 'The review board raises its binoculars. The pan is still cold enough to be honest.' };
-    setCaption('STATION 7 · LONG LENS · f/64', todLine[rfp().timeOfDay] || todLine.dawn);
+    if (rfp().impact) {
+      setCaption('STATION 7 · DROP RIG · PAD A',
+        'Twelve metres of rig arm, one painted plate, one article that only speaks on contact.');
+    } else {
+      setCaption('STATION 7 · LONG LENS · f/64', todLine[rfp().timeOfDay] || todLine.dawn);
+    }
     // the pre-countdown life beat: a jackrabbit clears the frame
     later(2100, startRabbit);
     if (rfp().flyoff) {
@@ -3553,9 +4050,47 @@
     rangeT.detDone = false;
     rangeT.soundDone = false;
     rangeT.lastBeep = 6;
-    rangeT.detAt = o.fired ? rangeT.cue + o.detT : null;
+    rangeT.impact = !!rfp().impact;
+    rangeT.fallS = 1.15;
+    rangeT.dropDone = false;
+    rangeT.landed = false;
+    // impact articles keep their own clock: detT is relative to PLATE CONTACT (cue + fall)
+    rangeT.detAt = o.fired ? rangeT.cue + (rangeT.impact ? rangeT.fallS : 0) + o.detT : null;
     rangeT.soundAt = rangeT.detAt != null ? rangeT.detAt + PG2.SOUND_DELAY : null;
     rangeT.dudHandled = false;
+  }
+  /* SKIPSTONE: the release, the fall, the thud (or the flash) */
+  function stepDrop() {
+    var t = rangeT.camT - rangeT.cue;
+    if (t < 0) return;
+    var dh = range.deviceHolder;
+    var o = S.result.outcome;
+    if (!rangeT.dropDone) {
+      rangeT.dropDone = true;
+      if (range.dropCable) range.dropCable.visible = false;
+      PGAudio.coverFlick();
+      setCaption('RELEASE · T+' + rangeT.cue.toFixed(1), 'The rig lets go. Gravity accepts the contract.');
+    }
+    var p = clamp(t / rangeT.fallS, 0, 1);
+    dh.position.y = 12 - (12 - 1.05) * p * p;
+    dh.position.x = (o.offsetM || 0) * p;
+    dh.rotation.z = (o.comX || 0) * 0.55 * p;
+    if (p >= 1 && !rangeT.landed) {
+      rangeT.landed = true;
+      spawnDust(dh.position.x, 0.7, 0.7, true);
+      spawnDust(dh.position.x + 0.9, 0.6, -0.6, false);
+      if (!o.fired || (rangeT.detAt != null && rangeT.detAt > rangeT.camT + 0.2)) {
+        PGAudio.thunk(1);
+        range.shake = Math.max(range.shake, 1.2);
+        if (o.type === 'nosemiss') {   // shoulder first, into the sand
+          var z0 = dh.rotation.z;
+          tween(700, function (tt) {
+            dh.rotation.z = lerp(z0, o.offsetM > 0 ? -1.35 : 1.35, tt);
+            dh.position.y = lerp(1.05, 0.72, tt);
+          });
+        }
+      }
+    }
   }
   function updateCamClock() {
     var tm = rangeT.camT - rangeT.cue;
@@ -3595,6 +4130,12 @@
     var vis = S.result.visual;
     var tx = fxTextures();
     var fxGroup = new THREE.Group();
+    if (rangeT.impact) {
+      var iOx = S.result.outcome.offsetM || 0;
+      var iOy = (S.result.outcome.detT != null && S.result.outcome.detT < -0.05)
+        ? Math.max(range.deviceHolder.position.y - 1.5, 0) : 0;   // mid-air burst rides the fall
+      fxGroup.position.set(iOx, iOy, 0);
+    }
     range.scene.add(fxGroup);
     var fx = { t: 0, sprites: [], debris: null, ring: null, torus: null, vis: vis, group: fxGroup };
     var scale = 14 + vis.crater * 1.6;             // fireball metres-ish
@@ -3661,11 +4202,11 @@
       fx.ring = ring;
       // debris streaks
       var dg = new THREE.BufferGeometry();
-      var cnt = 46, pos2 = new Float32Array(cnt * 3), vel = [];
+      var cnt = vis.frag ? 110 : 46, pos2 = new Float32Array(cnt * 3), vel = [];
       for (var di = 0; di < cnt; di++) {
         pos2[di * 3] = 0; pos2[di * 3 + 1] = 2; pos2[di * 3 + 2] = 0;
         var dv = lobes[di % 2].clone().add(V3((rand() - 0.5) * 1.4, rand() * 1.1, (rand() - 0.5) * 1.4));
-        dv.normalize().multiplyScalar(25 + rand() * 45 * (0.5 + vis.yield01));
+        dv.normalize().multiplyScalar((25 + rand() * 45 * (0.5 + vis.yield01)) * (vis.frag ? 1.4 : 1));
         vel.push(dv);
       }
       dg.setAttribute('position', new THREE.BufferAttribute(pos2, 3));
@@ -3994,6 +4535,8 @@
     var o = S.result.outcome;
     var line1 = o.type === 'unarmed'
       ? 'The device sits there. The desert sits there. Everyone sits there.'
+      : o.type === 'nosemiss'
+      ? 'It came down ' + Math.abs(o.offsetM || 0).toFixed(1) + ' m off the plate, shoulder first. The plate is unmoved.'
       : 'Nothing. The firing circuit kept the news to itself.';
     setCaption('T+00:06 · NO EVENT', line1);
     later(3400, function () {
@@ -4089,9 +4632,13 @@
         '<div class="stamp-row">' + r.stampList.map(stampCard).join('') + '</div>' +
         flyTable +
         (r.hint ? '<div class="hint-callout"><span class="hc-kicker">TEST #' + S.attempt +
-          (r.win ? ' — VERDICT' : ' — WHAT TO TWEAK') + '</span>' + r.hint + '</div>' : '') +
+          (r.win ? ' — VERDICT' : ' — WHAT TO TWEAK') +
+          (!r.win && r.outcome.rootCause && r.outcome.rootCause.phase
+            ? ' · ' + r.outcome.rootCause.phase + ' PHASE' : '') + '</span>' + r.hint + '</div>' : '') +
         (r.inspectorNote ? '<div class="inspector-aside"><span class="ia-kicker">INSPECTOR’S ASIDE · WIRE COLOUR CODE</span>' +
           r.inspectorNote + '</div>' : '') +
+        (r.fragNote ? '<div class="inspector-aside"><span class="ia-kicker">SURVEY NOTE · FRAG PATTERN</span>' +
+          r.fragNote + '</div>' : '') +
         '<div class="award-banner ' + (r.win ? 'win' : 'lose') + '">' +
           '<div class="ab-kicker">' + (r.win ? 'CONTRACT AWARDED' : 'CONTRACT NOT AWARDED') + '</div>' +
           '<div class="ab-title">' + (r.win ? 'REDSKY INC' : (r.vantage.ok ? 'VANTAGE DYNAMICS' : 'NO AWARD MADE')) + '</div>' +
@@ -4193,6 +4740,8 @@
       '</div>' +
       '<div class="ir-row">' +
         '<div class="ir-field"><div class="ir-lbl">OUTCOME</div><div class="ir-val" id="ir-outcome"></div></div>' +
+        '<div class="ir-field"><div class="ir-lbl">BUILD PHASE</div><div class="ir-val">' +
+          (inc.phase ? inc.phase : 'GENERAL') + '</div></div>' +
       '</div>' +
       '<div class="ir-block"><div class="ir-lbl">NARRATIVE OF EVENT</div><div class="ir-boxed" id="ir-cause"></div></div>' +
       '<div class="ir-block"><div class="ir-lbl">ROOT CAUSE (NAMED, AS ALWAYS)</div><div class="ir-boxed rc" id="ir-receipt"></div></div>' +
@@ -4330,6 +4879,7 @@
       if (S.phase === 'counting') {
         rangeT.camT = (now - rangeT.t0) / 1000;   // wall clock — never drifts on slow frames
         updateCamClock();
+        if (rangeT.impact) stepDrop();
         var tMinus = rangeT.cue - rangeT.camT;
         var whole = Math.ceil(tMinus);
         if (!rangeT.detDone && whole >= 0 && whole <= 4 && whole !== rangeT.lastBeep && tMinus > -0.05) {
@@ -4338,6 +4888,7 @@
         }
         if (rangeT.detAt != null && !rangeT.detDone && rangeT.camT >= rangeT.detAt) {
           rangeT.detDone = true;
+          if (rangeT.impact) range.deviceHolder.visible = false;   // the article is spent
           igniteFX();
           if (S.result.outcome.type === 'early' || S.result.outcome.type === 'cookoff') {
             $('cam-tick').textContent = (S.result.outcome.type === 'cookoff' ? 'THERMAL EVENT — T−' : 'OFF-CUE EVENT — T−') +
@@ -4369,7 +4920,7 @@
           $('cam-tick').classList.remove('hidden');
           later(2600, craterRevealOrScore);
         }
-        if (rangeT.detAt == null && rangeT.camT > rangeT.cue + 1.2 && !rangeT.dudHandled) {
+        if (rangeT.detAt == null && rangeT.camT > rangeT.cue + (rangeT.impact ? rangeT.fallS + 1.0 : 1.2) && !rangeT.dudHandled) {
           rangeT.dudHandled = true;
           PGAudio.wind();
           dudHold();
@@ -4425,11 +4976,11 @@
           '<div class="bd-stamp pending">CLEARANCE<br>PENDING</div>';
         card.addEventListener('click', function () {
           PGAudio.init(); PGAudio.buzz();
-          toast('Win ' + PG2.CONTRACTS[i - 1].id + ' first. The Authority insists on sequence.');
+          toast('Win ' + (c.unlockAfter || PG2.CONTRACTS[i - 1].id) + ' first. The Authority insists on sequence.');
         });
       } else {
         card.className = 'bd-card' + (recI.won ? ' won' : '');
-        var mech = c.flyoff ? 'THE FLY-OFF' : c.dial ? 'TIMER DIAL' : c.offsetSpec ? 'SHAPED BREACH' :
+        var mech = c.impact ? 'IMPACT DROP' : c.flyoff ? 'THE FLY-OFF' : c.dial ? 'TIMER DIAL' : c.offsetSpec ? 'SHAPED BREACH' :
                    c.weightCap ? 'WEIGHT CAP' : c.heatMult ? 'HEAT FORECAST' :
                    c.needsRefinery ? 'THE STILL' : i === 1 ? 'RESTRAINT' : 'THE LOOP';
         card.innerHTML = '<span class="bd-pin"></span>' +
@@ -4475,7 +5026,7 @@
   var FIRST_ORDER = ['win', 'threeStar', 'batch', 'glaze', 'incident', 'dud', 'flyoff'];
   var FIRST_LABEL = {
     win: 'FIRST CONTRACT WON', threeStar: 'FIRST FULL CARD (3 STAMPS)', batch: 'FIRST REFINED BATCH',
-    glaze: 'FIRST GLAZE POURED', incident: 'FIRST FRAMED DISASTER', dud: 'FIRST DUD, MADE SAFE', flyoff: 'THE FLY-OFF, WON'
+    glaze: 'FIRST G-3 POURED', incident: 'FIRST FRAMED DISASTER', dud: 'FIRST DUD, MADE SAFE', flyoff: 'THE FLY-OFF, WON'
   };
   function showMuseum(from) {
     museumReturn = from || 'scr-title';
@@ -4519,7 +5070,8 @@
         html += '<button type="button" class="mu-frame" data-ir="' + (M.irs.length - 1 - i) + '">' +
           '<div class="mf-form">FORM IR-3 · ' + ir.c + ' · ' + fmtDay(ir.t) + '</div>' +
           '<div class="mf-outcome">' + ir.outcome + '</div>' +
-          '<div class="mf-where">BLAME: ' + (ir.where || 'ASSEMBLY BAY') + ' · TEST #' + (ir.attempt || '?') + '</div>' +
+          '<div class="mf-where">BLAME: ' + (ir.where || 'ASSEMBLY BAY') +
+          (ir.phase ? ' · ' + ir.phase + ' PHASE' : '') + ' · TEST #' + (ir.attempt || '?') + '</div>' +
         '</button>';
       });
     }
@@ -4537,7 +5089,8 @@
   function showArchivedIncident(ir) {
     renderIncidentDoc({
       form: 'FORM IR-3 (REV. 12)', series: 'TEST SERIES ' + (ir.seed || '—') + ' · ' + ir.c,
-      outcome: ir.outcome, cause: ir.cause, receipt: ir.receipt, disposition: ir.disposition || 'Filed. Framed. Lit tastefully.'
+      outcome: ir.outcome, cause: ir.cause, receipt: ir.receipt, phase: ir.phase || null,
+      disposition: ir.disposition || 'Filed. Framed. Lit tastefully.'
     }, true);
   }
   $('btn-museum-back').addEventListener('click', function () {
@@ -4647,8 +5200,8 @@
   });
 
   /* ================= THE STILL (REFINERY v1 → SYSTEM) =================
-     Two stations now: DISTIL (band-hold, EMBER → EMBER-X) and
-     BLEND (pour-to-ratio, FROST → GLAZE). Stock persists in the save —
+     Two stations now: DISTIL (band-hold, F-1A → F-1X) and
+     BLEND (pour-to-ratio, F-2S → ADDITIVE G-3). Stock persists in the save —
      the batch ledger is a war chest. */
   var REF_BAND = { lo: 0.58, hi: 0.78 };    // needle band (matches gauge CSS)
   var ref = {
@@ -4660,7 +5213,7 @@
   function blendStatus(html) { $('blend-status').innerHTML = html; }
   function refStockLine() {
     var st = S.assembly.refine.stock;
-    var line = 'LEDGER — EMBER-X <b>×' + st.emberx + '</b> · SCORCHED <b>×' + st.emberxs + '</b> · GLAZE <b>×' + st.glaze +
+    var line = 'LEDGER — F-1X <b>×' + st.emberx + '</b> · SCORCHED <b>×' + st.emberxs + '</b> · G-3 <b>×' + st.glaze +
       '</b> · SPENT <b>' + fmt$(S.assembly.refine.spend) + '</b><span class="ref-persist">STOCK CARRIES BETWEEN CONTRACTS</span>';
     $('ref-stock').innerHTML = line;
   }
@@ -4690,7 +5243,7 @@
     $('ref-start').classList.toggle('hidden', tab !== 'distil');
     $('blend-start').classList.toggle('hidden', tab !== 'blend');
     $('blend-bottle').classList.toggle('hidden', tab !== 'blend');
-    $('ref-head').textContent = tab === 'distil' ? 'THE STILL · EMBER → EMBER-X' : 'THE BENCH · FROST → GLAZE';
+    $('ref-head').textContent = tab === 'distil' ? 'THE STILL · FILLER 1A → F-1X' : 'THE BENCH · F-2S → ADDITIVE G-3';
     $('ref-sub').innerHTML = tab === 'distil'
       ? 'Hold <b>HEAT</b> to warm the kettle. Keep the needle in the amber band until the batch is done. Ride it too hot for too long and the batch scorches.'
       : 'Hold <b>POUR</b> to tip the carboy. The stream has momentum — release early, let it settle <b>on the line</b>, then bottle it. Overpour and the bench drinks the difference.';
@@ -4704,8 +5257,8 @@
     $('ref-needle').style.top = '96%';
     $('ref-prog-fill').style.width = '0%';
     $('blend-fill').style.height = '0%';
-    refStatus('The kettle is cold. EMBER goes in ordinary; it comes out with ambitions.');
-    blendStatus('The carboy waits. FROST goes in calm; it comes out diplomatic.');
+    refStatus('The kettle is cold. FILLER 1A goes in ordinary; it comes out with ambitions.');
+    blendStatus('The carboy waits. FILLER 2S goes in calm; it comes out diplomatic.');
     setRefTab(ref.tab || 'distil');
     refStockLine();
     updateRefStart();
@@ -4736,13 +5289,13 @@
     clearHistory();   // the still changed the stock ledger — undo history can't reach behind it
     PGAudio.batchDone(!ref.scorched);
     refStatus(ref.scorched
-      ? '<b class="scorch">SCORCHED.</b> Two canisters of weaker, angrier X. They still count. Barely.'
-      : 'Beautiful. Two canisters of <b>EMBER-X</b>, glowing politely.');
+      ? '<b class="scorch">SCORCHED.</b> Two canisters of weaker, angrier F-1X. They still count. Barely.'
+      : 'Beautiful. Two canisters of <b>FILLER 1X</b>, glowing politely.');
     refStockLine();
     refreshHUD();
     updateRefStart();
   }
-  /* ---- BLEND: pour FROST to the line ---- */
+  /* ---- BLEND: pour F-2S to the line ---- */
   function startBlend() {
     blend.running = true;
     blend.level = 0; blend.flow = 0; blend.pouring = false;
@@ -4761,12 +5314,12 @@
     var yieldN = overpoured ? 1 : PG2.REFINERY.glazeYield;
     a.refine.stock.glaze += yieldN;
     syncStock();
-    museumFirst('glaze', 'FIRST GLAZE POURED');
+    museumFirst('glaze', 'FIRST G-3 POURED');
     clearHistory();
     PGAudio.batchDone(!overpoured);
     blendStatus(overpoured
-      ? '<b class="scorch">OVERPOURED.</b> The bench drinks the difference. One canister of GLAZE, and a lecture.'
-      : 'On the line. <b>Two canisters of GLAZE</b>, cool as filed paperwork.');
+      ? '<b class="scorch">OVERPOURED.</b> The bench drinks the difference. One canister of ADDITIVE G-3, and a lecture.'
+      : 'On the line. <b>Two canisters of ADDITIVE G-3</b>, cool as filed paperwork.');
     refStockLine();
     refreshHUD();
     updateRefStart();
@@ -5013,9 +5566,47 @@
       return worldToScreen(bb.getCenter(new THREE.Vector3()), bay.camera);
     },
     partCardVisible: function () { return !$('part-card').classList.contains('hidden'); },
+    phaseRail: function () {
+      var steps = {};
+      document.querySelectorAll('.pr-step').forEach(function (el) {
+        var r = el.getBoundingClientRect();
+        steps[el.dataset.phase] = { x: r.left + r.width / 2, y: r.top + r.height / 2,
+          on: el.classList.contains('on'), dim: el.classList.contains('dim') };
+      });
+      return { phase: buildPhase, steps: steps };
+    },
+    drawer: function () {
+      var tabR = $('drawer-tab').getBoundingClientRect();
+      var tiles = {};
+      document.querySelectorAll('#drawer-grid .tile').forEach(function (t) {
+        var r = t.getBoundingClientRect();
+        tiles[t.id.slice(5)] = { x: r.left + r.width / 2, y: r.top + r.height / 2,
+          locked: t.classList.contains('locked'), disabled: t.classList.contains('disabled'),
+          unlock: t.querySelector('.t-unlock') ? t.querySelector('.t-unlock').textContent : null };
+      });
+      var spine = {};
+      document.querySelectorAll('.spine-tab').forEach(function (el) {
+        var r = el.getBoundingClientRect();
+        spine[el.dataset.cat] = { x: r.left + r.width / 2, y: r.top + r.height / 2,
+          on: el.classList.contains('on'), sealed: el.classList.contains('sealed') };
+      });
+      return { open: drawer.open, cat: drawer.cat,
+        tab: { x: tabR.left + tabR.width / 2, y: tabR.top + tabR.height / 2 },
+        tiles: tiles, spine: spine,
+        panelLeft: $('drawer').getBoundingClientRect().left,
+        title: $('drawer-title').textContent };
+    },
     pickAt: function (x, y) {
       var root = pickPart({ x: x, y: y });
       return root && root.userData.remove ? root.userData.remove : null;
+    },
+    drop: function () {
+      return {
+        impact: !!rangeT.impact, landed: !!rangeT.landed, dropped: !!rangeT.dropDone,
+        deviceY: range && range.deviceHolder ? range.deviceHolder.position.y : null,
+        deviceX: range && range.deviceHolder ? range.deviceHolder.position.x : null,
+        rig: !!(range && range.dropRig && range.dropRig.visible)
+      };
     },
     convoy: function () {
       return range && range.convoy ? { t: range.convoy.t, shot: range.convoy.shot, slammed: range.convoy.slammed } : null;
@@ -5070,7 +5661,7 @@
   initGL();
   bay = initBay();
   makeIcons();
-  buildShelf();
+  buildDrawer();
   bayCam();
   requestAnimationFrame(loop);
 

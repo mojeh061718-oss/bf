@@ -129,6 +129,14 @@
       </div>
     </header>
 
+    <!-- BUILD PHASE RAIL (M3a) — navigation, never a lock -->
+    <div id="phase-rail">
+      <button class="pr-step" type="button" data-phase="structure">1 STRUCTURE</button>
+      <button class="pr-step" type="button" data-phase="payload">2 PAYLOAD</button>
+      <button class="pr-step" type="button" data-phase="systems">3 SYSTEMS</button>
+      <button class="pr-step pr-closeout" type="button" data-phase="closeout">4 CLOSE-OUT</button>
+    </div>
+
     <div id="bay-hint" class="bay-hint"></div>
 
     <div id="stage-build">
@@ -139,8 +147,14 @@
         <button id="btn-undo" type="button" disabled aria-label="Undo">↶</button>
         <button id="btn-redo" type="button" disabled aria-label="Redo">↷</button>
       </div>
-      <div id="shelf">
-        <div id="shelf-scroll"></div>
+      <!-- THE PARTS DRAWER (M3a) — KSP grammar: slide-out, spine tabs, 2-col grid -->
+      <div id="drawer" class="collapsed">
+        <div id="drawer-panel">
+          <div id="drawer-head"><span id="drawer-title">PARTS · SHELLS</span><span class="drawer-form">RD-CATALOG · STORES ISSUE</span></div>
+          <div id="drawer-grid"></div>
+        </div>
+        <div id="drawer-spine"></div>
+        <button id="drawer-tab" type="button" aria-label="Open parts drawer"><span class="dt-arrow">▸</span><span class="dt-lbl">PARTS</span></button>
       </div>
     </div>
 
@@ -251,10 +265,10 @@
   <div id="refinery-overlay" class="overlay hidden">
     <div class="ref-card">
       <div class="ref-tabs">
-        <button id="ref-tab-distil" type="button" class="ref-tab on">⚗ DISTIL · EMBER-X</button>
-        <button id="ref-tab-blend" type="button" class="ref-tab">🫙 BLEND · GLAZE</button>
+        <button id="ref-tab-distil" type="button" class="ref-tab on">⚗ DISTIL · F-1X</button>
+        <button id="ref-tab-blend" type="button" class="ref-tab">🫙 BLEND · G-3</button>
       </div>
-      <div class="ref-head" id="ref-head">THE STILL · EMBER → EMBER-X</div>
+      <div class="ref-head" id="ref-head">THE STILL · FILLER 1A → F-1X</div>
       <div class="ref-sub" id="ref-sub">Hold <b>HEAT</b> to warm the kettle. Keep the needle in the amber band until the batch is done.
         Ride it too hot for too long and the batch scorches.</div>
       <div class="ref-body" id="ref-distil-body">
@@ -279,7 +293,7 @@
       </div>
       <div class="ref-body hidden" id="ref-blend-body">
         <div class="blend-carboy" id="blend-carboy">
-          <div class="bc-body">FROST</div>
+          <div class="bc-body">F-2S</div>
           <div class="bc-neck"></div>
         </div>
         <div class="blend-beaker">
