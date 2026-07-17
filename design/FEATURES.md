@@ -51,7 +51,13 @@ A teaching ladder where every RFP adds one idea: restraint on a mean budget (FIR
 - **Type Certification:** freeze the design, three tests (performance vs. the object's floor, consistency repeat graded A/B/C, a seeded abuse test — hot soak or washboard), stamped **PRODUCTION READY** on a brass type plate (RSK-1 "MULE") with a spec card of *measured* results. Calm builds certify ~90% mostly grade A; hot twitchy builds ~37% — repeatability punishes lucky builds, as contracted.
 - **The Production Bid Board:** weekly seeded orders per certified type; a sealed-bid opening where the number climbs (grade, measured specs, reputation, and incident history set the ceiling); accepting books the workshop in real time and pays on delivery — with seeded **field-QA callbacks** root-caused to the design's true weak point, framed in the museum, and priced into the next auction.
 
-## 📋 NEXT — M3b wave 2 (polish)
+## ✅ SHIPPED — The Gate & the premium survey (M3b wave 2, part 1)
+
+- **Two worlds at the gate:** the title screen now offers **CAREER** (the ladder, real money) and the **SANDBOX LOT** — unlimited funds, the whole catalog unlocked from shot one, and the full R&D → certification → bid-board loop on its own save slice. Career progress is never touched by sandbox play; the buyers still have standards either way.
+- **Premium detonation:** the blast owns the light — a point-light flare that washes the terrain, pad and target objects, decaying to ember red; ballistic ember arcs that land in their own dust.
+- **Blast survey contours:** every crater now plots its **SCORCH** and **OVERPRESSURE** radii as animated rings on the dirt, labeled live during the measuring pass (career) and read out by the smug plotter (R&D).
+
+## 📋 NEXT — M3b wave 2 (remainder)
 
 - More target objects (the decommissioned bunker, stacked containers), per-object range scarring, richer auction drama, production-run vignettes.
 

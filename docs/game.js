@@ -42,6 +42,7 @@
   var S = {
     seed: (urlSeed || PG2.makeSeed()).toUpperCase(),
     phase: 'title',            // title hq board museum rfp build wiring dial det arm truck station counting aftermath crater score
+    world: 'career',           // 'career' | 'sandbox' — picked at the gate; sandbox money is a prop
     mode: 'contract',          // 'contract' | 'rnd' — the Workshop's two front doors
     rndTarget: 'truck',        // which object measures you tonight
     contract: urlContract,     // index into PG2.CONTRACTS — the Act I ladder
@@ -71,7 +72,9 @@
     rsk: 0,                                          // type-plate counter (RSK-1, RSK-2, …)
     types: [],                                       // certified designs: plate, name, target, grade, band, unitCost…
     run: null,                                       // the active production run, if the workshop is booked
-    doneOrders: {}                                   // orders already run — a bid board never repeats itself
+    doneOrders: {},                                  // orders already run — a bid board never repeats itself
+    /* the sandbox lot: same workshop, prop money, career progress untouched */
+    sb: { bench: null, rndTests: 0, rsk: 0, types: [], run: null, doneOrders: {} }
   };
   function migrateSave(s) {
     // v1 → v2: everything old is kept; the new rooms start empty.
@@ -104,7 +107,9 @@
     if (!s.types) s.types = [];
     if (s.run === undefined) s.run = null;
     if (!s.doneOrders) s.doneOrders = {};
-    s.v = 3;
+    // v3 → v4: the sandbox lot opens next door
+    if (!s.sb) s.sb = { bench: null, rndTests: 0, rsk: 0, types: [], run: null, doneOrders: {} };
+    s.v = 4;
     return s;
   }
   function loadSave() {
@@ -131,6 +136,7 @@
       SAVE.types = s.types;
       SAVE.run = s.run;
       SAVE.doneOrders = s.doneOrders;
+      SAVE.sb = s.sb;
       if (SAVE.ui && SAVE.ui.drawerCat) drawer.cat = SAVE.ui.drawerCat;
     } catch (e) { /* private mode etc — play in-memory */ }
   }
@@ -140,7 +146,7 @@
         v: 3, settings: SETTINGS, contracts: SAVE.contracts,
         stock: SAVE.stock, museum: SAVE.museum, scars: SAVE.scars, ui: SAVE.ui, paint: SAVE.paint,
         cash: SAVE.cash, banked: SAVE.banked, bench: SAVE.bench, rndTests: SAVE.rndTests,
-        rsk: SAVE.rsk, types: SAVE.types, run: SAVE.run, doneOrders: SAVE.doneOrders
+        rsk: SAVE.rsk, types: SAVE.types, run: SAVE.run, doneOrders: SAVE.doneOrders, sb: SAVE.sb
       }));
     } catch (e) {}
   }
@@ -149,6 +155,13 @@
     PG2.CONTRACTS.forEach(function (c, i) { if (contractRec(i).won) n++; });
     return n;
   }
+  /* ---- the two worlds: career money is real; sandbox money is a prop ---- */
+  function WS() { return S.world === 'sandbox' ? SAVE.sb : SAVE; }
+  function cashUnlimited() { return S.world === 'sandbox'; }
+  function cashOK(cost) { return cashUnlimited() || SAVE.cash >= cost; }
+  function cashSpend(n) { if (!cashUnlimited()) SAVE.cash -= n; }
+  function cashAdd(n) { if (!cashUnlimited()) SAVE.cash += n; }
+  function cashLabel() { return cashUnlimited() ? 'UNLIMITED · SANDBOX' : fmt$(SAVE.cash); }
   function contractRec(idx) {
     var id = PG2.CONTRACTS[idx].id;
     if (!SAVE.contracts[id]) SAVE.contracts[id] = { won: false, stars: 0, net: null, wonOn: null, tests: 0 };
@@ -1074,6 +1087,7 @@
   }
   var drawer = { open: false, cat: 'shells', wasOpenForDrag: false, built: null };
   function partLocked(entry) {
+    if (S.world === 'sandbox') return false;   // the sandbox lot has the whole catalog on the shelf
     if (!entry.unlock) return false;
     var idx = -1;
     PG2.CONTRACTS.forEach(function (c, i) { if (c.id === entry.unlock) idx = i; });
@@ -1389,11 +1403,11 @@
     $('m-weight-cap').classList.toggle('hidden', !R.weightCap);
     var cost = $('m-cost-val');
     // R&D runs on the company account: the cap is whatever's in it
-    var shortOnCash = S.mode === 'rnd' && d.cost > SAVE.cash;
-    cost.textContent = S.mode === 'rnd' ? fmt$(d.cost) + ' / ' + fmt$(SAVE.cash) : fmt$(d.cost);
+    var shortOnCash = S.mode === 'rnd' && !cashOK(d.cost);
+    cost.textContent = S.mode === 'rnd' ? fmt$(d.cost) + ' / ' + (cashUnlimited() ? '∞' : fmt$(SAVE.cash)) : fmt$(d.cost);
     cost.className = (d.overBudget || shortOnCash) ? 'bad' : '';
     var cf = $('m-cost-fill');
-    cf.style.width = clamp(d.cost / (S.mode === 'rnd' ? Math.max(SAVE.cash, 1) / 0.88 : R.budget / 0.88), 0, 1) * 100 + '%';
+    cf.style.width = clamp(d.cost / (S.mode === 'rnd' ? (cashUnlimited() ? d.cost / 0.42 : Math.max(SAVE.cash, 1) / 0.88) : R.budget / 0.88), 0, 1) * 100 + '%';
     cf.classList.toggle('over', d.overBudget || shortOnCash);
     var btn = $('btn-closeout');
     btn.disabled = !(d.complete && !d.overBudget && !d.overWeight && !shortOnCash);
@@ -1410,7 +1424,7 @@
     h.style.opacity = 1;
     var R = rfp();
     var msg;
-    var shortCash = S.mode === 'rnd' && d.cost > SAVE.cash;
+    var shortCash = S.mode === 'rnd' && !cashOK(d.cost);
     if (!S.assembly.shell) msg = S.mode === 'rnd'
       ? 'Your bench, your dime, no spec sheet.<br>Pull the <b>PARTS</b> drawer and build the thing you keep sketching.'
       : 'Pull the <b>PARTS</b> drawer and drag a <b>shell</b> onto the glowing stand.<br>One finger orbits · pinch zooms.';
@@ -1419,7 +1433,7 @@
       : 'Load <b>canisters</b> into the open bays.<br>Amber F-1A = more bang · blue F-2S = calmer.';
     else if (d.missing.length) msg = 'Still missing: <b>' + d.missing.join(' · ') + '</b>.<br>Tap a placed part to take it back off.';
     else if (shortCash) msg = '<b style="color:#ff8d7e">The account is short.</b> This article costs ' + fmt$(d.cost) +
-      ' to expend; the company holds ' + fmt$(SAVE.cash) + '. Win a contract, land an order, or build cheaper.';
+      ' to expend; the company holds ' + cashLabel() + '. Win a contract, land an order, or build cheaper.';
     else if (d.overBudget) msg = '<b style="color:#ff8d7e">Over budget.</b> Take something off — the Authority won’t pay a penny past $' + R.budget.toLocaleString('en-US') + '.';
     else if (d.overWeight) msg = '<b style="color:#ff8d7e">Over weight.</b> ' + Math.round(d.weight) + ' kg on a ' + R.weightCap + ' kg crane. The scale does not negotiate.';
     else if (d.cookRisk > 0) msg = '<b style="color:#ff8d7e">Heat warning.</b> This load may <b>cook off</b> under the forecast. F-2S or ADDITIVE G-3 buys shade.';
@@ -2022,8 +2036,8 @@
     showScreen(null); showUI('ui-bay');
     $('ui-bay').classList.remove('closeout');
     if (S.mode === 'rnd') {
-      $('bay-brand-txt').textContent = 'WEAPONS ASSEMBLY · R&D';
-      $('bay-attempt').textContent = 'SHOT #' + (SAVE.rndTests + 1);
+      $('bay-brand-txt').textContent = 'WEAPONS ASSEMBLY · ' + (S.world === 'sandbox' ? 'SANDBOX' : 'R&D');
+      $('bay-attempt').textContent = 'SHOT #' + (WS().rndTests + 1);
       $('btn-torange').innerHTML = 'OUT THE BACK GATE →';
       $('btn-hq').classList.remove('hidden');
     } else {
@@ -2052,7 +2066,7 @@
   }
   function updateStandStory() {
     // the bay quietly tells the story of your convergence
-    var tests = S.mode === 'rnd' ? SAVE.rndTests : contractRec(S.contract).tests;
+    var tests = S.mode === 'rnd' ? WS().rndTests : contractRec(S.contract).tests;
     bay.repaintFloor(tests);
     bay.clipboard.visible = tests >= 3;
   }
@@ -4299,6 +4313,33 @@
       core.position.set(0, 3, 0);
       fxGroup.add(core);
       fx.core = core;
+      // the detonation owns the light for a second and a half — terrain,
+      // pad dressing and target objects all take the flare
+      var burst = new THREE.PointLight(0xffd9a6, 0, 620, 1.6);
+      burst.position.set(0, 10, 0);
+      fxGroup.add(burst);
+      fx.light = burst;
+      // ember arcs: hot metal on ballistic paper-math trajectories
+      fx.embers = [];
+      var eRand = PG2.stream(S.seed, 'embers');
+      var nE = 10 + Math.round(vis.dust * 8);
+      for (var ei = 0; ei < nE; ei++) {
+        var em = new THREE.Sprite(new THREE.SpriteMaterial({
+          map: tx.fire, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+        em.material.color.setRGB(1, 0.75, 0.4);
+        var ea = eRand() * Math.PI * 2;
+        var ev = 14 + eRand() * 26;
+        em.userData = {
+          vx: Math.cos(ea) * ev * (0.4 + eRand() * 0.6),
+          vy: 16 + eRand() * 22,
+          vz: Math.sin(ea) * ev * (0.4 + eRand() * 0.6),
+          delay: eRand() * 0.14, dead: false
+        };
+        em.position.set(0, 2.5, 0);
+        em.scale.set(1.6, 1.6, 1);
+        fxGroup.add(em);
+        fx.embers.push(em);
+      }
       // dust torus
       var torus = new THREE.Mesh(new THREE.TorusGeometry(1, 2.2, 8, 28),
         new THREE.MeshLambertMaterial({ color: 0x9c7043, transparent: true, opacity: 0.7 }));
@@ -4420,6 +4461,32 @@
         sm.material.opacity = 0.5 * (k < 0.15 ? k / 0.15 : 1 - (k - 0.15) / 0.85);
       });
     }
+    if (fx.light) {
+      // flare hard, decay to ember red, gone by a second and a half
+      var lk = clamp(t / 1.5, 0, 1);
+      fx.light.intensity = Math.pow(1 - lk, 1.7) * (26 + fx.vis.dust * 30);
+      fx.light.color.setRGB(1, lerp(0.85, 0.4, lk), lerp(0.65, 0.16, lk));
+    }
+    if (fx.embers) {
+      fx.embers.forEach(function (em) {
+        var u = em.userData;
+        if (u.dead) return;
+        var tt = t - u.delay;
+        if (tt <= 0) return;
+        em.position.x += u.vx * dt;
+        em.position.z += u.vz * dt;
+        u.vy -= 30 * dt;                      // invented gravity, honest arc
+        em.position.y += u.vy * dt;
+        em.material.opacity = clamp(1.2 - tt * 0.5, 0, 1);
+        var es = Math.max(1.7 - tt * 0.55, 0.5);
+        em.scale.set(es, es, 1);
+        if (em.position.y <= 0.4) {           // it lands, it dies, the dust remembers
+          u.dead = true;
+          em.visible = false;
+          spawnDust(em.position.x, 0.6, em.position.z, false);
+        }
+      });
+    }
     if (fx.core) {
       var ck = clamp(t / 0.32, 0, 1);
       var cs = 1 + easeOut(ck) * fx.scale * 0.24;
@@ -4516,6 +4583,24 @@
       sp.userData.rise = (0.3 + i * 0.1) * r * 0.12;
       g.add(sp);
     }
+    // BLAST SURVEY CONTOURS — the premium part of the paperwork: scorch and
+    // overpressure radii drawn on the dirt, staggered in like a plotter working
+    g.userData.surveyRings = [];
+    [{ mult: 2.2, color: 0xe5a13d, op: 0.34, key: 'SCORCH' },
+     { mult: 4.2, color: 0x9cc8ea, op: 0.26, key: 'OVERPRESSURE' }].forEach(function (rc, ri) {
+      var RR = r * rc.mult;
+      var ring = new THREE.Mesh(new THREE.RingGeometry(RR * 0.985, RR, 72),
+        new THREE.MeshBasicMaterial({ color: rc.color, transparent: true, opacity: 0,
+          side: THREE.DoubleSide, depthWrite: false }));
+      ring.rotation.x = -Math.PI / 2;
+      ring.scale.x = ell;
+      ring.position.y = 0.44;
+      ring.userData.radiusM = RR;
+      ring.userData.key = rc.key;
+      g.add(ring);
+      g.userData.surveyRings.push(ring);
+      tween(900 + ri * 500, function (e) { ring.material.opacity = rc.op * e; });
+    });
     g.position.x = ox;                           // crater centre follows the load's lean
     return g;
   }
@@ -4556,6 +4641,8 @@
       (shaped ? '<line class="msr-datum" id="msr-datum"/>' +
                 '<line class="msr-off" id="msr-offline" opacity="0"/>' +
                 '<text id="msr-offtxt" text-anchor="middle" font-size="12" opacity="0"></text>' : '') +
+      '<text id="msr-ring0" text-anchor="middle" font-size="9" opacity="0"></text>' +
+      '<text id="msr-ring1" text-anchor="middle" font-size="9" opacity="0"></text>' +
       '<g id="msr-band"></g>';
     var cam = range.camera;
     var ctr = V3(ox, 0.6, 0);
@@ -4570,7 +4657,8 @@
         main: svg.querySelector('#msr-main'), t1: svg.querySelector('#msr-t1'),
         t2: svg.querySelector('#msr-t2'), txt: svg.querySelector('#msr-txt'),
         datum: svg.querySelector('#msr-datum'), offline: svg.querySelector('#msr-offline'),
-        offtxt: svg.querySelector('#msr-offtxt'), band: svg.querySelector('#msr-band')
+        offtxt: svg.querySelector('#msr-offtxt'), band: svg.querySelector('#msr-band'),
+        rings: [svg.querySelector('#msr-ring0'), svg.querySelector('#msr-ring1')]
       }
     };
   }
@@ -4609,6 +4697,18 @@
       el.offline.setAttribute('x2', pC.x); el.offline.setAttribute('y2', pD.y + 8);
       el.offtxt.setAttribute('x', (pD.x + pC.x) / 2);
       el.offtxt.setAttribute('y', pD.y + 24);
+    }
+    // the survey contours label themselves once drawn — glued to their rings
+    if (range.craterG && range.craterG.userData.surveyRings) {
+      range.craterG.userData.surveyRings.forEach(function (ring, ri) {
+        var lt = el.rings[ri];
+        if (!lt || ring.material.opacity <= 0.02) return;
+        var pR = worldToScreen(V3(msr.ox, 0.7, ring.userData.radiusM), cam);
+        lt.setAttribute('x', pR.x);
+        lt.setAttribute('y', pR.y - 4);
+        lt.setAttribute('opacity', String(Math.min(ring.material.opacity * 2.4, 0.85)));
+        lt.textContent = ring.userData.key + ' R ' + ring.userData.radiusM.toFixed(0) + ' m';
+      });
     }
     if (!msr.progDone && now - msr.t0 >= 1600) {
       msr.progDone = true;
@@ -5234,9 +5334,15 @@
 
   $('btn-start').addEventListener('click', function () {
     PGAudio.init(); PGAudio.tap();
+    S.world = 'career';
     // first contact goes straight to the teaching ladder; veterans get the compound
     if (wonCountAll() === 0) startContract();
     else showHQ();
+  });
+  $('btn-sandbox').addEventListener('click', function () {
+    PGAudio.init(); PGAudio.tap();
+    S.world = 'sandbox';
+    showHQ();
   });
   $('btn-title-board').addEventListener('click', function () {
     PGAudio.init(); PGAudio.tap();
@@ -5593,10 +5699,10 @@
   var hqTimer = null;
   function stopHqTimer() { if (hqTimer) { clearInterval(hqTimer); hqTimer = null; } }
   function runRemainMs() {
-    return SAVE.run ? Math.max(0, SAVE.run.t0 + SAVE.run.durMs - Date.now()) : 0;
+    return WS().run ? Math.max(0, WS().run.t0 + WS().run.durMs - Date.now()) : 0;
   }
   function typeByPlate(plate) {
-    for (var i = 0; i < SAVE.types.length; i++) if (SAVE.types[i].plate === plate) return SAVE.types[i];
+    for (var i = 0; i < WS().types.length; i++) if (WS().types[i].plate === plate) return WS().types[i];
     return null;
   }
   function showHQ() {
@@ -5605,7 +5711,10 @@
     S.mode = 'contract';
     showUI(null);
     reclaimRefined();
-    $('hq-cash').textContent = 'COMPANY ACCOUNT · ' + fmt$(SAVE.cash);
+    var sandbox = S.world === 'sandbox';
+    $('hq-cash').textContent = 'COMPANY ACCOUNT · ' + cashLabel();
+    document.querySelector('.hq-brand').innerHTML = 'REDSKY INC · THE COMPOUND' +
+      (sandbox ? '<span class="hq-world-badge">SANDBOX LOT</span>' : '');
     var wins = wonCountAll();
     var doors = $('hq-doors');
     var nextC = null;
@@ -5617,39 +5726,48 @@
         (badge || '') + '<span class="hd-kicker">' + kicker + '</span>' +
         '<div class="hd-name">' + name + '</div><div class="hd-sub">' + sub + '</div></button>';
     }
-    var waLocked = wins === 0;
-    var waBooked = !!SAVE.run;
+    var waLocked = !sandbox && wins === 0;   // the sandbox lot never checks your paperwork
+    var waBooked = !!WS().run;
     doors.innerHTML =
-      door('hq-office', 'THE FRONT DOOR', 'CONTRACT OFFICE',
-        wins >= PG2.CONTRACTS.length ? 'Act I complete. The corkboard is a trophy wall.'
-          : nextC ? 'Next up: ' + nextC.id + ' “' + nextC.title + '”. The corkboard awaits.'
-          : 'The corkboard awaits.',
-        wins === 0 ? 'primary' : '', '') +
+      (sandbox ? '' :
+        door('hq-office', 'THE FRONT DOOR', 'CONTRACT OFFICE',
+          wins >= PG2.CONTRACTS.length ? 'Act I complete. The corkboard is a trophy wall.'
+            : nextC ? 'Next up: ' + nextC.id + ' “' + nextC.title + '”. The corkboard awaits.'
+            : 'The corkboard awaits.',
+          wins === 0 ? 'primary' : '', '')) +
       door('hq-assembly', 'THE BIG SHED', 'WEAPONS ASSEMBLY',
         waLocked ? 'Free R&D — build anything on your own dime. The Authority wants one won contract on file first.'
           : waBooked ? 'The floor is tooled up and running an order. R&D resumes on delivery.'
-          : 'Free R&D on the company dime. No spec sheet over your shoulder. ' +
-            (SAVE.bench ? 'Your bench is as you left it.' : 'The bench is clean.'),
-        waLocked || waBooked ? 'locked' : (wins > 0 ? 'primary' : ''),
+          : (sandbox ? 'The whole catalog, no invoices. ' : 'Free R&D on the company dime. No spec sheet over your shoulder. ') +
+            (WS().bench ? 'Your bench is as you left it.' : 'The bench is clean.'),
+        waLocked || waBooked ? 'locked' : (sandbox || wins > 0 ? 'primary' : ''),
         waBooked ? '<span class="hd-badge warn">BOOKED</span>'
           : waLocked ? '<span class="hd-badge warn">CLEARANCE</span>' : '') +
       door('hq-bids', 'THE BACK OFFICE', 'PRODUCTION BID BOARD',
-        SAVE.types.length ? SAVE.types.length + ' certified type' + (SAVE.types.length > 1 ? 's' : '') + ' on file. Buyers post weekly.'
-          : 'Certified types only. Prototype in Weapons Assembly, pass the standards series, then sell it.',
-        SAVE.types.length ? '' : 'locked',
-        SAVE.types.length ? '' : '<span class="hd-badge warn">NO TYPES</span>') +
+        WS().types.length ? WS().types.length + ' certified type' + (WS().types.length > 1 ? 's' : '') + ' on file. Buyers post weekly.'
+          : 'Certified types only. Prototype in Weapons Assembly, pass the standards series, then sell it.' +
+            (sandbox ? ' Yes, even here — the buyers have standards.' : ''),
+        WS().types.length ? '' : 'locked',
+        WS().types.length ? '' : '<span class="hd-badge warn">NO TYPES</span>') +
       door('hq-museum', 'THE LONG HALL', 'THE MUSEUM',
-        'Framed disasters, brass firsts, best-crater plaques.', '', '');
-    $('hq-office').addEventListener('click', function () { PGAudio.init(); PGAudio.tap(); stopHqTimer(); showBoard('scr-hq'); });
+        'Framed disasters, brass firsts, best-crater plaques.', '', '') +
+      '<button id="hq-gate" type="button">← THE GATE · CHANGE MODE</button>';
+    $('hq-gate').addEventListener('click', function () {
+      PGAudio.tap(); stopHqTimer();
+      S.phase = 'title';
+      refreshTitle();
+      showScreen('scr-title');
+    });
+    if (!sandbox) $('hq-office').addEventListener('click', function () { PGAudio.init(); PGAudio.tap(); stopHqTimer(); showBoard('scr-hq'); });
     $('hq-assembly').addEventListener('click', function () {
       PGAudio.init();
       if (waLocked) { PGAudio.buzz(); toast('Win one contract first. The Authority funds hobbies it has vetted.'); return; }
-      if (SAVE.run) { PGAudio.buzz(); toast('The workshop is booked — ' + SAVE.run.plate + ' for ' + SAVE.run.buyer + '. R&D resumes on delivery.'); return; }
+      if (WS().run) { PGAudio.buzz(); toast('The workshop is booked — ' + WS().run.plate + ' for ' + WS().run.buyer + '. R&D resumes on delivery.'); return; }
       PGAudio.tap(); stopHqTimer(); enterRnd();
     });
     $('hq-bids').addEventListener('click', function () {
       PGAudio.init();
-      if (!SAVE.types.length) { PGAudio.buzz(); toast('No certified types on file. The bid board only trades in stamped plates.'); return; }
+      if (!WS().types.length) { PGAudio.buzz(); toast('No certified types on file. The bid board only trades in stamped plates.'); return; }
       PGAudio.tap(); stopHqTimer(); showBids();
     });
     $('hq-museum').addEventListener('click', function () { PGAudio.init(); PGAudio.tap(); stopHqTimer(); showMuseum('scr-hq'); });
@@ -5659,19 +5777,19 @@
   }
   function refreshRunTicker() {
     var tk = $('hq-run-ticker');
-    if (!SAVE.run) { tk.classList.add('hidden'); return; }
+    if (!WS().run) { tk.classList.add('hidden'); return; }
     tk.classList.remove('hidden');
     var left = runRemainMs();
     if (left <= 0) {
-      tk.innerHTML = '<b>PRODUCTION RUN COMPLETE</b> — ' + SAVE.run.units + '× ' + SAVE.run.plate +
-        ' crated for ' + SAVE.run.buyer + '. <b>TAP TO DELIVER.</b>';
+      tk.innerHTML = '<b>PRODUCTION RUN COMPLETE</b> — ' + WS().run.units + '× ' + WS().run.plate +
+        ' crated for ' + WS().run.buyer + '. <b>TAP TO DELIVER.</b>';
       tk.onclick = function () { PGAudio.tap(); deliverRun(); };
       return;
     }
     tk.onclick = null;
-    var p = 1 - left / SAVE.run.durMs;
+    var p = 1 - left / WS().run.durMs;
     var mm = Math.floor(left / 60000), ss = Math.floor((left % 60000) / 1000);
-    tk.innerHTML = 'WORKSHOP BOOKED — ' + SAVE.run.units + '× ' + SAVE.run.plate + ' FOR ' + SAVE.run.buyer +
+    tk.innerHTML = 'WORKSHOP BOOKED — ' + WS().run.units + '× ' + WS().run.plate + ' FOR ' + WS().run.buyer +
       ' · DELIVERY IN ' + mm + ':' + String(ss).padStart(2, '0') +
       '<div class="rt-bar"><div class="rt-fill" style="width:' + Math.round(p * 100) + '%"></div></div>';
   }
@@ -5679,13 +5797,13 @@
   /* ---------- WEAPONS ASSEMBLY: the R&D bench ---------- */
   function saveBench() {
     if (S.mode !== 'rnd') return;
-    SAVE.bench = JSON.parse(JSON.stringify(S.assembly));
+    WS().bench = JSON.parse(JSON.stringify(S.assembly));
     persist();
   }
   function enterRnd() {
     S.mode = 'rnd';
-    if (SAVE.bench) {
-      S.assembly = JSON.parse(JSON.stringify(SAVE.bench));
+    if (WS().bench) {
+      S.assembly = JSON.parse(JSON.stringify(WS().bench));
     } else {
       S.assembly = PG2.makeAssembly();
       S.assembly.paint = SAVE.paint || null;
@@ -5706,12 +5824,12 @@
   /* ---------- the target picker: which object measures you tonight ---------- */
   function openTargetPicker() {
     var d = PG2.derive(S.assembly, rfp());
-    if (d.cost > SAVE.cash) {
+    if (!cashOK(d.cost)) {
       PGAudio.buzz();
-      toast('The account is short: this article costs ' + fmt$(d.cost) + ' to expend, the company holds ' + fmt$(SAVE.cash) + '.');
+      toast('The account is short: this article costs ' + fmt$(d.cost) + ' to expend, the company holds ' + cashLabel() + '.');
       return;
     }
-    $('tgt-cost').textContent = 'THIS SHOT EXPENDS THE ARTICLE — ' + fmt$(d.cost) + ' · ACCOUNT ' + fmt$(SAVE.cash);
+    $('tgt-cost').textContent = 'THIS SHOT EXPENDS THE ARTICLE — ' + fmt$(d.cost) + ' · ACCOUNT ' + cashLabel();
     var list = $('tgt-list');
     list.innerHTML = '';
     PG2.TARGET_ORDER.forEach(function (tid) {
@@ -5740,8 +5858,8 @@
     clearLater();
     S.rndTarget = targetId;
     var d = PG2.derive(S.assembly, rfp());
-    SAVE.cash -= d.cost;               // the article is spent the moment it leaves the shed
-    SAVE.rndTests++;
+    cashSpend(d.cost);                 // the article is spent the moment it leaves the shed
+    WS().rndTests++;
     saveBench();
     var rt = PG2.resolveTarget(S.assembly, S.seed, targetId);
     S.result = { outcome: rt.o, visual: PG2.visualFor(rt.o), rnd: rt, shotCost: d.cost, seed: S.seed };
@@ -5813,7 +5931,7 @@
     $('cam-clock').textContent = 'T−00:0' + rfp().tSpec.toFixed(1);
     PGAudio.wind();
     var t = PG2.TARGETS[targetId];
-    setCaption('STATION 7 · AFTER HOURS · R&D SHOT #' + SAVE.rndTests,
+    setCaption('STATION 7 · AFTER HOURS · R&D SHOT #' + WS().rndTests,
       'No board. No binoculars. Just the ' + t.name.toLowerCase() + ', which measures back.');
     later(2100, startRabbit);
     later(1800, function () { $('btn-arm').classList.remove('hidden'); });
@@ -5987,7 +6105,14 @@
         setCaption('SURVEY · ' + t.name, '<b>' + m1.lbl + ' — ' + m1.val + (m1.unit ? ' ' + m1.unit : '') + '</b><br>' + m1.sub);
       }
     });
-    later(6800, showRndScore);
+    later(6600, function () {
+      // the blast survey reads its own contours off the dirt
+      PGAudio.measureTick();
+      setCaption('BLAST SURVEY · CONTOURS PLOTTED',
+        '<b>CRATER ⌀ ' + crater.toFixed(1) + ' m · SCORCH R ' + (cr * 2.2).toFixed(0) +
+        ' m · OVERPRESSURE R ' + (cr * 4.2).toFixed(0) + ' m</b><br>The plotter is smug about the circles.');
+    });
+    later(8800, showRndScore);
   }
 
   /* ---------- the R&D readout card ---------- */
@@ -6019,7 +6144,7 @@
       '<div class="score-sheet">' +
         '<div class="score-head">WEAPONS ASSEMBLY · INTERNAL — NOT FOR THE AUTHORITY</div>' +
         '<div class="score-title">RANGE READOUT</div>' +
-        '<div class="score-sub">' + t.name + ' · R&D SHOT #' + SAVE.rndTests + ' · SERIES ' + S.result.seed + '</div>' +
+        '<div class="score-sub">' + t.name + ' · R&D SHOT #' + WS().rndTests + ' · SERIES ' + S.result.seed + '</div>' +
         '<div class="stamp-row">' + rt.measures.map(mCard).join('') + '</div>' +
         (!o.fired && o.rootCause
           ? '<div class="hint-callout"><span class="hc-kicker">NO DATA — ' + o.rootCause.title + '</span>' +
@@ -6027,7 +6152,7 @@
           : (o.hint && !rt.funcOk ? '<div class="hint-callout"><span class="hc-kicker">OFF CUE</span>' + o.hint + '</div>' : '')) +
         '<table class="pay-table">' +
           '<tr><td>ARTICLE, EXPENDED (PARTS &amp; REFINING)</td><td>−' + fmt$(S.result.shotCost) + '</td></tr>' +
-          '<tr class="net"><td>COMPANY ACCOUNT</td><td>' + fmt$(SAVE.cash) + '</td></tr>' +
+          '<tr class="net"><td>COMPANY ACCOUNT</td><td>' + cashLabel() + '</td></tr>' +
         '</table>' +
         '<div class="score-btns">' +
           '<button id="btn-rnd-retry" type="button">BACK TO THE BENCH<span class="sub">YOUR BUILD, AS YOU LEFT IT</span></button>' +
@@ -6052,12 +6177,12 @@
   /* ---------- TYPE CERTIFICATION: three tests, design frozen ---------- */
   function certifyDesign() {
     var fee = certFee();
-    if (SAVE.cash < fee) {
+    if (!cashOK(fee)) {
       PGAudio.buzz();
-      toast('The series costs ' + fmt$(fee) + '; the company holds ' + fmt$(SAVE.cash) + '. The Authority does not run tabs.');
+      toast('The series costs ' + fmt$(fee) + '; the company holds ' + cashLabel() + '. The Authority does not run tabs.');
       return;
     }
-    SAVE.cash -= fee;
+    cashSpend(fee);
     var certSeed = PG2.makeSeed().toUpperCase();
     var series = PG2.certSeries(S.assembly, certSeed, S.rndTarget);
     var doc = $('cert-doc');
@@ -6097,8 +6222,8 @@
     };
   }
   function mintType(series, certSeed) {
-    SAVE.rsk++;
-    var plate = 'RSK-' + SAVE.rsk;
+    WS().rsk++;
+    var plate = 'RSK-' + WS().rsk;
     var name = PG2.certCodename(certSeed);
     var s1 = series.shots[0];
     var ty = {
@@ -6109,7 +6234,7 @@
       assembly: JSON.parse(JSON.stringify(S.assembly)),
       certSeed: certSeed, t: Date.now()
     };
-    SAVE.types.push(ty);
+    WS().types.push(ty);
     persist();
     var t = series.target;
     $('plate-doc').innerHTML =
@@ -6142,14 +6267,14 @@
     showUI(null);
     var wall = $('bids-wall');
     wall.innerHTML = '';
-    var orders = PG2.genOrders(SAVE.types, weekKey(), wonCountAll())
-      .filter(function (o) { return !SAVE.doneOrders[o.id]; });
+    var orders = PG2.genOrders(WS().types, weekKey(), wonCountAll())
+      .filter(function (o) { return !WS().doneOrders[o.id]; });
     $('bids-sub').textContent = 'PROCUREMENT ' + weekKey() + ' · ' + orders.length + ' OPEN ORDER' + (orders.length === 1 ? '' : 'S') +
-      ' · ACCOUNT ' + fmt$(SAVE.cash);
-    if (!SAVE.types.length) {
+      ' · ACCOUNT ' + cashLabel();
+    if (!WS().types.length) {
       wall.innerHTML = '<div class="bids-empty">No certified types on file.</div>';
     }
-    SAVE.types.forEach(function (ty) {
+    WS().types.forEach(function (ty) {
       var t = PG2.TARGETS[ty.target];
       var box = document.createElement('div');
       box.className = 'bid-type';
@@ -6166,8 +6291,8 @@
         row.innerHTML = '<div class="bo-txt"><b>' + order.buyer + '</b><br>' + order.units + ' UNITS · SEALED BIDS</div>';
         var btn = document.createElement('button');
         btn.type = 'button';
-        btn.textContent = SAVE.run ? 'WORKSHOP BOOKED' : 'OPEN THE BIDDING';
-        btn.disabled = !!SAVE.run;
+        btn.textContent = WS().run ? 'WORKSHOP BOOKED' : 'OPEN THE BIDDING';
+        btn.disabled = !!WS().run;
         btn.addEventListener('click', function () { PGAudio.tap(); runAuction(ty, order); });
         row.appendChild(btn);
         wall.appendChild(box);
@@ -6211,8 +6336,8 @@
       PGAudio.tap();
       clearLater();
       $('auction-overlay').classList.add('hidden');
-      SAVE.doneOrders[order.id] = 1;
-      SAVE.run = {
+      WS().doneOrders[order.id] = 1;
+      WS().run = {
         orderId: order.id, plate: ty.plate, name: ty.name, buyer: order.buyer,
         units: order.units, finalUnit: au.finalUnit, net: au.net,
         seedKey: order.seedKey, t0: Date.now(), durMs: au.durMin * 60000
@@ -6225,7 +6350,7 @@
       PGAudio.tap();
       clearLater();
       $('auction-overlay').classList.add('hidden');
-      SAVE.doneOrders[order.id] = 1;   // a spurned buyer does not call twice in one week
+      WS().doneOrders[order.id] = 1;   // a spurned buyer does not call twice in one week
       persist();
       showBids();
     };
@@ -6233,7 +6358,7 @@
 
   /* ---------- delivery day (and the occasional letter) ---------- */
   function deliverRun() {
-    var run = SAVE.run;
+    var run = WS().run;
     if (!run || runRemainMs() > 0) return;
     var ty = typeByPlate(run.plate);
     var qa = ty ? PG2.qaRoll(ty, { seedKey: run.seedKey, units: run.units }) : null;
@@ -6253,7 +6378,7 @@
     $('delivery-close').onclick = function () {
       PGAudio.tap();
       $('delivery-overlay').classList.add('hidden');
-      SAVE.cash += run.net;
+      cashAdd(run.net);
       if (qa && ty) {
         ty.incidents = (ty.incidents || 0) + 1;
         SAVE.museum.irs.push({
@@ -6263,7 +6388,7 @@
         });
         museumFirst('qaletter', 'FIRST QA CALLBACK — THE CUSTOMER MEASURES TOO');
       }
-      SAVE.run = null;
+      WS().run = null;
       persist();
       showHQ();
     };
@@ -6274,7 +6399,7 @@
     state: function () {
       return {
         phase: S.phase, seed: S.seed, contract: S.contract, attempt: S.attempt,
-        mode: S.mode, rndTarget: S.rndTarget,
+        mode: S.mode, rndTarget: S.rndTarget, world: S.world,
         assembly: JSON.parse(JSON.stringify(S.assembly))
       };
     },
@@ -6291,7 +6416,7 @@
         }
       }
       if (typeof opts.cash === 'number') SAVE.cash = opts.cash;
-      if (opts.finishRun && SAVE.run) SAVE.run.t0 = Date.now() - SAVE.run.durMs - 1000;
+      if (opts.finishRun && WS().run) WS().run.t0 = Date.now() - WS().run.durMs - 1000;
       persist();
       refreshTitle();
     },

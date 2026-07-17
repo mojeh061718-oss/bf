@@ -1610,3 +1610,18 @@ body.lefty #undo-bar { left: auto; right: 10px; }
   background: var(--bp-panel); color: var(--bp-bright); border: 1.5px solid var(--bp-line);
   box-shadow: 0 4px 0 #0a1826; font-size: 10px; padding: 10px 13px; }
 body.lefty .bay-cta.hq { left: auto; right: 12px; }
+
+/* the sandbox gate: quieter than career, still a door */
+#btn-sandbox {
+  margin-top: 10px; font-size: 11px; font-weight: 800; letter-spacing: .16em;
+  color: var(--bp-bright); background: rgba(16,42,68,.7);
+  border: 1.5px solid var(--bp-line);
+  padding: 11px 22px; border-radius: 4px;
+  box-shadow: 0 4px 0 #0a1826, 0 8px 18px rgba(0,0,0,.4);
+}
+#btn-sandbox .start-sub { display: block; font-family: var(--mono); font-size: 7px; letter-spacing: .16em; color: var(--bp-dim); margin-top: 3px; }
+/* the gate link home from the compound */
+#hq-gate { font-family: var(--mono); font-size: 7.5px; letter-spacing: .2em; color: var(--bp-dim);
+  background: none; border: none; text-decoration: underline; padding: 6px; margin: 0 auto; display: block; position: relative; }
+.hq-world-badge { display: inline-block; margin-left: 8px; font-size: 7.5px; letter-spacing: .16em;
+  color: var(--bp-deep); background: var(--bp-bright); border-radius: 3px; padding: 2px 6px; vertical-align: 1px; }
