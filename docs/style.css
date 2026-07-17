@@ -263,14 +263,17 @@ button { font-family: inherit; color: inherit; background: none; border: none; c
    Left-edge slide-out, KSP grammar: spine tabs, 2-column grid,
    thumb pull-tab, spring slide, auto-collapse on grab. */
 #drawer {
+  /* width is one source of truth so the collapse + lefty offsets track it;
+     capped against the viewport so it never eats the bay on a phone */
+  --drawer-w: min(210px, 56vw);
   position: absolute; left: 0; top: calc(142px + var(--sat)); bottom: 0;
-  width: 262px; z-index: 8;
+  width: var(--drawer-w); z-index: 8;
   display: flex; flex-direction: row;
   transform: translateX(0);
   transition: transform .34s cubic-bezier(.26,1.25,.42,1);   /* spring, consistent with the bay */
   will-change: transform;
 }
-#drawer.collapsed { transform: translateX(-262px); }
+#drawer.collapsed { transform: translateX(calc(-1 * var(--drawer-w))); }
 #drawer-panel {
   flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0;
   background: linear-gradient(105deg, rgba(7,17,29,.96), rgba(10,24,40,.93));
@@ -325,7 +328,7 @@ button { font-family: inherit; color: inherit; background: none; border: none; c
 #drawer-tab .dt-lbl { writing-mode: vertical-rl; font-family: var(--mono); font-size: 8.5px; letter-spacing: .24em; }
 /* lefty mirror: the drawer lives under the other thumb */
 body.lefty #drawer { left: auto; right: 0; flex-direction: row-reverse; }
-body.lefty #drawer.collapsed { transform: translateX(262px); }
+body.lefty #drawer.collapsed { transform: translateX(var(--drawer-w)); }
 body.lefty #drawer-panel { border-right: none; border-left: 1px solid var(--bp-line); border-radius: 10px 0 0 0; box-shadow: -8px 0 26px rgba(0,0,0,.45); }
 body.lefty #drawer-spine { border-right: none; border-left: 1px solid var(--bp-line-soft); }
 body.lefty .spine-tab { border-left: none; border-right: 3px solid transparent; }

@@ -29,7 +29,7 @@ A teaching ladder where every RFP adds one idea: restraint on a mean budget (FIR
 
 ---
 
-## 🔨 BUILDING NOW — M3a (4 of 5 stages done + verification remaining)
+## ✅ SHIPPED — M3a (all 5 stages + verification complete)
 
 | Stage | Feature | Status |
 |---|---|---|
@@ -37,8 +37,8 @@ A teaching ladder where every RFP adds one idea: restraint on a mean budget (FIR
 | 2 | **Parts Drawer:** KSP-style left-edge drawer — category tabs (SHELLS · PAYLOAD · FUZING · POWER · TRIM + a sealed GUIDANCE tease), 2-column tile grid, auto-collapse on grab, silhouette-locked parts showing their unlock contract | ✅ done |
 | 3 | **Build-Phase Rail:** STRUCTURE → PAYLOAD → SYSTEMS → CLOSE-OUT across the top of the bay; camera focus + drawer filtering per phase; scorecards attribute causes to phases | ✅ done |
 | 4 | **Catalog Wave 1 (~10 new parts):** thin-wall shell, segmented casing (visible frag spray), ¼-size trim cells (the precision workhorse), dense-pack cell, inert ballast, large battery, shielded harness, delay relay, impact fuze nose, paint locker (incl. "Government Grey No. 2") | ✅ done |
-| 5 | **RFP-066 "SKIPSTONE":** 9th contract — impact-fuze drop test onto a marked plate; placement band replaces the timing spec | 🔨 in progress |
-| — | Full verification: extended headless suite + browser regression on everything above | pending |
+| 5 | **RFP-066 "SKIPSTONE":** 9th contract — impact-fuze drop test onto a marked plate; placement band replaces the timing spec | ✅ done |
+| — | Full verification: extended headless suite + browser regression on everything above | ✅ done |
 
 ---
 
