@@ -289,6 +289,103 @@
     if (opts.transparent) { m.transparent = true; m.opacity = opts.opacity != null ? opts.opacity : 0.5; }
     return m;
   }
+  /* ---------- the paint shop: canvas skins + machined materials ----------
+     Every man-made surface earns a painted skin: panel lines, rivets,
+     stencils, AO, grime. Textures are cached; materials are always fresh
+     (aftermath tints mutate material.color — a shared material would rust
+     the whole catalog at once). */
+  var TEXCACHE = {};
+  function shadeHex(c, f) {   // f>0 toward white, f<0 toward black — css string out
+    var r = (c >> 16) & 255, g = (c >> 8) & 255, b = c & 255;
+    if (f >= 0) { r += (255 - r) * f; g += (255 - g) * f; b += (255 - b) * f; }
+    else { r *= 1 + f; g *= 1 + f; b *= 1 + f; }
+    return 'rgb(' + Math.round(r) + ',' + Math.round(g) + ',' + Math.round(b) + ')';
+  }
+  function shadeHexInt(c, f) {   // same ramp, integer out — for material tints
+    var r = (c >> 16) & 255, g = (c >> 8) & 255, b = c & 255;
+    if (f >= 0) { r += (255 - r) * f; g += (255 - g) * f; b += (255 - b) * f; }
+    else { r *= 1 + f; g *= 1 + f; b *= 1 + f; }
+    return (Math.round(r) << 16) | (Math.round(g) << 8) | Math.round(b);
+  }
+  function canvasTex(key, w, h, draw) {
+    if (TEXCACHE[key]) return TEXCACHE[key];
+    var c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    draw(c.getContext('2d'), w, h);
+    var tx = new THREE.CanvasTexture(c);
+    tx.encoding = THREE.sRGBEncoding;
+    tx.anisotropy = 4;
+    TEXCACHE[key] = tx;
+    return tx;
+  }
+  function texGrain(x, w, h, n, alpha, tag) {
+    // metal tooth — light + dark speckle, deterministic per tag
+    var r = PG2.stream('TEXTURE', tag || 'grain');
+    for (var i = 0; i < n; i++) {
+      var lite = r() > 0.5;
+      x.fillStyle = 'rgba(' + (lite ? '235,240,244' : '8,12,16') + ',' + (alpha * (0.3 + r() * 0.7)).toFixed(3) + ')';
+      x.fillRect(r() * w, r() * h, 1 + r() * 2, 1 + r() * 1.4);
+    }
+  }
+  function brushStrokes(x, w, h, n, alpha, tag) {
+    // rolled-steel tooth: streaks along canvas-y (the part's long axis)
+    var r = PG2.stream('TEXTURE', tag || 'brush');
+    for (var i = 0; i < n; i++) {
+      var bx = r() * w, lite = r() > 0.45;
+      x.fillStyle = 'rgba(' + (lite ? '225,232,238' : '18,24,30') + ',' + (alpha * (0.25 + r() * 0.75)).toFixed(3) + ')';
+      x.fillRect(bx, r() * h * 0.55, 1 + r(), h * (0.3 + r() * 0.7));
+    }
+  }
+  function sideText(x, txt, cx, cy, px, color, alpha, rot) {
+    // stencil lettering running along a cylinder's length (canvas-y)
+    x.save();
+    x.translate(cx, cy);
+    x.rotate(rot != null ? rot : Math.PI / 2);
+    x.font = '700 ' + px + 'px Menlo, monospace';
+    x.textAlign = 'center'; x.textBaseline = 'middle';
+    x.globalAlpha = alpha != null ? alpha : 1;
+    x.fillStyle = color;
+    x.fillText(txt, 0, 0);
+    x.restore();
+  }
+  function rivetDot(x, px, py, r2, dark, lite) {
+    x.fillStyle = dark || 'rgba(10,14,18,0.75)';
+    x.beginPath(); x.arc(px, py, r2, 0, Math.PI * 2); x.fill();
+    x.fillStyle = lite || 'rgba(228,236,242,0.8)';
+    x.beginPath(); x.arc(px - r2 * 0.25, py - r2 * 0.25, r2 * 0.45, 0, Math.PI * 2); x.fill();
+  }
+  function skinMat(tex, opts) {
+    opts = opts || {};
+    var m = new THREE.MeshPhongMaterial({
+      map: tex, flatShading: !!opts.flat,
+      shininess: opts.shin != null ? opts.shin : 26,
+      specular: new THREE.Color(opts.spec != null ? opts.spec : 0x3d434a)
+    });
+    if (opts.emissive) { m.emissive = new THREE.Color(opts.emissive); m.emissiveIntensity = opts.ei || 1; }
+    if (opts.transparent) { m.transparent = true; m.opacity = opts.opacity != null ? opts.opacity : 0.5; }
+    return m;
+  }
+  function machMat(color, rough, metal) {
+    // machined metal — brass gimbals, polished collars. Tuned to read under
+    // plain hemi+key lighting (no env map on a phone budget).
+    return new THREE.MeshStandardMaterial({
+      color: color, flatShading: true,
+      metalness: metal != null ? metal : 0.62,
+      roughness: rough != null ? rough : 0.32
+    });
+  }
+  function grainTint(hex, key, shin) {
+    // subtle speckle map multiplied by a tint — for domes and small castings.
+    // flat-shaded: facets are the house style, and they break up highlights.
+    var g = canvasTex(key || 'graintint', 128, 128, function (x, w, h) {
+      x.fillStyle = '#efefef'; x.fillRect(0, 0, w, h);
+      texGrain(x, w, h, 300, 0.09, key || 'graintint');
+    });
+    var m = new THREE.MeshPhongMaterial({ color: hex, map: g, flatShading: true,
+      shininess: shin != null ? shin : 24, specular: new THREE.Color(0x3d434a) });
+    return m;
+  }
+
   function textPlane(txt, w, h, opts) {
     opts = opts || {};
     var c = document.createElement('canvas');
@@ -340,90 +437,211 @@
   }
   function wellX(id) { return casingDims(id).L * 0.395; }
 
+  var SHELL_STENCIL = { compact: 'RD-045', standard: 'RD-047', heavy: 'RD-049', thinwall: 'RD-047T', segmented: 'RD-051F' };
+  function casingSkin(id, paintHex) {
+    // the rolled-steel skin: panel seams, rivets, stencils, hazard band, AO.
+    // canvas x wraps the circumference (front of the shell at x=w/2 via
+    // offset 0.5; the ground-contact AO lands at x=w/4), canvas y runs
+    // tail (y=0) → nose (y=h).
+    var key = 'cas:' + id + ':' + paintHex + ':' + S.seed;
+    return canvasTex(key, 1024, 512, function (x, w, h) {
+      var thin = id === 'thinwall';
+      var g0 = x.createLinearGradient(0, 0, 0, h);
+      g0.addColorStop(0, shadeHex(paintHex, -0.3));
+      g0.addColorStop(0.4, shadeHex(paintHex, -0.06));
+      g0.addColorStop(0.86, shadeHex(paintHex, -0.12));
+      g0.addColorStop(1, shadeHex(paintHex, -0.22));
+      x.fillStyle = g0; x.fillRect(0, 0, w, h);
+      brushStrokes(x, w, h, thin ? 150 : 280, thin ? 0.07 : 0.11, key + ':b');
+      texGrain(x, w, h, 900, 0.05, key + ':g');
+      var rr = PG2.stream('TEXTURE', key + ':wear');
+      function seam(yf, heavyRow) {
+        var sy = yf * h;
+        x.fillStyle = 'rgba(14,19,24,0.66)'; x.fillRect(0, sy - 1.5, w, 3);
+        x.fillStyle = 'rgba(232,240,246,0.22)'; x.fillRect(0, sy + 2, w, 1);
+        for (var rx = 26; rx < w; rx += 60) {
+          rivetDot(x, rx + (heavyRow ? 0 : 8), sy - 9, 4.2);
+          if (heavyRow) rivetDot(x, rx + 30, sy + 10, 4.2);
+        }
+        // chips of bare steel along the seam — the crew is not gentle
+        for (var ci = 0; ci < 8; ci++) {
+          x.fillStyle = 'rgba(214,224,232,' + (0.2 + rr() * 0.3).toFixed(2) + ')';
+          x.fillRect(rr() * w, sy - 2 + rr() * 4, 3 + rr() * 9, 1.6);
+        }
+      }
+      if (id === 'segmented') {
+        // machine-scored frag grid — painted score lines, dark and exact
+        x.fillStyle = 'rgba(16,22,27,0.72)';
+        for (var gy = 0.1; gy < 0.87; gy += 0.096) x.fillRect(0, gy * h, w, 2.6);
+        for (var gx = 0; gx < w; gx += 64) x.fillRect(gx, 0.1 * h, 2.6, 0.77 * h);
+        x.fillStyle = 'rgba(235,242,247,0.14)';
+        for (var gy2 = 0.1; gy2 < 0.87; gy2 += 0.096) x.fillRect(0, gy2 * h + 2.6, w, 1);
+      } else if (thin) {
+        // light-gauge: no butt seams — spot-weld rows and oil-canning shimmer
+        var rs = PG2.stream('TEXTURE', key + ':spot');
+        [0.2, 0.5, 0.8].forEach(function (yf) {
+          for (var sx = 18; sx < w; sx += 46) rivetDot(x, sx, yf * h + (rs() - 0.5) * 3, 2.6, 'rgba(30,38,44,0.55)', 'rgba(235,242,247,0.5)');
+        });
+        for (var oc = 0; oc < 9; oc++) {
+          var ox2 = rs() * w, oy2 = (0.1 + rs() * 0.75) * h;
+          var og = x.createRadialGradient(ox2, oy2, 4, ox2, oy2, 60 + rs() * 90);
+          og.addColorStop(0, 'rgba(' + (rs() > 0.5 ? '240,246,250,0.10' : '10,16,22,0.10') + ')');
+          og.addColorStop(1, 'rgba(0,0,0,0)');
+          x.fillStyle = og; x.fillRect(0, 0, w, h);
+        }
+      } else {
+        var seams = id === 'compact' ? [0.3, 0.62] : id === 'heavy' ? [0.14, 0.4, 0.62, 0.8] : [0.16, 0.56, 0.78];
+        seams.forEach(function (yf) { seam(yf, id === 'heavy'); });
+        // one longitudinal weld line, kept on the shell's blind side
+        x.fillStyle = 'rgba(18,24,30,0.5)';
+        for (var wy = 0; wy < h * 0.85; wy += 14) x.fillRect(56, wy, 3, 9);
+      }
+      // hazard band at the nose end — red oxide with cream pinstripes
+      var b0 = 0.885 * h, b1 = 0.985 * h;
+      x.fillStyle = shadeHex(COL.nose, -0.06); x.fillRect(0, b0, w, b1 - b0);
+      x.fillStyle = 'rgba(12,16,20,0.4)'; x.fillRect(0, b0 - 2, w, 2.4);
+      x.fillStyle = 'rgba(240,232,208,0.85)';
+      x.fillRect(0, b0 + 5, w, 2.2); x.fillRect(0, b1 - 7, w, 2.2);
+      if (id === 'heavy') { x.fillStyle = shadeHex(COL.nose, -0.06); x.fillRect(0, 0.015 * h, w, 0.03 * h); }
+      for (var bw = 0; bw < 14; bw++) {   // chipped band edge — painted wear
+        x.fillStyle = 'rgba(' + (bw % 2 ? '210,220,228' : '150,160,168') + ',' + (0.25 + rr() * 0.3).toFixed(2) + ')';
+        x.fillRect(rr() * w, b0 + rr() * (b1 - b0), 2 + rr() * 7, 1.6);
+      }
+      // stencil block — designation, lot, and the Authority's fine print
+      var ink = 'rgba(26,28,30,0.88)', inkSoft = 'rgba(32,34,36,0.6)';
+      sideText(x, SHELL_STENCIL[id] || 'RD-047', w / 2 + 14, h * 0.33, 60, ink);
+      sideText(x, PG2.lotNumber(S.seed, id), w / 2 - 44, h * 0.33, 24, inkSoft);
+      sideText(x, 'REDSKY INC · AUTHORITY PATTERN', w / 2 - 74, h * 0.33, 13, 'rgba(36,38,40,0.5)');
+      sideText(x, 'LIFT HERE', w / 2 + 40, h * 0.76, 15, inkSoft);
+      // inspection stamp — a square, a diagonal, a number. Paperwork, painted.
+      x.strokeStyle = inkSoft; x.lineWidth = 2.4;
+      x.strokeRect(w / 2 - 26, h * 0.62, 52, 52);
+      x.beginPath(); x.moveTo(w / 2 - 26, h * 0.62 + 52); x.lineTo(w / 2 + 26, h * 0.62); x.stroke();
+      sideText(x, '7', w / 2, h * 0.62 + 26, 26, inkSoft);
+      // ground-shadow AO around the belly + a sheen along the spine
+      var ao = x.createLinearGradient(0, 0, w, 0);
+      ao.addColorStop(0, 'rgba(8,12,16,0.36)');
+      ao.addColorStop(0.25, 'rgba(8,12,16,0.52)');
+      ao.addColorStop(0.5, 'rgba(8,12,16,0.08)');
+      ao.addColorStop(0.75, 'rgba(8,12,16,0)');
+      ao.addColorStop(1, 'rgba(8,12,16,0.36)');
+      x.fillStyle = ao; x.fillRect(0, 0, w, h);
+      var sheen = x.createLinearGradient(w * 0.55, 0, w, 0);
+      sheen.addColorStop(0, 'rgba(255,243,224,0)');
+      sheen.addColorStop(0.72, 'rgba(255,243,224,0.11)');
+      sheen.addColorStop(1, 'rgba(255,243,224,0)');
+      x.fillStyle = sheen; x.fillRect(0, 0, w, h);
+      // oil smudges under the belly, dust at the tail
+      for (var os = 0; os < 5; os++) {
+        var sx2 = w * (0.13 + rr() * 0.24), sy2 = rr() * h * 0.8;
+        var sg2 = x.createRadialGradient(sx2, sy2, 2, sx2, sy2, 26 + rr() * 40);
+        sg2.addColorStop(0, 'rgba(16,14,10,0.20)'); sg2.addColorStop(1, 'rgba(16,14,10,0)');
+        x.fillStyle = sg2; x.fillRect(0, 0, w, h);
+      }
+      var tg = x.createLinearGradient(0, 0, 0, h * 0.09);
+      tg.addColorStop(0, 'rgba(10,14,18,0.34)'); tg.addColorStop(1, 'rgba(10,14,18,0)');
+      x.fillStyle = tg; x.fillRect(0, 0, w, h * 0.09);
+    });
+  }
   function buildCasing(id) {
     var d = casingDims(id);
     var g = new THREE.Group();
     var skin = id === 'thinwall' ? 0xa6b5c2 : bodyColor();
-    var body = new THREE.Mesh(new THREE.CylinderGeometry(d.r, d.r, d.L, 20, 1, false), mat(skin));
+    var skinTex = casingSkin(id, skin);
+    skinTex.wrapS = THREE.RepeatWrapping;
+    skinTex.offset.x = 0.5;
+    var body = new THREE.Mesh(new THREE.CylinderGeometry(d.r, d.r, d.L, 24, 1, true), skinMat(skinTex, { shin: 30 }));
     body.rotation.z = Math.PI / 2;
     body.castShadow = true;
     g.add(body);
     if (id === 'segmented') {
-      // machine-scored frag squares: rings + longitudinal scoring
-      for (var ri = -2; ri <= 2; ri++) {
-        var score = new THREE.Mesh(new THREE.TorusGeometry(d.r + 0.004, 0.008, 6, 26), mat(0x39434c, { shin: 4 }));
+      // two machined score rings keep the grid honest in silhouette
+      [-1, 1].forEach(function (s2) {
+        var score = new THREE.Mesh(new THREE.TorusGeometry(d.r + 0.003, 0.007, 6, 28), mat(0x2c343c, { shin: 8 }));
         score.rotation.y = Math.PI / 2;
-        score.position.x = ri * d.L * 0.17;
+        score.position.x = s2 * d.L * 0.17;
         g.add(score);
-      }
-      for (var li = 0; li < 8; li++) {
-        var strip = new THREE.Mesh(new THREE.BoxGeometry(d.L * 0.86, 0.014, 0.014), mat(0x39434c, { shin: 4 }));
-        var ang = li * Math.PI / 4 + Math.PI / 8;
-        strip.position.set(0, Math.cos(ang) * (d.r + 0.004), Math.sin(ang) * (d.r + 0.004));
-        strip.rotation.x = -ang;
-        g.add(strip);
-      }
+      });
     }
     if (id === 'thinwall') {
       for (var wi = -1; wi <= 1; wi++) {   // stiffening ribs — it needs them
-        var rib = new THREE.Mesh(new THREE.TorusGeometry(d.r + 0.008, 0.012, 6, 22), mat(0x77899a));
+        var rib = new THREE.Mesh(new THREE.TorusGeometry(d.r + 0.008, 0.011, 6, 24), machMat(0x9fb1bf, 0.35, 0.55));
         rib.rotation.y = Math.PI / 2;
         rib.position.x = wi * d.L * 0.3;
         g.add(rib);
       }
     }
     [-1, 1].forEach(function (s) {
-      var dome = new THREE.Mesh(new THREE.SphereGeometry(d.r, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2), mat(skin));
+      var nose2 = s > 0;
+      var dome = new THREE.Mesh(new THREE.SphereGeometry(d.r, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2),
+        grainTint(id === 'thinwall' ? 0x8798a6 : shadeHexInt(skin, nose2 ? -0.1 : -0.16), 'cap:' + id + ':' + s, 16));
       dome.rotation.z = s * -Math.PI / 2;
       dome.position.x = s * d.L / 2;
       dome.castShadow = true;
       g.add(dome);
+      // machined end collar — the chamfer that says someone owned a lathe
+      var col2 = new THREE.Mesh(new THREE.CylinderGeometry(d.r + 0.006, d.r + 0.006, 0.045, 24, 1, true),
+        machMat(nose2 ? 0x5a636d : 0x4c565f, 0.34, 0.6));
+      col2.rotation.z = Math.PI / 2;
+      col2.position.x = s * (d.L / 2 - 0.028);
+      g.add(col2);
     });
-    // painted nose band
-    var band = new THREE.Mesh(new THREE.CylinderGeometry(d.r + 0.006, d.r + 0.006, 0.1, 20), mat(COL.nose));
-    band.rotation.z = Math.PI / 2;
-    band.position.x = d.L / 2 - 0.10;
-    g.add(band);
-    // stencil
-    var st = textPlane({ thinwall: 'RD-047T', segmented: 'RD-051F', compact: 'RD-045', heavy: 'RD-049' }[id] || 'RD-047',
-      0.6, 0.18, { color: '#2e2b26', px: 72 });
-    st.position.set(-d.L * 0.12, -0.02, d.r + 0.005);
-    g.add(st);
-    // slot rims + dark bores
+    // slot rims + dark bores — machined collars around every payload bay
     slotXs(id).forEach(function (x, i) {
-      var rim = new THREE.Mesh(new THREE.TorusGeometry(0.135, 0.022, 8, 18), mat(COL.steelDark));
+      var rim = new THREE.Mesh(new THREE.TorusGeometry(0.135, 0.022, 8, 20), machMat(0x525c66, 0.42, 0.55));
       rim.rotation.x = Math.PI / 2;
       rim.position.set(x, d.r - 0.01, 0);
       rim.userData.slotRim = i;
       g.add(rim);
-      var bore = new THREE.Mesh(new THREE.CylinderGeometry(0.125, 0.125, 0.16, 14), mat(0x1a222b, { shin: 4 }));
+      var bore = new THREE.Mesh(new THREE.CylinderGeometry(0.125, 0.125, 0.16, 14), mat(0x141b22, { shin: 4 }));
       bore.position.set(x, d.r - 0.09, 0);
       g.add(bore);
     });
     // detonator well boss (top, near nose)
     var wx = wellX(id);
-    var boss = new THREE.Mesh(new THREE.CylinderGeometry(0.085, 0.1, 0.12, 12), mat(COL.steelDark));
+    var boss = new THREE.Mesh(new THREE.CylinderGeometry(0.085, 0.1, 0.12, 12), machMat(0x5c6670, 0.34, 0.6));
     boss.position.set(wx, d.r + 0.02, 0);
     g.add(boss);
-    var bore2 = new THREE.Mesh(new THREE.CylinderGeometry(0.052, 0.052, 0.1, 10), mat(0x14181d, { shin: 2 }));
+    var bore2 = new THREE.Mesh(new THREE.CylinderGeometry(0.052, 0.052, 0.1, 10), mat(0x11161b, { shin: 2 }));
     bore2.position.set(wx, d.r + 0.04, 0);
     g.add(bore2);
     // access panel recess (front +Z, center)
     var frame = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.4, 0.05), mat(COL.steelDark));
     frame.position.set(0, 0.02, d.r - 0.05);
     g.add(frame);
-    var recess = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.34, 0.06), mat(0x232b33, { shin: 4 }));
+    var recess = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.34, 0.06), mat(0x1d252d, { shin: 4 }));
     recess.position.set(0, 0.02, d.r - 0.04);
     g.add(recess);
-    // door (hinged at top) — pivot group
+    // door (hinged at top) — pivot group, wearing a painted service label
     var doorPivot = new THREE.Group();
     doorPivot.position.set(0, 0.19, d.r + 0.015);
-    var door = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.34, 0.022), mat(skin));
+    var doorTex = canvasTex('door:' + skin, 256, 174, function (x, w2, h2) {
+      x.fillStyle = shadeHex(skin, -0.02); x.fillRect(0, 0, w2, h2);
+      texGrain(x, w2, h2, 260, 0.08, 'door:' + skin);
+      x.strokeStyle = 'rgba(16,22,28,0.5)'; x.lineWidth = 3;
+      x.strokeRect(9, 9, w2 - 18, h2 - 18);
+      // louver slots
+      x.fillStyle = 'rgba(14,20,26,0.62)';
+      for (var lv = 0; lv < 4; lv++) x.fillRect(w2 * 0.12, h2 * 0.24 + lv * h2 * 0.13, w2 * 0.3, 4);
+      x.fillStyle = 'rgba(235,242,247,0.16)';
+      for (var lv2 = 0; lv2 < 4; lv2++) x.fillRect(w2 * 0.12, h2 * 0.24 + lv2 * h2 * 0.13 + 4, w2 * 0.3, 1.4);
+      x.font = '700 17px Menlo, monospace'; x.textAlign = 'left';
+      x.fillStyle = 'rgba(28,30,32,0.8)';
+      x.fillText('SERVICE', w2 * 0.5, h2 * 0.36);
+      x.fillText('BUS', w2 * 0.5, h2 * 0.52);
+      x.font = '700 11px Menlo, monospace';
+      x.fillStyle = 'rgba(32,34,36,0.55)';
+      x.fillText('NO FIELD ENTRY', w2 * 0.5, h2 * 0.7);
+      var aog = x.createLinearGradient(0, h2 * 0.6, 0, h2);
+      aog.addColorStop(0, 'rgba(10,14,18,0)'); aog.addColorStop(1, 'rgba(10,14,18,0.24)');
+      x.fillStyle = aog; x.fillRect(0, 0, w2, h2);
+    });
+    var door = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.34, 0.022), skinMat(doorTex, { shin: 24 }));
     door.position.y = -0.17;
     doorPivot.add(door);
     [-0.21, 0.21].forEach(function (dx) {
       [-0.31, -0.03].forEach(function (dy) {
-        var screw = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.02, 8), mat(COL.brass, { shin: 60 }));
+        var screw = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.02, 8), machMat(COL.brass, 0.3, 0.8));
         screw.rotation.x = Math.PI / 2;
         screw.position.set(dx, dy, 0.012);
         doorPivot.add(screw);
@@ -445,85 +663,227 @@
     var dm = comp === 'trimcell' ? { r: 0.085, h: 0.15, band: 0.05, topY: 0.075, valveY: 0.14 }
            : comp === 'densepack' ? { r: 0.13, h: 0.24, band: 0.1, topY: 0.12, valveY: 0.22 }
            : { r: 0.115, h: 0.26, band: 0.09, topY: 0.13, valveY: 0.24 };
-    var bodyCol = comp === 'densepack' ? 0x4b5157 : comp === 'ballast' ? 0x9aa1a7 : 0xb9c2c9;
-    var body = new THREE.Mesh(new THREE.CylinderGeometry(dm.r, dm.r, dm.h, 14), mat(bodyCol));
+    var bodyCol = comp === 'densepack' ? 0x454b51 : comp === 'ballast' ? 0x8d949a : 0xa8b1b8;
+    // drum skin: spun-metal tooth, crimp shadows, painted AO at the foot
+    var drumTex = canvasTex('can:' + comp, 256, 256, function (x, w, h) {
+      var g1 = x.createLinearGradient(0, 0, 0, h);
+      g1.addColorStop(0, shadeHex(bodyCol, 0.05));
+      g1.addColorStop(0.55, shadeHex(bodyCol, -0.04));
+      g1.addColorStop(1, shadeHex(bodyCol, -0.26));
+      x.fillStyle = g1; x.fillRect(0, 0, w, h);
+      // spin lines around the drum
+      var r0 = PG2.stream('TEXTURE', 'can:' + comp);
+      for (var i = 0; i < 46; i++) {
+        var ly = r0() * h, lite = r0() > 0.5;
+        x.fillStyle = 'rgba(' + (lite ? '232,238,243' : '16,22,27') + ',' + (0.05 + r0() * 0.09).toFixed(3) + ')';
+        x.fillRect(0, ly, w, 1);
+      }
+      texGrain(x, w, h, 240, 0.06, 'can:' + comp + ':g');
+      // crimp shadows top + bottom
+      x.fillStyle = 'rgba(12,17,22,0.4)';
+      x.fillRect(0, 0, w, 4); x.fillRect(0, h - 5, w, 5);
+      // faint vertical side-seam
+      x.fillStyle = 'rgba(14,19,24,0.35)'; x.fillRect(w * 0.06, 0, 2, h);
+    });
+    var body = new THREE.Mesh(new THREE.CylinderGeometry(dm.r, dm.r, dm.h, 18), skinMat(drumTex, { shin: 34 }));
     body.castShadow = true;
     g.add(body);
-    var band = new THREE.Mesh(new THREE.CylinderGeometry(dm.r + 0.003, dm.r + 0.003, dm.band, 14),
+    // embossed ribs — pressed into the drum, same skin tone
+    [-0.26, -0.4].forEach(function (yf) {
+      var rib = new THREE.Mesh(new THREE.TorusGeometry(dm.r + 0.003, 0.005, 5, 18), mat(shadeHexInt(bodyCol, -0.05), { shin: 30 }));
+      rib.rotation.x = Math.PI / 2;
+      rib.position.y = dm.h * yf;
+      g.add(rib);
+    });
+    // the contract band — amber / blue / violet stays exactly as certified
+    var band = new THREE.Mesh(new THREE.CylinderGeometry(dm.r + 0.004, dm.r + 0.004, dm.band, 18),
       glow > 0 ? mat(hue, { emissive: hue, ei: glow }) : mat(hue));
     band.position.y = 0.02;
     g.add(band);
-    var top = new THREE.Mesh(new THREE.SphereGeometry(dm.r, 14, 7, 0, Math.PI * 2, 0, Math.PI / 2),
-      mat(comp === 'ballast' ? bodyCol : hue));
+    var top = new THREE.Mesh(new THREE.SphereGeometry(dm.r, 18, 8, 0, Math.PI * 2, 0, Math.PI / 2),
+      grainTint(comp === 'ballast' ? bodyCol : shadeHexInt(hue, -0.04), 'canlid:' + comp, 30));
     top.position.y = dm.topY;
     g.add(top);
+    // crimped lid ring + carry bail — someone hauls these by hand all day
+    var crimp = new THREE.Mesh(new THREE.TorusGeometry(dm.r * 0.995, 0.008, 5, 18), machMat(0x77818a, 0.4, 0.55));
+    crimp.rotation.x = Math.PI / 2;
+    crimp.position.y = dm.topY + 0.004;
+    g.add(crimp);
+    if (comp !== 'trimcell') {
+      var bail = new THREE.Mesh(new THREE.TorusGeometry(dm.r * 0.55, 0.008, 5, 12, Math.PI), machMat(0x9aa4ad, 0.35, 0.6));
+      bail.position.y = dm.topY + dm.r * 0.34;
+      bail.rotation.y = 0.6;
+      g.add(bail);
+    }
     if (comp === 'densepack') {   // pressed fill: hex bolts around the crown
       for (var bi = 0; bi < 6; bi++) {
-        var bolt = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.03, 6), mat(COL.brass, { shin: 50 }));
+        var bolt = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.03, 6), machMat(COL.brass, 0.32, 0.8));
         var ba = bi * Math.PI / 3;
         bolt.position.set(Math.cos(ba) * dm.r * 0.7, dm.topY + 0.02, Math.sin(ba) * dm.r * 0.7);
         g.add(bolt);
       }
     }
     if (comp !== 'ballast') {
-      var valve = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.05, 8), mat(COL.brass, { shin: 60 }));
+      var valve = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.05, 8), machMat(COL.brass, 0.28, 0.85));
       valve.position.y = dm.valveY;
       g.add(valve);
+      var valveCap = new THREE.Mesh(new THREE.CylinderGeometry(0.034, 0.034, 0.012, 8), machMat(0xd8dde2, 0.25, 0.85));
+      valveCap.position.y = dm.valveY + 0.028;
+      g.add(valveCap);
     }
     // stockroom stencil: designation + seeded lot number, painted on the can
     var def = PG2.COMPOUNDS[comp];
     if (def && def.stencil) {
       var sc2 = dm.r / 0.115;
-      var st = textPlane(def.stencil, 0.16 * sc2, 0.062 * sc2, { color: '#241f18', px: 76 });
-      st.position.set(0, -0.035 * sc2, dm.r + 0.002);
+      var st = textPlane(def.stencil, 0.16 * sc2, 0.062 * sc2, { color: '#1e1a15', px: 76 });
+      st.position.set(0, -0.035 * sc2, dm.r + 0.003);
       g.add(st);
-      var lot = textPlane(PG2.lotNumber(S.seed, comp), 0.17 * sc2, 0.045 * sc2, { color: '#3a332a', px: 46 });
-      lot.position.set(0, -0.095 * sc2, dm.r + 0.002);
+      var lot = textPlane(PG2.lotNumber(S.seed, comp), 0.17 * sc2, 0.045 * sc2, { color: '#332d25', px: 46 });
+      lot.position.set(0, -0.095 * sc2, dm.r + 0.003);
       g.add(lot);
     }
     return g;
   }
+  function knurlTex(key, base) {
+    // machinist's knurling — fine vertical ticks around a collar
+    return canvasTex(key || 'knurl', 128, 24, function (x, w, h) {
+      x.fillStyle = shadeHex(base || 0x8a939c, -0.08); x.fillRect(0, 0, w, h);
+      for (var i = 0; i < w; i += 4) {
+        x.fillStyle = 'rgba(16,22,27,0.6)'; x.fillRect(i, 2, 1.6, h - 4);
+        x.fillStyle = 'rgba(235,241,246,0.4)'; x.fillRect(i + 2, 2, 1, h - 4);
+      }
+    });
+  }
+  function noseStandoff() {
+    // fuzing hardware clears the nose dome of whatever shell it rides —
+    // purely visual: the snap node and part origin never move
+    var r2 = S.assembly && S.assembly.shell ? casingDims(S.assembly.shell).r : 0.42;
+    return Math.max(0, (r2 - 0.2) * 1.3);
+  }
   function buildTimer() {
+    // T-5 CLOCKWORK: machined cone, graduated amber bezel, brass wind key —
+    // shifted proud of the nose dome so the product actually shows
     var g = new THREE.Group();
-    var cone = new THREE.Mesh(new THREE.ConeGeometry(0.24, 0.4, 14), mat(COL.steelDark));
+    var off = noseStandoff();
+    var cone = new THREE.Mesh(new THREE.ConeGeometry(0.21, 0.36, 16), grainTint(0x424b55, 'timerbody', 30));
     cone.rotation.z = -Math.PI / 2;
-    cone.position.x = 0.2;
+    cone.position.x = 0.31 + off;
     cone.castShadow = true;
     g.add(cone);
-    var ring = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 0.07, 14), mat(COL.amber, { emissive: COL.amber, ei: 0.25 }));
-    ring.rotation.z = Math.PI / 2;
-    ring.position.x = 0.02;
-    g.add(ring);
-    var dial = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.02, 12), mat(0xf1e9d3, { shin: 50 }));
-    dial.rotation.x = Math.PI / 2;
-    dial.position.set(0.16, 0.13, 0.12);
-    dial.rotation.z = 0.5;
-    g.add(dial);
+    var bezTex = canvasTex('timerbezel', 256, 32, function (x, w, h) {
+      x.fillStyle = shadeHex(COL.amber, -0.05); x.fillRect(0, 0, w, h);
+      x.fillStyle = 'rgba(38,28,12,0.85)';
+      for (var i = 0; i < 24; i++) x.fillRect(i * (w / 24) + 2, h * 0.16, 2, i % 6 === 0 ? h * 0.68 : h * 0.36);
+      x.fillStyle = 'rgba(150,44,32,0.95)';
+      x.beginPath(); x.moveTo(2, h * 0.28); x.lineTo(10, h * 0.5); x.lineTo(2, h * 0.72); x.closePath(); x.fill();
+      var sh = x.createLinearGradient(0, 0, 0, h);
+      sh.addColorStop(0, 'rgba(255,246,230,0.18)'); sh.addColorStop(0.5, 'rgba(0,0,0,0)'); sh.addColorStop(1, 'rgba(10,8,4,0.3)');
+      x.fillStyle = sh; x.fillRect(0, 0, w, h);
+    });
+    // mounting stem out of the nose dome
+    var stem = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, off + 0.14, 12), grainTint(0x39424c, 'timerstem', 20));
+    stem.rotation.z = Math.PI / 2;
+    stem.position.x = (off + 0.14) / 2 - 0.02;
+    g.add(stem);
+    var bezel = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 0.08, 20),
+      skinMat(bezTex, { emissive: COL.amber, ei: 0.16, shin: 42 }));
+    bezel.rotation.z = Math.PI / 2;
+    bezel.position.x = 0.1 + off;
+    g.add(bezel);
+    var collar = new THREE.Mesh(new THREE.CylinderGeometry(0.215, 0.215, 0.05, 20), skinMat(knurlTex('knurl:steel', 0x77818a), { shin: 46 }));
+    collar.rotation.z = Math.PI / 2;
+    collar.position.x = 0.155 + off;
+    g.add(collar);
+    // brass wind key at the tip — the whole mechanism's one honest joke
+    var keyStem = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.07, 8), machMat(COL.brass, 0.3, 0.8));
+    keyStem.rotation.z = Math.PI / 2;
+    keyStem.position.x = 0.52 + off;
+    g.add(keyStem);
+    var keyBow = new THREE.Mesh(new THREE.TorusGeometry(0.036, 0.011, 6, 12), machMat(COL.brass, 0.3, 0.8));
+    keyBow.rotation.y = Math.PI / 2;
+    keyBow.position.x = 0.565 + off;
+    g.add(keyBow);
+    // set-knob on the shoulder, knurled
+    var knob = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.028, 12), skinMat(knurlTex('knurl:steel', 0x77818a), { shin: 50 }));
+    knob.rotation.x = Math.PI / 2;
+    knob.position.set(0.24 + off, 0.11, 0.13);
+    knob.rotation.z = 0.5;
+    g.add(knob);
+    var tag = textPlane('T-5 · CAL 7A', 0.16, 0.05, { color: '#241f16', bg: '#d9c9a0', px: 40 });
+    tag.position.set(0.3 + off, -0.15, 0.1);
+    tag.rotation.y = 0.4; tag.rotation.z = -0.5;
+    g.add(tag);
     return g;
+  }
+  function batteryLabelTex(key, base, big, sub) {
+    return canvasTex(key, 256, 220, function (x, w, h) {
+      x.fillStyle = shadeHex(base, -0.06); x.fillRect(0, 0, w, h);
+      texGrain(x, w, h, 200, 0.07, key);
+      // moulding lines
+      x.fillStyle = 'rgba(10,14,12,0.4)';
+      x.fillRect(0, h * 0.1, w, 2); x.fillRect(0, h * 0.86, w, 2);
+      // cream label panel, slightly worn
+      x.fillStyle = '#ded2ae';
+      x.fillRect(w * 0.13, h * 0.24, w * 0.74, h * 0.46);
+      x.fillStyle = 'rgba(30,26,18,0.9)';
+      x.font = '700 44px Menlo, monospace'; x.textAlign = 'center';
+      x.fillText(big, w * 0.5, h * 0.47);
+      x.font = '700 15px Menlo, monospace';
+      x.fillStyle = 'rgba(48,42,30,0.85)';
+      x.fillText(sub, w * 0.5, h * 0.61);
+      x.strokeStyle = 'rgba(48,42,30,0.7)'; x.lineWidth = 2;
+      x.strokeRect(w * 0.13 + 4, h * 0.24 + 4, w * 0.74 - 8, h * 0.46 - 8);
+      // terminal marks over the posts
+      x.font = '700 26px Menlo, monospace';
+      x.fillStyle = '#d8dde2'; x.fillText('−', w * 0.3, h * 0.14);
+      x.fillStyle = '#e0b52e'; x.fillText('+', w * 0.7, h * 0.14);
+      // worn corner + AO foot
+      var r0 = PG2.stream('TEXTURE', key + ':wear');
+      for (var i = 0; i < 10; i++) {
+        x.fillStyle = 'rgba(222,210,174,' + (0.12 + r0() * 0.2).toFixed(2) + ')';
+        x.fillRect(r0() * w, h * (0.72 + r0() * 0.2), 2 + r0() * 6, 1.6);
+      }
+      var ao = x.createLinearGradient(0, h * 0.7, 0, h);
+      ao.addColorStop(0, 'rgba(0,0,0,0)'); ao.addColorStop(1, 'rgba(4,8,6,0.4)');
+      x.fillStyle = ao; x.fillRect(0, 0, w, h);
+    });
   }
   function buildBattery() {
     var g = new THREE.Group();
-    var box = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.26, 0.26), mat(COL.batt));
+    var side = batteryLabelTex('batt:side', COL.batt, 'DC-9', '12V · FIRING TRAIN');
+    var plain = grainTint(shadeHexInt(COL.batt, -0.1), 'batt:plain', 16);
+    var sideM = skinMat(side, { shin: 30 });
+    var box = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.26, 0.26),
+      [plain, plain.clone(), grainTint(shadeHexInt(COL.batt, -0.16), 'batt:top', 16), plain.clone(), sideM, sideM.clone()]);
     box.castShadow = true;
     g.add(box);
+    // terminal block + posts
+    var block = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.035, 0.2), mat(0x23303a, { shin: 8 }));
+    block.position.set(-0.08, 0.145, 0);
+    g.add(block);
     [-0.06, 0.06].forEach(function (dz, i) {
-      var post = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.06, 8), mat(i ? COL.brass : 0xb0b6bb, { shin: 70 }));
-      post.position.set(-0.08, 0.15, dz);
+      var post = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.06, 8), machMat(i ? COL.brass : 0xb0b6bb, 0.3, 0.8));
+      post.position.set(-0.08, 0.18, dz);
       g.add(post);
+      var nut = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.014, 6), machMat(i ? COL.brass : 0x9aa1a7, 0.35, 0.7));
+      nut.position.set(-0.08, 0.165, dz);
+      g.add(nut);
     });
-    var lbl = textPlane('DC-9', 0.2, 0.09, { color: '#e8ddc0', px: 80 });
-    lbl.position.set(0, 0, 0.135);
-    g.add(lbl);
     return g;
   }
   function buildCap() {
     var g = new THREE.Group();
-    var dome = new THREE.Mesh(new THREE.SphereGeometry(0.13, 14, 7, 0, Math.PI * 2, 0, Math.PI / 2), mat(COL.nose));
+    var dome = new THREE.Mesh(new THREE.SphereGeometry(0.13, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2),
+      grainTint(shadeHexInt(COL.nose, -0.4), 'cap:well', 10));
     dome.castShadow = true;
     g.add(dome);
-    var lip = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 0.03, 14), mat(COL.steelDark));
-    lip.position.y = -0.005;
+    // knurled lip — this cap gets torqued by hand, daily
+    var lip = new THREE.Mesh(new THREE.CylinderGeometry(0.142, 0.142, 0.034, 16), skinMat(knurlTex('knurl:steel', 0x77818a), { shin: 44 }));
+    lip.position.y = -0.004;
     g.add(lip);
+    var detent = new THREE.Mesh(new THREE.SphereGeometry(0.016, 8, 6), machMat(COL.brass, 0.3, 0.8));
+    detent.position.set(0.1, 0.062, 0);
+    g.add(detent);
     return g;
   }
   function buildFins() {
@@ -532,12 +892,16 @@
     shape.moveTo(0, 0); shape.lineTo(0.34, -0.04); shape.lineTo(0.34, -0.26); shape.lineTo(0.06, -0.18); shape.lineTo(0, -0.16); shape.closePath();
     var geo = new THREE.ExtrudeGeometry(shape, { depth: 0.02, bevelEnabled: false });
     for (var i = 0; i < 4; i++) {
-      var f = new THREE.Mesh(geo, mat(COL.fin));
+      var f = new THREE.Mesh(geo, grainTint(COL.fin, 'fin', 30));
       f.castShadow = true;
       var hold = new THREE.Group();
       f.rotation.y = Math.PI / 2;
       f.position.z = -0.01;
       hold.add(f);
+      // painted tracking stripe on the trailing edge — morale, in oxide red
+      var stripe = new THREE.Mesh(new THREE.BoxGeometry(0.026, 0.21, 0.03), mat(shadeHexInt(COL.nose, -0.06), { shin: 14 }));
+      stripe.position.set(0, -0.15, -0.335);
+      hold.add(stripe);
       hold.rotation.x = i * Math.PI / 2 + Math.PI / 4;
       g.add(hold);
     }
@@ -545,7 +909,47 @@
   }
   function buildArmPanel() {
     var g = new THREE.Group();
-    var base = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.2, 0.07), mat(COL.panel));
+    // painted control face: engraved border, hazard chevrons round the lever
+    // slot, stencilled legend, LED bezel — one crafted little instrument
+    var faceTex = canvasTex('armface', 256, 200, function (x, w, h) {
+      x.fillStyle = shadeHex(COL.panel, -0.05); x.fillRect(0, 0, w, h);
+      texGrain(x, w, h, 260, 0.07, 'armface');
+      x.strokeStyle = 'rgba(226,234,240,0.28)'; x.lineWidth = 2;
+      x.strokeRect(7, 7, w - 14, h - 14);
+      // lever slot plate with chevron surround (lever at world x=-0.045 → u≈0.33)
+      var px0 = w * 0.2, pw = w * 0.27, py0 = h * 0.18, ph = h * 0.66;
+      x.save();
+      x.beginPath(); x.rect(px0, py0, pw, ph); x.clip();
+      for (var cv = -6; cv < 14; cv++) {
+        x.fillStyle = cv % 2 ? '#c8a23c' : '#20262c';
+        x.beginPath();
+        x.moveTo(px0 + cv * 14, py0 + ph); x.lineTo(px0 + cv * 14 + 14, py0 + ph);
+        x.lineTo(px0 + cv * 14 + 14 + ph, py0); x.lineTo(px0 + cv * 14 + ph, py0);
+        x.closePath(); x.fill();
+      }
+      x.restore();
+      x.strokeStyle = 'rgba(10,14,18,0.8)'; x.lineWidth = 3;
+      x.strokeRect(px0, py0, pw, ph);
+      x.fillStyle = 'rgba(10,14,18,0.85)';
+      x.fillRect(px0 + pw * 0.5 - 4, py0 + 8, 8, ph - 16);
+      // legend
+      x.font = '700 24px Menlo, monospace'; x.textAlign = 'center';
+      x.fillStyle = '#f0d9a8'; x.fillText('ARM', w * 0.79, h * 0.68);
+      x.font = '700 11px Menlo, monospace';
+      x.fillStyle = 'rgba(240,217,168,0.55)'; x.fillText('FIRE CIRCUIT', w * 0.79, h * 0.8);
+      x.fillText('SAFE ▲', w * 0.79, h * 0.9);
+      // LED bezel (led mesh at world 0.075,0.05 → u≈0.79, v≈0.75)
+      x.strokeStyle = 'rgba(220,228,234,0.6)'; x.lineWidth = 3;
+      x.beginPath(); x.arc(w * 0.79, h * 0.25, 15, 0, Math.PI * 2); x.stroke();
+      // corner screws
+      [[16, 16], [w - 16, 16], [16, h - 16], [w - 16, h - 16]].forEach(function (p) { rivetDot(x, p[0], p[1], 5); });
+      var ao = x.createLinearGradient(0, h * 0.7, 0, h);
+      ao.addColorStop(0, 'rgba(0,0,0,0)'); ao.addColorStop(1, 'rgba(6,10,14,0.3)');
+      x.fillStyle = ao; x.fillRect(0, 0, w, h);
+    });
+    var plainP = grainTint(shadeHexInt(COL.panel, -0.12), 'armside', 18);
+    var base = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.2, 0.07),
+      [plainP, plainP.clone(), plainP.clone(), plainP.clone(), skinMat(faceTex, { shin: 30 }), plainP.clone()]);
     base.castShadow = true;
     g.add(base);
     // guard cover (hinged at top)
@@ -556,12 +960,15 @@
     coverPivot.add(cover);
     g.add(coverPivot);
     g.userData.coverPivot = coverPivot;
-    // switch lever
+    // switch lever — machined, with a red grip ball
     var leverPivot = new THREE.Group();
     leverPivot.position.set(-0.045, -0.02, 0.038);
-    var lever = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.1, 0.03), mat(0xd8dde2, { shin: 60 }));
+    var lever = new THREE.Mesh(new THREE.BoxGeometry(0.024, 0.1, 0.024), machMat(0xd8dde2, 0.28, 0.8));
     lever.position.y = -0.04;
     leverPivot.add(lever);
+    var grip = new THREE.Mesh(new THREE.SphereGeometry(0.02, 8, 6), grainTint(shadeHexInt(COL.nose, -0.1), 'armgrip', 30));
+    grip.position.y = -0.088;
+    leverPivot.add(grip);
     leverPivot.rotation.x = -0.5;
     g.add(leverPivot);
     g.userData.leverPivot = leverPivot;
@@ -570,20 +977,30 @@
     led.position.set(0.075, 0.05, 0.04);
     g.add(led);
     g.userData.led = led;
-    var lbl = textPlane('ARM', 0.09, 0.045, { color: '#f0d9a8', px: 90 });
-    lbl.position.set(0.075, -0.03, 0.037);
-    g.add(lbl);
     return g;
   }
   function buildDetonator() {
     var g = new THREE.Group();
-    var body = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.26, 12), mat(COL.det, { shin: 70 }));
+    var detTex = canvasTex('dettube', 128, 128, function (x, w, h) {
+      var g1 = x.createLinearGradient(0, 0, w, 0);
+      g1.addColorStop(0, '#9ba1a8'); g1.addColorStop(0.28, '#e8ecf0');
+      g1.addColorStop(0.55, '#c2c8ce'); g1.addColorStop(1, '#8d939a');
+      x.fillStyle = g1; x.fillRect(0, 0, w, h);
+      // crimp rings + copper band
+      x.fillStyle = 'rgba(20,26,31,0.5)';
+      x.fillRect(0, h * 0.2, w, 2); x.fillRect(0, h * 0.26, w, 2);
+      x.fillStyle = 'rgba(168,102,58,0.9)'; x.fillRect(0, h * 0.55, w, h * 0.08);
+      x.font = '700 10px Menlo, monospace'; x.textAlign = 'center';
+      x.fillStyle = 'rgba(40,44,48,0.7)';
+      x.save(); x.translate(w * 0.5, h * 0.78); x.rotate(Math.PI / 2); x.fillText('No.8', 0, 0); x.restore();
+    });
+    var body = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.26, 12), skinMat(detTex, { shin: 78, spec: 0x666c73 }));
     body.castShadow = true;
     g.add(body);
-    var tip = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.045, 0.05, 12), mat(COL.nose));
+    var tip = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.045, 0.05, 12), grainTint(shadeHexInt(COL.nose, -0.08), 'dettip', 26));
     tip.position.y = -0.15;
     g.add(tip);
-    var ring = new THREE.Mesh(new THREE.TorusGeometry(0.05, 0.012, 6, 12), mat(COL.brass, { shin: 70 }));
+    var ring = new THREE.Mesh(new THREE.TorusGeometry(0.05, 0.012, 6, 14), machMat(COL.brass, 0.28, 0.85));
     ring.rotation.x = Math.PI / 2;
     ring.position.y = 0.12;
     g.add(ring);
@@ -591,110 +1008,240 @@
   }
   function buildBatteryL() {
     var g = new THREE.Group();
-    var box = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.3, 0.3), mat(0x33503e));
+    var side = batteryLabelTex('battL:side', 0x33503e, 'DC-12 L', 'HEAVY · AUX TERMINAL');
+    var plain = grainTint(shadeHexInt(0x33503e, -0.1), 'battL:plain', 16);
+    var sideM = skinMat(side, { shin: 30 });
+    var box = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.3, 0.3),
+      [plain, plain.clone(), grainTint(shadeHexInt(0x33503e, -0.16), 'battL:top', 16), plain.clone(), sideM, sideM.clone()]);
     box.castShadow = true;
     g.add(box);
+    var block = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.04, 0.28), mat(0x1e2a34, { shin: 8 }));
+    block.position.set(-0.1, 0.165, 0);
+    g.add(block);
     [-0.1, 0, 0.1].forEach(function (dz, i) {
-      var post = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.06, 8),
-        mat(i === 2 ? 0x8a929a : i ? COL.brass : 0xb0b6bb, { shin: 70 }));
-      post.position.set(-0.1, 0.17, dz);
+      var post = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.06, 8),
+        machMat(i === 2 ? 0x8a929a : i ? COL.brass : 0xb0b6bb, 0.3, 0.8));
+      post.position.set(-0.1, 0.2, dz);
       g.add(post);
+      var nut = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.014, 6), machMat(0x9aa1a7, 0.35, 0.7));
+      nut.position.set(-0.1, 0.187, dz);
+      g.add(nut);
     });
-    var strap = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.03, 0.05), mat(0x22303c));
+    // lashing strap with a buckle — it ships heavy
+    var strap = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.03, 0.05), mat(0x22303c, { shin: 6 }));
     strap.position.y = 0.12;
     g.add(strap);
-    var lbl = textPlane('DC-12 L · AUX', 0.26, 0.08, { color: '#e8ddc0', px: 70 });
-    lbl.position.set(0, 0, 0.155);
-    g.add(lbl);
+    var buckle = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.045, 0.06), machMat(0x8a929a, 0.4, 0.6));
+    buckle.position.set(0.12, 0.12, 0);
+    g.add(buckle);
     return g;
   }
   function buildHarness() {
     var g = new THREE.Group();
-    var coil = new THREE.Mesh(new THREE.TorusGeometry(0.13, 0.032, 8, 20), mat(0x2c3238, { shin: 30 }));
+    // woven shielding — a fine crosshatch skin over the coil
+    var weave = canvasTex('weave', 64, 64, function (x, w, h) {
+      x.fillStyle = '#262c33'; x.fillRect(0, 0, w, h);
+      x.strokeStyle = 'rgba(122,134,146,0.6)'; x.lineWidth = 2;
+      for (var i = -h; i < w + h; i += 7) {
+        x.beginPath(); x.moveTo(i, 0); x.lineTo(i + h, h); x.stroke();
+        x.beginPath(); x.moveTo(i + h, 0); x.lineTo(i, h); x.stroke();
+      }
+      x.fillStyle = 'rgba(8,12,16,0.35)';
+      for (var j = 0; j < h; j += 7) x.fillRect(0, j, w, 2);
+    });
+    weave.wrapS = weave.wrapT = THREE.RepeatWrapping;
+    weave.repeat.set(10, 2);
+    var coil = new THREE.Mesh(new THREE.TorusGeometry(0.13, 0.032, 8, 24), skinMat(weave, { shin: 38, flat: false }));
     coil.rotation.x = Math.PI / 2;
     g.add(coil);
-    var braid = new THREE.Mesh(new THREE.TorusGeometry(0.13, 0.036, 8, 20, Math.PI * 1.2), mat(0x5a6672, { shin: 45 }));
+    var braid = new THREE.Mesh(new THREE.TorusGeometry(0.13, 0.036, 8, 22, Math.PI * 1.2), skinMat(weave, { shin: 52, flat: false }));
     braid.rotation.x = Math.PI / 2;
     g.add(braid);
     [-0.09, 0.09].forEach(function (dx) {
-      var clipM = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.03, 0.07), mat(COL.brass, { shin: 60 }));
+      var clipM = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.03, 0.07), machMat(COL.brass, 0.32, 0.8));
       clipM.position.set(dx, 0.01, 0);
       g.add(clipM);
+      var screw = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.036, 6), machMat(0xd8dde2, 0.3, 0.8));
+      screw.position.set(dx, 0.025, 0);
+      g.add(screw);
     });
+    var tag = textPlane('SHD-3', 0.08, 0.034, { color: '#241f16', bg: '#d9c9a0', px: 44 });
+    tag.position.set(0, 0.012, 0.15);
+    tag.rotation.x = -0.5;
+    g.add(tag);
     return g;
   }
   function buildDelayRelay() {
     var g = new THREE.Group();
-    var box = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.13, 0.1), mat(0x4a3527, { shin: 40 }));
+    // bakelite block: warm phenolic swirl, cream stencil, brass screw posts
+    var bakTex = canvasTex('relayface', 200, 144, function (x, w, h) {
+      x.fillStyle = '#43301f'; x.fillRect(0, 0, w, h);
+      var r0 = PG2.stream('TEXTURE', 'bakelite');
+      for (var i = 0; i < 26; i++) {   // phenolic swirl
+        x.strokeStyle = 'rgba(' + (r0() > 0.5 ? '96,68,42' : '52,36,22') + ',' + (0.14 + r0() * 0.2).toFixed(2) + ')';
+        x.lineWidth = 1 + r0() * 3;
+        x.beginPath();
+        var sy = r0() * h;
+        x.moveTo(0, sy);
+        x.bezierCurveTo(w * 0.3, sy + (r0() - 0.5) * 40, w * 0.6, sy + (r0() - 0.5) * 40, w, sy + (r0() - 0.5) * 30);
+        x.stroke();
+      }
+      x.font = '700 30px Menlo, monospace'; x.textAlign = 'center';
+      x.fillStyle = 'rgba(240,217,168,0.92)'; x.fillText('K-DLY', w / 2, h * 0.44);
+      x.font = '700 20px Menlo, monospace';
+      x.fillStyle = 'rgba(240,217,168,0.7)'; x.fillText('+0.5 s', w / 2, h * 0.68);
+      x.strokeStyle = 'rgba(240,217,168,0.4)'; x.lineWidth = 2;
+      x.strokeRect(8, 8, w - 16, h - 16);
+      [[16, 16], [w - 16, 16], [16, h - 16], [w - 16, h - 16]].forEach(function (p) { rivetDot(x, p[0], p[1], 4, 'rgba(24,16,8,0.8)', 'rgba(214,182,120,0.8)'); });
+    });
+    var plainB = grainTint(0x3a2a1c, 'relayplain', 40);
+    var box = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.13, 0.1),
+      [plainB, plainB.clone(), plainB.clone(), plainB.clone(), skinMat(bakTex, { shin: 52, spec: 0x5a4a34 }), plainB.clone()]);
     box.castShadow = true;
     g.add(box);
-    var can = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.07, 10), mat(0xb9c2c9, { shin: 60 }));
-    can.position.set(0.04, 0.09, 0);
+    // the timing can — polished, with a crimped foot
+    var can = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.07, 12), machMat(0xc4cbd1, 0.24, 0.85));
+    can.position.set(0.04, 0.095, 0);
     g.add(can);
-    var lbl = textPlane('K-DLY +0.5s', 0.15, 0.05, { color: '#f0d9a8', px: 60 });
-    lbl.position.set(0, -0.01, 0.055);
-    g.add(lbl);
+    var canFoot = new THREE.Mesh(new THREE.CylinderGeometry(0.046, 0.046, 0.012, 12), machMat(0x8a929a, 0.35, 0.7));
+    canFoot.position.set(0.04, 0.062, 0);
+    g.add(canFoot);
+    [-0.05, -0.01].forEach(function (dx) {
+      var post = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.011, 0.03, 6), machMat(COL.brass, 0.3, 0.82));
+      post.position.set(dx, 0.075, 0.02);
+      g.add(post);
+    });
     return g;
   }
   function buildImpactFuze() {
     var g = new THREE.Group();
-    var cone = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.44, 14), mat(COL.nose));
+    // machined steel ogive with painted grade rings and a red contact tip
+    var coneTex = canvasTex('fuzecone', 256, 128, function (x, w, h) {
+      var g1 = x.createLinearGradient(0, 0, 0, h);
+      g1.addColorStop(0, '#5a636d'); g1.addColorStop(0.6, '#79838d'); g1.addColorStop(1, '#8d97a1');
+      x.fillStyle = g1; x.fillRect(0, 0, w, h);
+      texGrain(x, w, h, 300, 0.07, 'fuzecone');
+      // machining rings (v runs base→tip; tip is canvas top)
+      x.fillStyle = 'rgba(20,26,31,0.4)';
+      [0.3, 0.44, 0.58, 0.72].forEach(function (yf) { x.fillRect(0, yf * h, w, 1.6); });
+      // red contact grade at the tip
+      x.fillStyle = shadeHex(COL.nose, -0.08); x.fillRect(0, 0, w, h * 0.2);
+      x.fillStyle = 'rgba(240,232,208,0.85)'; x.fillRect(0, h * 0.2, w, 2);
+      var ao = x.createLinearGradient(0, h * 0.75, 0, h);
+      ao.addColorStop(0, 'rgba(0,0,0,0)'); ao.addColorStop(1, 'rgba(8,12,16,0.24)');
+      x.fillStyle = ao; x.fillRect(0, 0, w, h);
+    });
+    var off = noseStandoff();
+    var stem = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, off + 0.14, 12), grainTint(0x4c565f, 'fuzestem', 20));
+    stem.rotation.z = Math.PI / 2;
+    stem.position.x = (off + 0.14) / 2 - 0.02;
+    g.add(stem);
+    var cone = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.44, 16), skinMat(coneTex, { shin: 40 }));
     cone.rotation.z = -Math.PI / 2;
-    cone.position.x = 0.2;
+    cone.position.x = 0.24 + off;
     cone.castShadow = true;
     g.add(cone);
-    var pin = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.02, 0.14, 8), mat(0xd8dde2, { shin: 80 }));
+    var pin = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.02, 0.14, 8), machMat(0xd8dde2, 0.24, 0.85));
     pin.rotation.z = -Math.PI / 2;
-    pin.position.x = 0.46;
+    pin.position.x = 0.5 + off;
     g.add(pin);
-    var ring = new THREE.Mesh(new THREE.CylinderGeometry(0.23, 0.23, 0.06, 14), mat(0xd8dde2, { shin: 50 }));
+    var pinTip = new THREE.Mesh(new THREE.SphereGeometry(0.024, 8, 6), machMat(COL.brass, 0.28, 0.85));
+    pinTip.position.x = 0.575 + off;
+    g.add(pinTip);
+    // knurled arming collar at the base
+    var ring = new THREE.Mesh(new THREE.CylinderGeometry(0.23, 0.23, 0.06, 20), skinMat(knurlTex('knurl:steel', 0x77818a), { shin: 46 }));
     ring.rotation.z = Math.PI / 2;
-    ring.position.x = 0.0;
+    ring.position.x = 0.04 + off;
     g.add(ring);
     var lbl = textPlane('NF-1', 0.14, 0.06, { color: '#f3ede0', px: 80 });
-    lbl.position.set(0.14, 0.1, 0.14);
+    lbl.position.set(0.18 + off, 0.1, 0.14);
     lbl.rotation.y = 0.35;
     g.add(lbl);
     return g;
   }
   function buildGyro() {
-    // GYRO CORE G-7: a caged sphere in gimbal rings — the most instrument-looking
-    // thing in the drawer, and it knows it
+    // GYRO CORE G-7: brass gimbals over a lit rotor — the most instrument-
+    // looking thing in the drawer, and it knows it
     var g = new THREE.Group();
-    var housing = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.18, 0.16, 12), mat(0x39424c, { shin: 45 }));
+    var housTex = canvasTex('gyrohous', 256, 96, function (x, w, h) {
+      x.fillStyle = '#333c46'; x.fillRect(0, 0, w, h);
+      texGrain(x, w, h, 220, 0.07, 'gyrohous');
+      // calibration tick ring around the top edge
+      x.fillStyle = 'rgba(156,200,234,0.8)';
+      for (var i = 0; i < 36; i++) x.fillRect(i * (w / 36), 3, 1.6, i % 9 === 0 ? 12 : 6);
+      x.fillStyle = 'rgba(12,17,22,0.5)'; x.fillRect(0, h - 6, w, 6);
+      // riveted data plate
+      x.fillStyle = '#b8bfc6'; x.fillRect(w * 0.38, h * 0.36, w * 0.24, h * 0.34);
+      x.fillStyle = 'rgba(30,34,38,0.9)';
+      x.font = '700 13px Menlo, monospace'; x.textAlign = 'center';
+      x.fillText('G-7', w * 0.5, h * 0.58);
+      rivetDot(x, w * 0.4, h * 0.42, 2.4); rivetDot(x, w * 0.6, h * 0.42, 2.4);
+    });
+    var housing = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.18, 0.16, 16), skinMat(housTex, { shin: 42 }));
     housing.castShadow = true;
     g.add(housing);
-    var ringA = new THREE.Mesh(new THREE.TorusGeometry(0.115, 0.014, 8, 22), mat(0xc7b06a, { shin: 85 }));
+    var ringA = new THREE.Mesh(new THREE.TorusGeometry(0.115, 0.014, 8, 26), machMat(0xc9a24b, 0.22, 0.88));
     ringA.position.y = 0.1;
     ringA.rotation.x = 0.5;
     g.add(ringA);
-    var ringB = new THREE.Mesh(new THREE.TorusGeometry(0.085, 0.012, 8, 20), mat(0xd8dde2, { shin: 90 }));
+    var ringB = new THREE.Mesh(new THREE.TorusGeometry(0.085, 0.012, 8, 24), machMat(0xd8dde2, 0.2, 0.9));
     ringB.position.y = 0.1;
     ringB.rotation.z = 0.9;
     g.add(ringB);
-    var rotor = new THREE.Mesh(new THREE.SphereGeometry(0.055, 12, 10),
-      mat(0x9cc8ea, { shin: 95, emissive: 0x27506e, ei: 0.45 }));
+    var rotor = new THREE.Mesh(new THREE.SphereGeometry(0.055, 14, 12),
+      mat(0x9cc8ea, { shin: 95, emissive: 0x27506e, ei: 0.45, flat: false }));
     rotor.position.y = 0.1;
     g.add(rotor);
+    // inspection tag on a corner — the bench signed it out
+    var tag = textPlane('PASS · 7A', 0.11, 0.042, { color: '#241f16', bg: '#d8b25a', px: 40 });
+    tag.position.set(0.12, -0.05, 0.13);
+    tag.rotation.y = 0.5; tag.rotation.z = -0.35;
+    g.add(tag);
     var lbl = textPlane('G-7', 0.12, 0.05, { color: '#9cc8ea', px: 72 });
-    lbl.position.set(0, -0.02, 0.185);
+    lbl.position.set(0, -0.02, 0.187);
     g.add(lbl);
     return g;
   }
   function buildPaintTin() {
     var g = new THREE.Group();
-    var tin = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 0.22, 16), mat(0x777f83, { shin: 40 }));
+    var tinTex = canvasTex('painttin', 256, 128, function (x, w, h) {
+      var g1 = x.createLinearGradient(0, 0, 0, h);
+      g1.addColorStop(0, '#8d959b'); g1.addColorStop(0.5, '#6d757b'); g1.addColorStop(1, '#565e64');
+      x.fillStyle = g1; x.fillRect(0, 0, w, h);
+      texGrain(x, w, h, 200, 0.06, 'painttin');
+      // paper label band
+      x.fillStyle = '#d9cba2'; x.fillRect(0, h * 0.3, w, h * 0.44);
+      x.fillStyle = 'rgba(60,50,34,0.4)'; x.fillRect(0, h * 0.3, w, 2); x.fillRect(0, h * 0.74 - 2, w, 2);
+      // a long drip over the label
+      x.fillStyle = '#8a4a34';
+      x.fillRect(w * 0.68, h * 0.18, 7, h * 0.4);
+      x.beginPath(); x.arc(w * 0.68 + 3.5, h * 0.58, 5, 0, Math.PI * 2); x.fill();
+    });
+    var tin = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 0.22, 18), skinMat(tinTex, { shin: 38 }));
     tin.castShadow = true;
     g.add(tin);
-    var lid = new THREE.Mesh(new THREE.CylinderGeometry(0.165, 0.165, 0.02, 16), mat(0x9aa1a7, { shin: 60 }));
+    // lid with a painted swatch ring — the shop's colour card
+    var lidTex = canvasTex('paintlid', 128, 128, function (x, w, h) {
+      x.fillStyle = '#9aa1a7'; x.fillRect(0, 0, w, h);
+      x.strokeStyle = 'rgba(20,26,31,0.4)'; x.lineWidth = 3;
+      x.beginPath(); x.arc(w / 2, h / 2, w * 0.42, 0, Math.PI * 2); x.stroke();
+      x.fillStyle = '#8a4a34';
+      x.beginPath(); x.arc(w / 2, h / 2, w * 0.3, 0, Math.PI * 2); x.fill();
+      x.fillStyle = 'rgba(255,246,230,0.25)';
+      x.beginPath(); x.arc(w * 0.42, h * 0.42, w * 0.1, 0, Math.PI * 2); x.fill();
+    });
+    var lid = new THREE.Mesh(new THREE.CylinderGeometry(0.165, 0.165, 0.02, 18),
+      [machMat(0x9aa1a7, 0.35, 0.6), skinMat(lidTex, { shin: 44 }), machMat(0x9aa1a7, 0.35, 0.6)]);
     lid.position.y = 0.12;
     g.add(lid);
-    var handle = new THREE.Mesh(new THREE.TorusGeometry(0.13, 0.012, 6, 16, Math.PI), mat(0xb9c2c9, { shin: 70 }));
+    var handle = new THREE.Mesh(new THREE.TorusGeometry(0.13, 0.012, 6, 18, Math.PI), machMat(0xb9c2c9, 0.3, 0.7));
     handle.position.y = 0.13;
     g.add(handle);
-    var drip = new THREE.Mesh(new THREE.SphereGeometry(0.03, 8, 6), mat(0x8a4a34));
-    drip.position.set(0.12, 0.11, 0.05);
-    g.add(drip);
+    [[0.12, 0.05], [-0.07, 0.1]].forEach(function (dp, i) {
+      var drip = new THREE.Mesh(new THREE.SphereGeometry(i ? 0.02 : 0.03, 8, 6), mat(0x8a4a34, { shin: 46 }));
+      drip.position.set(dp[0], 0.11, dp[1]);
+      g.add(drip);
+    });
     var lbl = textPlane('GG No.2', 0.2, 0.07, { color: '#241f18', px: 64 });
     lbl.position.set(0, 0, 0.162);
     g.add(lbl);
@@ -2364,9 +2911,14 @@
     var ghost = partBuilder(id);
     ghost.traverse(function (m) {
       if (m.isMesh) {
-        m.material = m.material.clone();
-        m.material.transparent = true;
-        m.material.opacity = 0.55;
+        // multi-material parts (label + plain faces) ghost per face
+        var ghostly = function (mm) {
+          var c = mm.clone();
+          c.transparent = true;
+          c.opacity = 0.55;
+          return c;
+        };
+        m.material = Array.isArray(m.material) ? m.material.map(ghostly) : ghostly(m.material);
         m.castShadow = false;
       }
     });
@@ -6513,14 +7065,37 @@
   var msr = { active: false };
   function buildCraterGroup(r, ell, ox) {
     var g = new THREE.Group();
-    // scorch decal
+    // scorch decal with ejecta rays — the blast writes its own sunburst
     var sc = document.createElement('canvas');
     sc.width = sc.height = 512;
     var sx = sc.getContext('2d');
+    var rayR = PG2.stream(S.seed, 'rays');
+    // ejecta rays first, under the scorch: pale thrown undersoil + dark char
+    for (var ry = 0; ry < 18; ry++) {
+      var ra = rayR() * Math.PI * 2;
+      var rl = 110 + rayR() * 110;                  // ray length in px (256 = full)
+      var rw2 = 3 + rayR() * 8;                     // half-width at the far end
+      var pale = rayR() > 0.45;
+      sx.save();
+      sx.translate(256, 256);
+      sx.rotate(ra);
+      var rg2 = sx.createLinearGradient(0, 0, rl, 0);
+      if (pale) { rg2.addColorStop(0, 'rgba(146,114,72,0.34)'); rg2.addColorStop(0.8, 'rgba(150,122,84,0.14)'); rg2.addColorStop(1, 'rgba(150,122,84,0)'); }
+      else { rg2.addColorStop(0, 'rgba(40,28,16,0.42)'); rg2.addColorStop(0.75, 'rgba(52,38,22,0.14)'); rg2.addColorStop(1, 'rgba(52,38,22,0)'); }
+      sx.fillStyle = rg2;
+      sx.beginPath();
+      sx.moveTo(30, 0);
+      sx.lineTo(rl, -rw2);
+      sx.lineTo(rl + rw2 * 1.4, 0);
+      sx.lineTo(rl, rw2);
+      sx.closePath();
+      sx.fill();
+      sx.restore();
+    }
     var sg = sx.createRadialGradient(256, 256, 24, 256, 256, 256);
-    sg.addColorStop(0, 'rgba(28,20,13,0.95)');
-    sg.addColorStop(0.4, 'rgba(56,40,25,0.8)');
-    sg.addColorStop(0.72, 'rgba(92,68,42,0.35)');
+    sg.addColorStop(0, 'rgba(24,17,11,0.96)');
+    sg.addColorStop(0.34, 'rgba(52,37,23,0.82)');
+    sg.addColorStop(0.62, 'rgba(88,64,40,0.32)');
     sg.addColorStop(1, 'rgba(92,68,42,0)');
     sx.fillStyle = sg;
     sx.fillRect(0, 0, 512, 512);
@@ -6532,6 +7107,13 @@
     scorch.scale.x = ell;
     scorch.position.y = 0.42;
     g.add(scorch);
+    // fused glass at the hypocentre — dark, slick, faintly proud of itself
+    var glassD = new THREE.Mesh(new THREE.CircleGeometry(r * 0.42, 20),
+      new THREE.MeshPhongMaterial({ color: 0x0c0e12, specular: new THREE.Color(0x7d8ba0), shininess: 90 }));
+    glassD.rotation.x = -Math.PI / 2;
+    glassD.scale.x = ell;
+    glassD.position.y = 0.515;
+    g.add(glassD);
     // bowl: vertex-graded disc, near-black centre out to rim earth
     var bowlGeo = new THREE.CircleGeometry(r, 36);
     var bp = bowlGeo.attributes.position;
@@ -6546,21 +7128,43 @@
     bowl.scale.x = ell;                          // lopsided loads dig ovals
     bowl.position.y = 0.5;
     g.add(bowl);
-    // thrown rim
-    var rim = new THREE.Mesh(new THREE.TorusGeometry(r * 1.04, r * 0.13, 8, 36),
+    // layered thrown rim: a charred inner lip inside the raised earth berm
+    var rimIn = new THREE.Mesh(new THREE.TorusGeometry(r * 0.97, r * 0.09, 7, 36),
+      new THREE.MeshLambertMaterial({ color: 0x3d2c1a }));
+    rimIn.rotation.x = Math.PI / 2;
+    rimIn.position.y = 0.53;
+    rimIn.scale.set(ell, 1, 0.34);
+    g.add(rimIn);
+    var rim = new THREE.Mesh(new THREE.TorusGeometry(r * 1.08, r * 0.13, 8, 36),
       new THREE.MeshLambertMaterial({ color: 0x63482c }));
     rim.rotation.x = Math.PI / 2;
     rim.position.y = 0.55;
     rim.scale.set(ell, 1, 0.3);
     g.add(rim);
-    // ejecta chunks
+    // rim debris — clumped where the berm broke, thinning with distance
     var chunkRand = PG2.stream(S.seed, 'chunks');
-    for (var ci = 0; ci < 12; ci++) {
+    for (var cl = 0; cl < 6; cl++) {
+      var clAng = chunkRand() * Math.PI * 2;
+      var clDist = r * (1.1 + chunkRand() * 0.35);
+      var clN = 2 + Math.floor(chunkRand() * 2);
+      for (var cj = 0; cj < clN; cj++) {
+        var cs0 = r * (0.035 + chunkRand() * 0.06);
+        var jx = Math.cos(clAng) * clDist * ell + (chunkRand() - 0.5) * r * 0.34;
+        var jz = Math.sin(clAng) * clDist + (chunkRand() - 0.5) * r * 0.34;
+        var clod = new THREE.Mesh(cj % 2 ? new THREE.DodecahedronGeometry(cs0, 0) : new THREE.BoxGeometry(cs0 * 2, cs0, cs0 * 1.5),
+          mat(chunkRand() > 0.6 ? 0x584022 : 0x6e5233, { shin: 2 }));
+        clod.position.set(jx, 0.5 + cs0 / 2, jz);
+        clod.rotation.set(chunkRand() * 3, chunkRand() * 3, chunkRand() * 3);
+        g.add(clod);
+      }
+    }
+    // far-flung singles riding the ejecta rays
+    for (var ci = 0; ci < 7; ci++) {
       var ang = chunkRand() * Math.PI * 2;
-      var dist = r * (1.15 + chunkRand() * 1.6);
-      var cs = r * (0.03 + chunkRand() * 0.06);
+      var dist = r * (1.5 + chunkRand() * 1.5);
+      var cs = r * (0.025 + chunkRand() * 0.045);
       var chunk = new THREE.Mesh(new THREE.BoxGeometry(cs * 2, cs, cs * 1.4), mat(0x6e5233, { shin: 2 }));
-      chunk.position.set(Math.cos(ang) * dist, 0.5 + cs / 2, Math.sin(ang) * dist);
+      chunk.position.set(Math.cos(ang) * dist * ell, 0.5 + cs / 2, Math.sin(ang) * dist);
       chunk.rotation.set(chunkRand() * 3, chunkRand() * 3, chunkRand() * 3);
       g.add(chunk);
     }
@@ -8111,65 +8715,309 @@
   function setTargetObject(tid) {
     if (range.targetG) { range.scene.remove(range.targetG); range.targetG = null; }
     var g = buildTargetGroup(tid);
-    g.traverse(function (m) { if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; } });
+    g.traverse(function (m) {
+      if (m.isMesh && !(m.material && m.material.transparent)) { m.castShadow = true; m.receiveShadow = true; }
+    });
     range.scene.add(g);
     range.targetG = g;
+  }
+  function groundDecal(w2, l2, dark) {
+    // painted contact shadow — a soft ellipse of settled dust under anything
+    // that has sat on the playa long enough to matter
+    var tx = canvasTex('gshadow', 128, 128, function (x, w, h) {
+      var gr = x.createRadialGradient(w / 2, h / 2, w * 0.1, w / 2, h / 2, w * 0.5);
+      gr.addColorStop(0, 'rgba(24,18,10,0.42)');
+      gr.addColorStop(0.7, 'rgba(30,23,13,0.2)');
+      gr.addColorStop(1, 'rgba(30,23,13,0)');
+      x.fillStyle = gr; x.fillRect(0, 0, w, h);
+    });
+    var m = new THREE.Mesh(new THREE.PlaneGeometry(w2, l2),
+      new THREE.MeshBasicMaterial({ map: tx, transparent: true, opacity: dark != null ? dark : 0.85, depthWrite: false }));
+    m.rotation.x = -Math.PI / 2;
+    m.renderOrder = 1;
+    return m;
+  }
+  function rustSkin(key, base, paintPatch) {
+    return canvasTex(key, 512, 512, function (x, w, h) {
+      x.fillStyle = shadeHex(base, -0.02); x.fillRect(0, 0, w, h);
+      var r0 = PG2.stream('TEXTURE', key);
+      // the old paint, going in continents
+      if (paintPatch) {
+        for (var p = 0; p < 7; p++) {
+          x.fillStyle = 'rgba(122,118,92,' + (0.18 + r0() * 0.2).toFixed(2) + ')';
+          x.beginPath();
+          x.ellipse(r0() * w, r0() * h, 40 + r0() * 90, 26 + r0() * 60, r0() * 3, 0, Math.PI * 2);
+          x.fill();
+        }
+      }
+      // rust blooms
+      for (var i = 0; i < 26; i++) {
+        var bx = r0() * w, by = r0() * h, br = 8 + r0() * 46;
+        var rg = x.createRadialGradient(bx, by, 1, bx, by, br);
+        rg.addColorStop(0, 'rgba(' + (r0() > 0.5 ? '92,54,28' : '58,36,20') + ',' + (0.3 + r0() * 0.3).toFixed(2) + ')');
+        rg.addColorStop(1, 'rgba(70,44,24,0)');
+        x.fillStyle = rg; x.fillRect(0, 0, w, h);
+      }
+      // rain streaks, always downhill
+      for (var s = 0; s < 40; s++) {
+        var sx2 = r0() * w, sy2 = r0() * h * 0.5;
+        x.fillStyle = 'rgba(40,26,14,' + (0.1 + r0() * 0.16).toFixed(2) + ')';
+        x.fillRect(sx2, sy2, 1.6 + r0() * 2, 30 + r0() * 110);
+      }
+      texGrain(x, w, h, 700, 0.06, key + ':g');
+      var ao = x.createLinearGradient(0, h * 0.62, 0, h);
+      ao.addColorStop(0, 'rgba(0,0,0,0)'); ao.addColorStop(1, 'rgba(16,12,6,0.42)');
+      x.fillStyle = ao; x.fillRect(0, 0, w, h);
+    });
   }
   function buildTargetGroup(tid) {
     var g = new THREE.Group();
     g.userData.tid = tid;
     if (tid === 'truck') {
+      // the derelict hauler: a real flatbed silhouette — chassis rails, cab
+      // with dark glass, arched fenders, stake rails, one dead tyre. It sags.
       var rust = 0x6b4b32, rust2 = 0x59422f;
-      var bed = new THREE.Mesh(new THREE.BoxGeometry(4.0, 0.22, 2.1), mat(rust2, { shin: 6 }));
+      var skinT = rustSkin('trk:cab', rust, true);
+      var bedT = rustSkin('trk:bed', rust2, false);
+      function rustM(tex) { return skinMat(tex, { shin: 10 }); }
+      // chassis rails + rear crossmember
+      [-0.62, 0.62].forEach(function (z) {
+        var rail = new THREE.Mesh(new THREE.BoxGeometry(4.7, 0.16, 0.12), mat(0x33291c, { shin: 5 }));
+        rail.position.set(0.15, 0.74, z);
+        g.add(rail);
+      });
+      var bed = new THREE.Mesh(new THREE.BoxGeometry(4.0, 0.22, 2.1), rustM(bedT));
       bed.position.set(0, 1.06, 0);
       g.add(bed);
       g.userData.bed = bed;
-      var cab = new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.5, 1.9), mat(rust, { shin: 8 }));
-      cab.position.set(2.6, 1.5, 0);
-      g.add(cab);
-      var hood = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.8, 1.7), mat(rust, { shin: 8 }));
-      hood.position.set(3.85, 1.05, 0);
-      g.add(hood);
-      [[-1.4, 0.75], [-0.1, 0.75], [2.7, 0.75], [3.8, 0.75]].forEach(function (wxz) {
-        [-1, 1].forEach(function (sz) {
-          var wh = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, 0.3, 10), mat(0x22262b, { shin: 4 }));
-          wh.rotation.x = Math.PI / 2;
-          wh.position.set(wxz[0], 0.42, sz * 1.1);
-          g.add(wh);
+      // stake rails round the flatbed
+      [-1, 1].forEach(function (sz) {
+        var rail2 = new THREE.Mesh(new THREE.BoxGeometry(3.9, 0.07, 0.07), mat(0x4a3826, { shin: 6 }));
+        rail2.position.set(0, 1.62, sz * 1.01);
+        g.add(rail2);
+        [-1.75, -0.55, 0.65, 1.85].forEach(function (sx) {
+          var stake = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.5, 0.08), mat(0x4a3826, { shin: 6 }));
+          stake.position.set(sx, 1.42, sz * 1.01);
+          g.add(stake);
         });
       });
+      // cab with painted patina + true dark glass
+      var cab = new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.5, 1.9), rustM(skinT));
+      cab.position.set(2.6, 1.5, 0);
+      g.add(cab);
+      var shield = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 0.62), mat(0x0d1319, { shin: 80, spec: 0x5a7186, flat: false }));
+      shield.position.set(3.36, 1.86, 0);
+      shield.rotation.y = Math.PI / 2;
+      g.add(shield);
+      [-1, 1].forEach(function (sz) {
+        var win = new THREE.Mesh(new THREE.PlaneGeometry(0.72, 0.5), mat(0x0d1319, { shin: 80, spec: 0x5a7186, flat: false }));
+        win.position.set(2.42, 1.86, sz * 0.955);
+        win.rotation.y = sz > 0 ? 0 : Math.PI;
+        g.add(win);
+        // mirror stalks — long dead, still standing
+        var stalk = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.3), mat(0x3a3026, { shin: 8 }));
+        stalk.position.set(3.3, 2.0, sz * 1.06);
+        g.add(stalk);
+        var mir = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.22, 0.14), mat(0x2a2f34, { shin: 30 }));
+        mir.position.set(3.3, 1.96, sz * 1.22);
+        g.add(mir);
+      });
+      var hood = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.8, 1.7), rustM(skinT));
+      hood.position.set(3.85, 1.05, 0);
+      g.add(hood);
+      // radiator grille + arched front fenders
+      var grille = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 0.62),
+        skinMat(canvasTex('trk:grille', 128, 64, function (x, w, h) {
+          x.fillStyle = '#241c12'; x.fillRect(0, 0, w, h);
+          x.fillStyle = 'rgba(150,140,120,0.5)';
+          for (var i = 6; i < w; i += 10) x.fillRect(i, 5, 3, h - 10);
+          x.strokeStyle = 'rgba(160,150,130,0.6)'; x.lineWidth = 3; x.strokeRect(2, 2, w - 4, h - 4);
+        }), { shin: 20 }));
+      grille.position.set(4.41, 1.0, 0);
+      grille.rotation.y = Math.PI / 2;
+      g.add(grille);
+      [-1, 1].forEach(function (sz) {
+        var fender = new THREE.Mesh(new THREE.CylinderGeometry(0.56, 0.56, 0.34, 12, 1, true, 0, Math.PI), rustM(skinT));
+        fender.rotation.x = Math.PI / 2;
+        fender.rotation.y = Math.PI / 2;
+        fender.position.set(3.8, 0.6, sz * 1.1);
+        g.add(fender);
+      });
+      // wheels — one rear tyre is done with all of this
+      [[-1.4, 0.75], [-0.1, 0.75], [2.7, 0.75], [3.8, 0.75]].forEach(function (wxz, wi) {
+        [-1, 1].forEach(function (sz) {
+          var dead = (wi === 0 && sz < 0);
+          var wh = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, 0.3, 12), mat(0x1d2126, { shin: 4 }));
+          wh.rotation.x = Math.PI / 2;
+          wh.position.set(wxz[0], dead ? 0.36 : 0.42, sz * 1.1);
+          if (dead) wh.scale.set(1, 1, 0.86);
+          g.add(wh);
+          var hub = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 0.32, 8), mat(0x4c443a, { shin: 20 }));
+          hub.rotation.x = Math.PI / 2;
+          hub.position.copy(wh.position);
+          if (dead) hub.scale.copy(wh.scale);
+          g.add(hub);
+        });
+      });
+      // exhaust stack behind the cab, and the dust it all sits in
+      var stack = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 1.5, 8), mat(0x3a332a, { shin: 12 }));
+      stack.position.set(1.95, 2.0, -0.75);
+      g.add(stack);
+      var shad = groundDecal(6.6, 3.6);
+      shad.position.y = 0.045;
+      g.add(shad);
+      g.rotation.z = 0.028;          // rear springs went first — the derelict sags
       g.position.set(15, 0, -2.5);
       g.rotation.y = 0.4;
     } else if (tid === 'wall') {
+      // board-formed test panels: tie holes, formwork lines, rebar waiting
+      // under the skin for the day the survey goes loud
+      var slabTex = canvasTex('wallslab', 256, 512, function (x, w, h) {
+        x.fillStyle = '#7f8587'; x.fillRect(0, 0, w, h);
+        var r0 = PG2.stream('TEXTURE', 'wallslab');
+        // board-form strata
+        for (var b = 0; b < h; b += 36) {
+          x.fillStyle = 'rgba(' + (r0() > 0.5 ? '235,238,240' : '30,34,36') + ',' + (0.07 + r0() * 0.09).toFixed(3) + ')';
+          x.fillRect(0, b, w, 34);
+          x.fillStyle = 'rgba(24,28,30,0.5)'; x.fillRect(0, b, w, 3);
+        }
+        // tie holes with rust weep
+        for (var ty = 0; ty < 3; ty++) {
+          for (var tx2 = 0; tx2 < 2; tx2++) {
+            var hx2 = w * (0.3 + tx2 * 0.4), hy = h * (0.2 + ty * 0.3);
+            x.fillStyle = 'rgba(120,90,60,0.35)';
+            x.fillRect(hx2 - 3, hy, 6, 30 + r0() * 60);
+            x.fillStyle = '#3c4042';
+            x.beginPath(); x.arc(hx2, hy, 6, 0, Math.PI * 2); x.fill();
+            x.fillStyle = 'rgba(255,255,255,0.25)';
+            x.beginPath(); x.arc(hx2, hy - 2, 3, 0, Math.PI * 2); x.fill();
+          }
+        }
+        texGrain(x, w, h, 600, 0.06, 'wallslab:g');
+        // weather stain from the crown, grime at the foot
+        var tg2 = x.createLinearGradient(0, 0, 0, h * 0.2);
+        tg2.addColorStop(0, 'rgba(60,58,50,0.3)'); tg2.addColorStop(1, 'rgba(60,58,50,0)');
+        x.fillStyle = tg2; x.fillRect(0, 0, w, h * 0.2);
+        var ao = x.createLinearGradient(0, h * 0.72, 0, h);
+        ao.addColorStop(0, 'rgba(0,0,0,0)'); ao.addColorStop(1, 'rgba(30,26,18,0.4)');
+        x.fillStyle = ao; x.fillRect(0, 0, w, h);
+      });
       g.userData.slabs = [];
+      g.userData.rebar = [];
       [-3.6, 0, 3.6].forEach(function (z, i) {
-        var slab = new THREE.Mesh(new THREE.BoxGeometry(0.62, 4.4, 3.5), mat(0x9aa0a2, { shin: 3 }));
+        var slab = new THREE.Mesh(new THREE.BoxGeometry(0.62, 4.4, 3.5), skinMat(slabTex, { shin: 4 }));
         slab.position.set(0, 2.2, z);
         g.add(slab);
         g.userData.slabs.push(slab);
-        var foot = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.4, 3.5), mat(0x8a9092, { shin: 3 }));
+        var foot = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.4, 3.5), grainTint(0x83898b, 'wallfoot', 4));
         foot.position.set(0, 0.2, z);
         g.add(foot);
+        // panel designation, stencilled by the Authority
+        var pn = textPlane('PANEL B-' + (i + 1), 1.1, 0.24, { color: '#3d4144', px: 60 });
+        pn.position.set(0.32, 3.6, z);
+        pn.rotation.y = Math.PI / 2;
+        g.add(pn);
+        // rebar stubs — invisible until the damage states earn them
+        var rb = new THREE.Group();
+        for (var ri = 0; ri < 5; ri++) {
+          var rod = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.024, 0.7 + (ri % 3) * 0.25, 6), mat(0x5a4632, { shin: 26 }));
+          rod.position.set((ri % 2 ? 0.1 : -0.1), 0.6, -1.2 + ri * 0.6);
+          rod.rotation.x = (ri - 2) * 0.16;
+          rod.rotation.z = (ri % 2 ? 0.22 : -0.18);
+          rb.add(rod);
+        }
+        rb.position.z = z;
+        rb.visible = false;
+        g.add(rb);
+        g.userData.rebar.push(rb);
       });
+      var shadW = groundDecal(3.4, 11.6);
+      shadW.position.y = 0.045;
+      g.add(shadW);
       g.position.set(14.5, 0, 0);
     } else {
-      // the instrument array: twelve honest panes at the contracted standoff
+      // the instrument array: twelve honest panes on proper survey racks —
+      // tripod-braced posts, junction boxes, cable droops between stations
       g.userData.panels = [];
+      var postGeo = new THREE.BoxGeometry(0.09, 2.6, 0.09);
+      var barGeo = new THREE.BoxGeometry(0.08, 0.08, 1.72);
+      var legGeo = new THREE.CylinderGeometry(0.03, 0.03, 1.05, 6);
+      var boxGeo = new THREE.BoxGeometry(0.2, 0.34, 0.46);
+      var glassGeo = new THREE.PlaneGeometry(1.5, 1.5);
+      var glassTex = canvasTex('arrayglass', 128, 128, function (x, w, h) {
+        // fresnel-ish pane: airy center, luminous rim
+        var gr = x.createRadialGradient(w / 2, h / 2, w * 0.08, w / 2, h / 2, w * 0.72);
+        gr.addColorStop(0, 'rgba(156,200,234,0.5)');
+        gr.addColorStop(0.72, 'rgba(170,212,240,0.72)');
+        gr.addColorStop(1, 'rgba(220,240,252,1)');
+        x.fillStyle = gr; x.fillRect(0, 0, w, h);
+        x.strokeStyle = 'rgba(240,250,255,0.9)'; x.lineWidth = 5;
+        x.strokeRect(2, 2, w - 4, h - 4);
+        // one long diagonal glare stripe
+        x.save();
+        x.translate(w / 2, h / 2); x.rotate(-0.7);
+        x.fillStyle = 'rgba(235,246,255,0.5)';
+        x.fillRect(-w, -h * 0.16, w * 2, h * 0.1);
+        x.restore();
+      });
+      var jboxTex = canvasTex('jbox', 128, 96, function (x, w, h) {
+        x.fillStyle = '#38424c'; x.fillRect(0, 0, w, h);
+        [[0.32, 0.42], [0.68, 0.42]].forEach(function (dc) {
+          x.fillStyle = '#dfe6d8';
+          x.beginPath(); x.arc(w * dc[0], h * dc[1], 13, 0, Math.PI * 2); x.fill();
+          x.strokeStyle = '#2a2f34'; x.lineWidth = 2;
+          x.beginPath(); x.arc(w * dc[0], h * dc[1], 13, 0, Math.PI * 2); x.stroke();
+          x.beginPath(); x.moveTo(w * dc[0], h * dc[1]);
+          x.lineTo(w * dc[0] + 8, h * dc[1] - 6); x.stroke();
+        });
+        x.fillStyle = 'rgba(229,161,61,0.9)'; x.fillRect(w * 0.2, h * 0.72, w * 0.6, 6);
+        rivetDot(x, 10, 10, 3); rivetDot(x, w - 10, 10, 3); rivetDot(x, 10, h - 10, 3); rivetDot(x, w - 10, h - 10, 3);
+      });
       for (var i = 0; i < 12; i++) {
         var row = Math.floor(i / 6), col = i % 6;
         var pg = new THREE.Group();
-        var frame = new THREE.Mesh(new THREE.BoxGeometry(0.14, 2.5, 0.14), mat(0x3c4650, { shin: 20 }));
-        frame.position.y = 1.25;
-        pg.add(frame);
-        var glass = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 1.5),
-          mat(0x9cc8ea, { shin: 90, emissive: 0x2c4a66, ei: 0.5, transparent: true, opacity: 0.5 }));
+        [-0.78, 0.78].forEach(function (pz) {
+          var post = new THREE.Mesh(postGeo, mat(0x3c4650, { shin: 22 }));
+          post.position.set(0, 1.3, pz);
+          pg.add(post);
+          var leg = new THREE.Mesh(legGeo, mat(0x333c46, { shin: 18 }));
+          leg.position.set(0.4, 0.5, pz);
+          leg.rotation.z = 0.72;
+          pg.add(leg);
+        });
+        [2.52, 0.92].forEach(function (by) {
+          var bar = new THREE.Mesh(barGeo, mat(0x46505a, { shin: 22 }));
+          bar.position.set(0, by, 0);
+          pg.add(bar);
+        });
+        var jb = new THREE.Mesh(boxGeo, skinMat(jboxTex, { shin: 26 }));
+        jb.position.set(0, 0.36, 0);
+        pg.add(jb);
+        var conduit = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.42, 6), mat(0x2c3238, { shin: 20 }));
+        conduit.position.set(0, 0.72, 0);
+        pg.add(conduit);
+        var glass = new THREE.Mesh(glassGeo,
+          skinMat(glassTex, { shin: 90, spec: 0x9cc8ea, emissive: 0x2c4a66, ei: 0.5, transparent: true, opacity: 0.5, flat: false }));
         glass.position.y = 1.7;
         glass.rotation.y = -Math.PI / 2;
         pg.add(glass);
         pg.userData.glass = glass;
+        var shadP = groundDecal(1.5, 2.2, 0.6);
+        shadP.position.y = 0.045;
+        pg.add(shadP);
         pg.position.set(row * 3.2, 0, -8.75 + col * 3.5);
         g.add(pg);
         g.userData.panels.push(pg);
+      }
+      // cable droops between stations — the array is wired like it means it
+      for (var rw = 0; rw < 2; rw++) {
+        for (var cd = 0; cd < 5; cd++) {
+          var z0 = -8.75 + cd * 3.5, z1 = z0 + 3.5, xw = rw * 3.2;
+          var curve = new THREE.QuadraticBezierCurve3(
+            V3(xw, 0.42, z0 + 0.25), V3(xw, 0.1, (z0 + z1) / 2), V3(xw, 0.42, z1 - 0.25));
+          var cable = new THREE.Mesh(new THREE.TubeGeometry(curve, 8, 0.016, 5, false), mat(0x23282e, { shin: 16 }));
+          g.add(cable);
+        }
       }
       g.position.set(40, 0, 0);
     }
@@ -8209,8 +9057,10 @@
       if (rt.collapsed) breach = 100;   // the lintel went; the panel followed
       if (breach >= 95) {
         mid.visible = false;
+        if (g.userData.rebar && g.userData.rebar[1]) g.userData.rebar[1].visible = true;   // the skeleton shows
         for (var i = 0; i < 7; i++) {
-          var ch = new THREE.Mesh(new THREE.BoxGeometry(0.5 + r() * 0.5, 0.4 + r() * 0.5, 0.6 + r() * 0.6), mat(0x7e8486));
+          var ch = new THREE.Mesh(new THREE.BoxGeometry(0.5 + r() * 0.5, 0.4 + r() * 0.5, 0.6 + r() * 0.6),
+            grainTint(0x767c7e, 'wallchunk', 4));
           ch.position.set(-1.2 + r() * 3.2, 0.3, -1.4 + r() * 2.8);
           ch.rotation.set(r() * 2, r() * 2, r() * 2);
           g.add(ch);
@@ -8218,8 +9068,10 @@
       } else if (breach >= 55) {
         mid.scale.y = 0.42;
         mid.position.y = 3.5;    // the bottom went; the lintel holds, embarrassed
+        if (g.userData.rebar && g.userData.rebar[1]) g.userData.rebar[1].visible = true;   // rebar stubs, revealed
         for (var j = 0; j < 4; j++) {
-          var ch2 = new THREE.Mesh(new THREE.BoxGeometry(0.5 + r() * 0.4, 0.4 + r() * 0.4, 0.5 + r() * 0.5), mat(0x7e8486));
+          var ch2 = new THREE.Mesh(new THREE.BoxGeometry(0.5 + r() * 0.4, 0.4 + r() * 0.4, 0.5 + r() * 0.5),
+            grainTint(0x767c7e, 'wallchunk', 4));
           ch2.position.set(-0.9 + r() * 2.4, 0.28, -1.1 + r() * 2.2);
           ch2.rotation.set(r() * 2, r() * 2, r() * 2);
           g.add(ch2);
