@@ -1383,8 +1383,9 @@ var PG2 = (function () {
       out.measures.push({ lbl: 'PANELS', val: panels + ' / 12', unit: '', sub: 'SHATTERED, IN ORDER OF HONESTY' });
       out.panels = panels;
     }
+    var tAbs = rfp.tSpec + o.detT;   // when it actually fired, on the range clock
     out.measures.push({ lbl: 'FUNCTION', val: funcOk ? 'ON CUE' : (o.detT < 0 ? 'EARLY' : 'LATE'), unit: '',
-                        sub: 'T' + (o.detT >= 0 ? '+' : '−') + Math.abs(rfp.tSpec + o.detT).toFixed(2) + ' s' });
+                        sub: 'T' + (tAbs >= 0 ? '+' : '−') + Math.abs(tAbs).toFixed(2) + ' s' });
     return out;
   }
 

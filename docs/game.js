@@ -2025,10 +2025,12 @@
       $('bay-brand-txt').textContent = 'WEAPONS ASSEMBLY · R&D';
       $('bay-attempt').textContent = 'SHOT #' + (SAVE.rndTests + 1);
       $('btn-torange').innerHTML = 'OUT THE BACK GATE →';
+      $('btn-hq').classList.remove('hidden');
     } else {
       $('bay-brand-txt').textContent = 'REDSKY INC · ' + rfp().id;
       $('bay-attempt').textContent = 'TEST #' + (S.attempt + 1);
       $('btn-torange').innerHTML = 'TRUCK TO RANGE →';
+      $('btn-hq').classList.add('hidden');
     }
     buildPhase = S.assembly.shell ? buildPhase : 'structure';   // a fresh stand starts at STRUCTURE
     buildDrawer();
@@ -4452,13 +4454,7 @@
 
   /* ---------- crater reveal + measuring (slow walk-around) ---------- */
   var msr = { active: false };
-  function craterReveal() {
-    S.phase = 'crater';
-    var crater = S.result.outcome.craterActual || 0;
-    var r = Math.max(crater / 2, 1.6);
-    var ell = S.result.visual.ellipse || 1;      // the crater follows the load
-    var ox = S.result.visual.offsetM || 0;       // negative = west
-    if (range.craterG) range.scene.remove(range.craterG);
+  function buildCraterGroup(r, ell, ox) {
     var g = new THREE.Group();
     // scorch decal
     var sc = document.createElement('canvas');
@@ -4521,8 +4517,17 @@
       g.add(sp);
     }
     g.position.x = ox;                           // crater centre follows the load's lean
-    range.scene.add(g);
-    range.craterG = g;
+    return g;
+  }
+  function craterReveal() {
+    S.phase = 'crater';
+    var crater = S.result.outcome.craterActual || 0;
+    var r = Math.max(crater / 2, 1.6);
+    var ell = S.result.visual.ellipse || 1;      // the crater follows the load
+    var ox = S.result.visual.offsetM || 0;       // negative = west
+    if (range.craterG) range.scene.remove(range.craterG);
+    range.craterG = buildCraterGroup(r, ell, ox);
+    range.scene.add(range.craterG);
     // low push-in, then a slow survey orbit while the tape runs
     var c = range.camera;
     c.fov = 24;
@@ -4661,6 +4666,11 @@
   }
   function craterRevealOrScore() {
     $('cam-tick').classList.add('hidden');
+    if (S.mode === 'rnd') {
+      if (S.result.outcome.fired) rndSurvey();
+      else showRndScore();
+      return;
+    }
     if (S.result.outcome.fired) craterReveal();
     else showScore();
   }
@@ -4684,11 +4694,16 @@
     if (r.win && b.wonOn == null) b.wonOn = S.attempt;
     // …and into localStorage: a won contract stays won, and unlocks the next folder
     var rec = contractRec(S.contract);
+    var firstWin = r.win && !rec.won;   // the development award banks ONCE per contract
     rec.stars = Math.max(rec.stars, r.stars);
     rec.net = rec.net == null ? r.payout.net : Math.max(rec.net, r.payout.net);
     if (r.win) {
       rec.won = true;
       if (rec.wonOn == null) rec.wonOn = S.attempt;
+    }
+    if (firstWin) {
+      SAVE.cash += r.payout.net;
+      SAVE.banked[R.id] = r.payout.net;
     }
     // the range remembers; the museum collects
     recordScar(r);
@@ -4764,6 +4779,7 @@
           '<tr><td>PARTS &amp; REFINING (AS BUILT)</td><td>−' + fmt$(r.payout.cost) + '</td></tr>' +
           '<tr class="net"><td>NET TO REDSKY</td><td class="' + (r.payout.net >= 0 ? 'pos' : 'neg') + '">' +
             (r.payout.net >= 0 ? '' : '−') + fmt$(Math.abs(r.payout.net)) + '</td></tr>' +
+          (firstWin ? '<tr><td>BANKED — COMPANY ACCOUNT</td><td>' + fmt$(SAVE.cash) + '</td></tr>' : '') +
         '</table>' +
         '<div class="clipping">' +
           '<div class="clip-mast"><b>ORDNANCE WEEKLY</b><span>TRADE PAPER OF RECORD</span></div>' +
@@ -4778,6 +4794,7 @@
             : '<button id="btn-newcontract" type="button">NEW CONTRACT<span class="sub">FRESH SERIES</span></button>') +
         '</div>' +
         '<div class="score-navrow"><button id="btn-score-board" type="button">CONTRACT BOARD</button>' +
+          '<button id="btn-score-hq" type="button">THE COMPOUND</button>' +
           '<button id="btn-score-museum" type="button">THE MUSEUM</button></div>' +
         '<div class="score-best">BEST ON ' + R.id + ' — <b>' + b.stars + '★</b>' +
           (b.net > -Infinity ? ' · NET ' + (b.net < 0 ? '−' : '') + fmt$(Math.abs(b.net)) : '') +
@@ -4804,6 +4821,7 @@
       startContract();
     });
     $('btn-score-board').addEventListener('click', function () { PGAudio.tap(); showBoard(); });
+    $('btn-score-hq').addEventListener('click', function () { PGAudio.tap(); showHQ(); });
     $('btn-score-museum').addEventListener('click', function () { PGAudio.tap(); showMuseum('scr-score'); });
   }
 
@@ -5105,6 +5123,7 @@
         card.addEventListener('click', function () {
           PGAudio.init(); PGAudio.tap();
           reclaimRefined();
+          S.mode = 'contract';
           S.contract = i;
           S.seed = PG2.makeSeed().toUpperCase();
           S.attempt = 0;
@@ -5122,6 +5141,7 @@
   $('btn-board-back').addEventListener('click', function () {
     PGAudio.tap();
     if (boardReturn === 'scr-score') { S.phase = 'score'; showScreen('scr-score'); }
+    else if (boardReturn === 'scr-hq') { showHQ(); }
     else { S.phase = 'title'; showScreen('scr-title'); }
   });
   $('btn-board-museum').addEventListener('click', function () { PGAudio.tap(); showMuseum('scr-board'); });
@@ -5208,12 +5228,15 @@
     PGAudio.tap();
     if (museumReturn === 'scr-score') { S.phase = 'score'; showScreen('scr-score'); }
     else if (museumReturn === 'scr-board') { showBoard(boardReturn); }
+    else if (museumReturn === 'scr-hq') { showHQ(); }
     else { S.phase = 'title'; showScreen('scr-title'); }
   });
 
   $('btn-start').addEventListener('click', function () {
     PGAudio.init(); PGAudio.tap();
-    startContract();
+    // first contact goes straight to the teaching ladder; veterans get the compound
+    if (wonCountAll() === 0) startContract();
+    else showHQ();
   });
   $('btn-title-board').addEventListener('click', function () {
     PGAudio.init(); PGAudio.tap();
@@ -5228,7 +5251,7 @@
     PG2.CONTRACTS.forEach(function (c, i) { if (contractRec(i).won) won++; });
     var cur = PG2.CONTRACTS[S.contract];
     $('btn-start').innerHTML = won === 0 ? 'TAP TO START'
-      : 'CONTINUE — ' + cur.id + '<span class="start-sub">' + cur.title + '</span>';
+      : 'THE COMPOUND<span class="start-sub">ACCOUNT ' + fmt$(SAVE.cash) + ' · NEXT: ' + cur.id + '</span>';
     var tp = $('title-progress');
     if (won > 0) {
       tp.classList.remove('hidden');
@@ -5291,6 +5314,7 @@
   });
   $('btn-torange').addEventListener('click', function () {
     PGAudio.tap();
+    if (S.mode === 'rnd') { openTargetPicker(); return; }   // the button stays for a change of heart
     $('btn-torange').classList.add('hidden');
     enterRange();
   });
@@ -5540,7 +5564,11 @@
     refreshHUD();
   });
   $('btn-refinery').addEventListener('click', function () { PGAudio.tap(); openRefinery(); });
-  $('btn-refire').addEventListener('click', function () { PGAudio.tap(); enterRange(); });
+  $('btn-refire').addEventListener('click', function () {
+    PGAudio.tap();
+    if (S.mode === 'rnd') { openTargetPicker(); return; }
+    enterRange();
+  });
   $('btn-det-pull').addEventListener('click', function () {
     PGAudio.unsnap();
     $('btn-det-pull').classList.add('hidden');
@@ -5557,13 +5585,723 @@
     stageDetCase(wellW);
   });
 
+  /* ================= M3b — THE WORKSHOP =================
+     The HQ compound, Weapons Assembly (free R&D), the target range,
+     Type Certification, and the production bid board. */
+
+  /* ---------- THE HQ: the compound is the main menu ---------- */
+  var hqTimer = null;
+  function stopHqTimer() { if (hqTimer) { clearInterval(hqTimer); hqTimer = null; } }
+  function runRemainMs() {
+    return SAVE.run ? Math.max(0, SAVE.run.t0 + SAVE.run.durMs - Date.now()) : 0;
+  }
+  function typeByPlate(plate) {
+    for (var i = 0; i < SAVE.types.length; i++) if (SAVE.types[i].plate === plate) return SAVE.types[i];
+    return null;
+  }
+  function showHQ() {
+    stopHqTimer();
+    S.phase = 'hq';
+    S.mode = 'contract';
+    showUI(null);
+    reclaimRefined();
+    $('hq-cash').textContent = 'COMPANY ACCOUNT · ' + fmt$(SAVE.cash);
+    var wins = wonCountAll();
+    var doors = $('hq-doors');
+    var nextC = null;
+    for (var ci = 0; ci < PG2.CONTRACTS.length; ci++) {
+      if (contractUnlocked(ci) && !contractRec(ci).won) { nextC = PG2.CONTRACTS[ci]; break; }
+    }
+    function door(id, kicker, name, sub, cls, badge) {
+      return '<button type="button" class="hq-door ' + (cls || '') + '" id="' + id + '">' +
+        (badge || '') + '<span class="hd-kicker">' + kicker + '</span>' +
+        '<div class="hd-name">' + name + '</div><div class="hd-sub">' + sub + '</div></button>';
+    }
+    var waLocked = wins === 0;
+    var waBooked = !!SAVE.run;
+    doors.innerHTML =
+      door('hq-office', 'THE FRONT DOOR', 'CONTRACT OFFICE',
+        wins >= PG2.CONTRACTS.length ? 'Act I complete. The corkboard is a trophy wall.'
+          : nextC ? 'Next up: ' + nextC.id + ' “' + nextC.title + '”. The corkboard awaits.'
+          : 'The corkboard awaits.',
+        wins === 0 ? 'primary' : '', '') +
+      door('hq-assembly', 'THE BIG SHED', 'WEAPONS ASSEMBLY',
+        waLocked ? 'Free R&D — build anything on your own dime. The Authority wants one won contract on file first.'
+          : waBooked ? 'The floor is tooled up and running an order. R&D resumes on delivery.'
+          : 'Free R&D on the company dime. No spec sheet over your shoulder. ' +
+            (SAVE.bench ? 'Your bench is as you left it.' : 'The bench is clean.'),
+        waLocked || waBooked ? 'locked' : (wins > 0 ? 'primary' : ''),
+        waBooked ? '<span class="hd-badge warn">BOOKED</span>'
+          : waLocked ? '<span class="hd-badge warn">CLEARANCE</span>' : '') +
+      door('hq-bids', 'THE BACK OFFICE', 'PRODUCTION BID BOARD',
+        SAVE.types.length ? SAVE.types.length + ' certified type' + (SAVE.types.length > 1 ? 's' : '') + ' on file. Buyers post weekly.'
+          : 'Certified types only. Prototype in Weapons Assembly, pass the standards series, then sell it.',
+        SAVE.types.length ? '' : 'locked',
+        SAVE.types.length ? '' : '<span class="hd-badge warn">NO TYPES</span>') +
+      door('hq-museum', 'THE LONG HALL', 'THE MUSEUM',
+        'Framed disasters, brass firsts, best-crater plaques.', '', '');
+    $('hq-office').addEventListener('click', function () { PGAudio.init(); PGAudio.tap(); stopHqTimer(); showBoard('scr-hq'); });
+    $('hq-assembly').addEventListener('click', function () {
+      PGAudio.init();
+      if (waLocked) { PGAudio.buzz(); toast('Win one contract first. The Authority funds hobbies it has vetted.'); return; }
+      if (SAVE.run) { PGAudio.buzz(); toast('The workshop is booked — ' + SAVE.run.plate + ' for ' + SAVE.run.buyer + '. R&D resumes on delivery.'); return; }
+      PGAudio.tap(); stopHqTimer(); enterRnd();
+    });
+    $('hq-bids').addEventListener('click', function () {
+      PGAudio.init();
+      if (!SAVE.types.length) { PGAudio.buzz(); toast('No certified types on file. The bid board only trades in stamped plates.'); return; }
+      PGAudio.tap(); stopHqTimer(); showBids();
+    });
+    $('hq-museum').addEventListener('click', function () { PGAudio.init(); PGAudio.tap(); stopHqTimer(); showMuseum('scr-hq'); });
+    refreshRunTicker();
+    showScreen('scr-hq');
+    hqTimer = setInterval(refreshRunTicker, 1000);
+  }
+  function refreshRunTicker() {
+    var tk = $('hq-run-ticker');
+    if (!SAVE.run) { tk.classList.add('hidden'); return; }
+    tk.classList.remove('hidden');
+    var left = runRemainMs();
+    if (left <= 0) {
+      tk.innerHTML = '<b>PRODUCTION RUN COMPLETE</b> — ' + SAVE.run.units + '× ' + SAVE.run.plate +
+        ' crated for ' + SAVE.run.buyer + '. <b>TAP TO DELIVER.</b>';
+      tk.onclick = function () { PGAudio.tap(); deliverRun(); };
+      return;
+    }
+    tk.onclick = null;
+    var p = 1 - left / SAVE.run.durMs;
+    var mm = Math.floor(left / 60000), ss = Math.floor((left % 60000) / 1000);
+    tk.innerHTML = 'WORKSHOP BOOKED — ' + SAVE.run.units + '× ' + SAVE.run.plate + ' FOR ' + SAVE.run.buyer +
+      ' · DELIVERY IN ' + mm + ':' + String(ss).padStart(2, '0') +
+      '<div class="rt-bar"><div class="rt-fill" style="width:' + Math.round(p * 100) + '%"></div></div>';
+  }
+
+  /* ---------- WEAPONS ASSEMBLY: the R&D bench ---------- */
+  function saveBench() {
+    if (S.mode !== 'rnd') return;
+    SAVE.bench = JSON.parse(JSON.stringify(S.assembly));
+    persist();
+  }
+  function enterRnd() {
+    S.mode = 'rnd';
+    if (SAVE.bench) {
+      S.assembly = JSON.parse(JSON.stringify(SAVE.bench));
+    } else {
+      S.assembly = PG2.makeAssembly();
+      S.assembly.paint = SAVE.paint || null;
+    }
+    S.assembly.refine.stock = JSON.parse(JSON.stringify(SAVE.stock));   // the shelf is shared
+    S.seed = PG2.makeSeed().toUpperCase();   // every R&D shot is its own series
+    clearHistory();
+    enterBuild(true);
+    $('btn-hq').classList.remove('hidden');
+  }
+  $('btn-hq').addEventListener('click', function () {
+    PGAudio.tap();
+    saveBench();
+    $('btn-hq').classList.add('hidden');
+    showHQ();
+  });
+
+  /* ---------- the target picker: which object measures you tonight ---------- */
+  function openTargetPicker() {
+    var d = PG2.derive(S.assembly, rfp());
+    if (d.cost > SAVE.cash) {
+      PGAudio.buzz();
+      toast('The account is short: this article costs ' + fmt$(d.cost) + ' to expend, the company holds ' + fmt$(SAVE.cash) + '.');
+      return;
+    }
+    $('tgt-cost').textContent = 'THIS SHOT EXPENDS THE ARTICLE — ' + fmt$(d.cost) + ' · ACCOUNT ' + fmt$(SAVE.cash);
+    var list = $('tgt-list');
+    list.innerHTML = '';
+    PG2.TARGET_ORDER.forEach(function (tid) {
+      var t = PG2.TARGETS[tid];
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'tgt-row';
+      b.innerHTML = '<span class="tg-metric">' + t.metric + '</span><div class="tg-name">' + t.name + '</div>' +
+        '<div class="tg-sub">' + t.sub + '</div><div class="tg-blurb">' + t.blurb + '</div>';
+      b.addEventListener('click', function () {
+        PGAudio.tap();
+        $('target-overlay').classList.add('hidden');
+        enterRangeRnd(tid);
+      });
+      list.appendChild(b);
+    });
+    $('target-overlay').classList.remove('hidden');
+  }
+  $('tgt-close').addEventListener('click', function () {
+    PGAudio.tap();
+    $('target-overlay').classList.add('hidden');
+  });
+
+  /* ---------- the R&D range: out the back gate, no convoy, an object that measures back ---------- */
+  function enterRangeRnd(targetId) {
+    clearLater();
+    S.rndTarget = targetId;
+    var d = PG2.derive(S.assembly, rfp());
+    SAVE.cash -= d.cost;               // the article is spent the moment it leaves the shed
+    SAVE.rndTests++;
+    saveBench();
+    var rt = PG2.resolveTarget(S.assembly, S.seed, targetId);
+    S.result = { outcome: rt.o, visual: PG2.visualFor(rt.o), rnd: rt, shotCost: d.cost, seed: S.seed };
+    if (!range) range = initRange();
+    S.phase = 'station';
+    showUI('ui-range');
+    $('stage-bar').classList.add('hidden');
+    $('arm-ui').classList.add('hidden');
+    $('cam-overlay').classList.remove('hidden');
+    $('cam-tick').classList.add('hidden');
+    $('measure-svg').classList.add('hidden');
+    $('btn-arm').classList.add('hidden');
+    $('btn-fire').classList.add('hidden');
+    $('btn-skip-truck').classList.add('hidden');
+    $('arm-ring').style.setProperty('--p', 0);
+    $('flash').style.opacity = 0;
+    $('dustwall').style.opacity = 0;
+    window.__pgMeasureDone = false;
+    if (range.fx && range.fx.group) range.scene.remove(range.fx.group);
+    range.fx = null;
+    if (range.craterG) { range.scene.remove(range.craterG); range.craterG = null; }
+    if (range.vantageG) { range.scene.remove(range.vantageG); range.vantageG = null; }
+    if (range.dropRig) range.dropRig.visible = false;
+    range.vBeatSkip = null;
+    range.mode = 'station';
+    range.truck.visible = false;
+    range.escort.visible = false;
+    range.convoyG.visible = false;
+    range.convoy = null;
+    range.dustPool.forEach(function (dd) { dd.live = false; dd.sp.visible = false; });
+    range.rabbit.visible = false;
+    range.rabbit.userData.run = null;
+    range.shake = 0;
+    range.convoyShake = 0;
+    rebuildScars();
+    range.wind = windOf(rfp());
+    applyRangePalette(rfp().timeOfDay || 'dusk');   // R&D happens after hours
+    range.pad.visible = true;
+    range.padDress.visible = true;
+    // the article on the trestle — no convoy for a company shot
+    var dh = range.deviceHolder;
+    if (dh.parent) dh.parent.remove(dh);
+    range.scene.add(dh);
+    for (var i = dh.children.length - 1; i >= 0; i--) dh.remove(dh.children[i]);
+    dh.add(buildRangeDevice());
+    dh.position.set(0, 2.1, 0);
+    dh.scale.set(1.7, 1.7, 1.7);
+    dh.rotation.z = 0;
+    dh.visible = true;
+    if (!range.trestle) {
+      var tr = new THREE.Group();
+      [-0.9, 0.9].forEach(function (x) {
+        var leg = new THREE.Mesh(new THREE.BoxGeometry(0.28, 1.5, 1.6), mat(0x6b4a2a));
+        leg.position.set(x, 0.75, 0);
+        tr.add(leg);
+      });
+      range.scene.add(tr);
+      range.trestle = tr;
+    }
+    range.trestle.visible = true;
+    // the object of the evening
+    setTargetObject(targetId);
+    // Station 7, after hours
+    range.camera.position.set(60, 14, 1600);
+    range.camera.fov = 7;
+    range.camera.updateProjectionMatrix();
+    range.camera.lookAt(targetId === 'array' ? 18 : 6, 3, 0);
+    $('cam-station').textContent = PG2.CAMERA.id + ' — ' + PG2.CAMERA.km.toFixed(1) + ' KM';
+    $('cam-clock').textContent = 'T−00:0' + rfp().tSpec.toFixed(1);
+    PGAudio.wind();
+    var t = PG2.TARGETS[targetId];
+    setCaption('STATION 7 · AFTER HOURS · R&D SHOT #' + SAVE.rndTests,
+      'No board. No binoculars. Just the ' + t.name.toLowerCase() + ', which measures back.');
+    later(2100, startRabbit);
+    later(1800, function () { $('btn-arm').classList.remove('hidden'); });
+    persist();
+  }
+
+  /* ---------- the objects: built fresh per shot, damaged per the survey ---------- */
+  function setTargetObject(tid) {
+    if (range.targetG) { range.scene.remove(range.targetG); range.targetG = null; }
+    var g = buildTargetGroup(tid);
+    range.scene.add(g);
+    range.targetG = g;
+  }
+  function buildTargetGroup(tid) {
+    var g = new THREE.Group();
+    g.userData.tid = tid;
+    if (tid === 'truck') {
+      var rust = 0x6b4b32, rust2 = 0x59422f;
+      var bed = new THREE.Mesh(new THREE.BoxGeometry(4.0, 0.22, 2.1), mat(rust2, { shin: 6 }));
+      bed.position.set(0, 1.06, 0);
+      g.add(bed);
+      g.userData.bed = bed;
+      var cab = new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.5, 1.9), mat(rust, { shin: 8 }));
+      cab.position.set(2.6, 1.5, 0);
+      g.add(cab);
+      var hood = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.8, 1.7), mat(rust, { shin: 8 }));
+      hood.position.set(3.85, 1.05, 0);
+      g.add(hood);
+      [[-1.4, 0.75], [-0.1, 0.75], [2.7, 0.75], [3.8, 0.75]].forEach(function (wxz) {
+        [-1, 1].forEach(function (sz) {
+          var wh = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, 0.3, 10), mat(0x22262b, { shin: 4 }));
+          wh.rotation.x = Math.PI / 2;
+          wh.position.set(wxz[0], 0.42, sz * 1.1);
+          g.add(wh);
+        });
+      });
+      g.position.set(15, 0, -2.5);
+      g.rotation.y = 0.4;
+    } else if (tid === 'wall') {
+      g.userData.slabs = [];
+      [-3.6, 0, 3.6].forEach(function (z, i) {
+        var slab = new THREE.Mesh(new THREE.BoxGeometry(0.62, 4.4, 3.5), mat(0x9aa0a2, { shin: 3 }));
+        slab.position.set(0, 2.2, z);
+        g.add(slab);
+        g.userData.slabs.push(slab);
+        var foot = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.4, 3.5), mat(0x8a9092, { shin: 3 }));
+        foot.position.set(0, 0.2, z);
+        g.add(foot);
+      });
+      g.position.set(14.5, 0, 0);
+    } else {
+      // the instrument array: twelve honest panes at the contracted standoff
+      g.userData.panels = [];
+      for (var i = 0; i < 12; i++) {
+        var row = Math.floor(i / 6), col = i % 6;
+        var pg = new THREE.Group();
+        var frame = new THREE.Mesh(new THREE.BoxGeometry(0.14, 2.5, 0.14), mat(0x3c4650, { shin: 20 }));
+        frame.position.y = 1.25;
+        pg.add(frame);
+        var glass = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 1.5),
+          mat(0x9cc8ea, { shin: 90, emissive: 0x2c4a66, ei: 0.5, transparent: true, opacity: 0.5 }));
+        glass.position.y = 1.7;
+        glass.rotation.y = -Math.PI / 2;
+        pg.add(glass);
+        pg.userData.glass = glass;
+        pg.position.set(row * 3.2, 0, -8.75 + col * 3.5);
+        g.add(pg);
+        g.userData.panels.push(pg);
+      }
+      g.position.set(40, 0, 0);
+    }
+    return g;
+  }
+  function applyTargetDamage() {
+    var g = range.targetG;
+    if (!g || !S.result.rnd || !S.result.outcome.fired) return;
+    var rt = S.result.rnd;
+    var r = PG2.stream(S.seed, 'aftermath');
+    // every object wears the scorch
+    g.traverse(function (m) {
+      if (m.isMesh && m.material && m.material.color) m.material.color.multiplyScalar(0.62);
+    });
+    if (g.userData.tid === 'truck') {
+      var pen = rt.primary || 0;
+      if (pen >= 140) {          // clean through, and the hauler leaves the ground
+        g.rotation.z = 1.75 + r() * 0.4;
+        g.position.y += 1.15;
+        g.position.x += 1.6;
+      } else if (pen >= 70) {
+        g.rotation.z = 0.34;
+        g.position.x += 0.7;
+        g.position.y += 0.18;
+      }
+      if (pen >= 40 && g.userData.bed) {
+        var hole = new THREE.Mesh(new THREE.CircleGeometry(0.35 + Math.min(pen, 200) / 260, 12),
+          new THREE.MeshBasicMaterial({ color: 0x0a0a0a }));
+        hole.rotation.x = -Math.PI / 2;
+        hole.position.set(-0.4, 0.12, 0);
+        g.userData.bed.add(hole);
+      }
+    } else if (g.userData.tid === 'wall') {
+      var breach = rt.primary || 0;
+      var mid = g.userData.slabs[1];
+      if (breach >= 95) {
+        mid.visible = false;
+        for (var i = 0; i < 7; i++) {
+          var ch = new THREE.Mesh(new THREE.BoxGeometry(0.5 + r() * 0.5, 0.4 + r() * 0.5, 0.6 + r() * 0.6), mat(0x7e8486));
+          ch.position.set(-1.2 + r() * 3.2, 0.3, -1.4 + r() * 2.8);
+          ch.rotation.set(r() * 2, r() * 2, r() * 2);
+          g.add(ch);
+        }
+      } else if (breach >= 55) {
+        mid.scale.y = 0.42;
+        mid.position.y = 3.5;    // the bottom went; the lintel holds, embarrassed
+        for (var j = 0; j < 4; j++) {
+          var ch2 = new THREE.Mesh(new THREE.BoxGeometry(0.5 + r() * 0.4, 0.4 + r() * 0.4, 0.5 + r() * 0.5), mat(0x7e8486));
+          ch2.position.set(-0.9 + r() * 2.4, 0.28, -1.1 + r() * 2.2);
+          ch2.rotation.set(r() * 2, r() * 2, r() * 2);
+          g.add(ch2);
+        }
+      } else if (breach >= 25) {
+        mid.rotation.x = 0.05 - r() * 0.1;   // cracked, leaning, standing out of spite
+      }
+    } else {
+      var n = rt.panels || 0;
+      g.userData.panels.forEach(function (pg, i) {
+        if (i < n) {
+          pg.userData.glass.material.opacity = 0.07;
+          pg.userData.glass.rotation.z = (r() - 0.5) * 0.5;
+          pg.rotation.x = (r() - 0.5) * 0.14;
+        }
+      });
+    }
+  }
+
+  /* ---------- the R&D survey: the object reads back, then the card ---------- */
+  function rndSurvey() {
+    S.phase = 'crater';
+    msr.active = false;
+    var o = S.result.outcome;
+    var rt = S.result.rnd;
+    var t = rt.target;
+    // the crater happens exactly as it always does
+    var crater = o.craterActual || 0;
+    var cr = Math.max(crater / 2, 1.6);
+    if (range.craterG) range.scene.remove(range.craterG);
+    range.craterG = buildCraterGroup(cr, S.result.visual.ellipse || 1, S.result.visual.offsetM || 0);
+    range.scene.add(range.craterG);
+    applyTargetDamage();
+    // survey pass: pad first, then the object
+    var g = range.targetG;
+    var tx = g ? g.position.x : 14, tz = g ? g.position.z : 0;
+    var cam = range.camera;
+    cam.fov = 26;
+    cam.updateProjectionMatrix();
+    var from = V3(tx * 0.4, 7, 30);
+    var to = V3(tx - (rt.target.id === 'array' ? 16 : 9), 4.2, 13);
+    setCaption('SURVEY PASS · THE OBJECT', 'The dust votes first. The instruments vote last.');
+    tween(4200, function (e) {
+      cam.position.lerpVectors(from, to, e);
+      cam.lookAt(tx, rt.target.id === 'wall' ? 2.2 : 1.4, tz);
+    }, null, easeInOut);
+    var m0 = rt.measures[0], m1 = rt.measures[1];
+    later(2400, function () {
+      PGAudio.typeDing();
+      setCaption('SURVEY · ' + t.name, '<b>' + m0.lbl + ' — ' + m0.val + (m0.unit ? ' ' + m0.unit : '') + '</b><br>' + m0.sub);
+    });
+    later(4600, function () {
+      if (m1) {
+        PGAudio.typeDing();
+        setCaption('SURVEY · ' + t.name, '<b>' + m1.lbl + ' — ' + m1.val + (m1.unit ? ' ' + m1.unit : '') + '</b><br>' + m1.sub);
+      }
+    });
+    later(6800, showRndScore);
+  }
+
+  /* ---------- the R&D readout card ---------- */
+  function certFee() {
+    var unitCost = S.result && S.result.shotCost != null ? S.result.shotCost
+      : PG2.derive(S.assembly, rfp()).cost;
+    return 500 + unitCost * 2;   // filing, plus the two extra articles the series expends
+  }
+  function showRndScore() {
+    clearLater();
+    S.phase = 'score';
+    msr.active = false;
+    showUI(null);
+    $('measure-svg').classList.add('hidden');
+    var rt = S.result.rnd;
+    var o = S.result.outcome;
+    var t = rt.target;
+    if (o.fired && rt.funcOk) PGAudio.fanfare(); else if (!o.fired) PGAudio.sadDrone();
+    persist();
+    var el = $('score-scroll');
+    function mCard(m) {
+      return '<div class="stamp-card"><div class="sc-lbl">' + m.lbl + '</div>' +
+        '<div class="sc-val">' + m.val + (m.unit ? ' <span style="font-size:11px">' + m.unit + '</span>' : '') + '</div>' +
+        '<div class="sc-spec">' + m.sub + '</div></div>';
+    }
+    var certifiable = o.fired && rt.funcOk;
+    var fee = certFee();
+    el.innerHTML =
+      '<div class="score-sheet">' +
+        '<div class="score-head">WEAPONS ASSEMBLY · INTERNAL — NOT FOR THE AUTHORITY</div>' +
+        '<div class="score-title">RANGE READOUT</div>' +
+        '<div class="score-sub">' + t.name + ' · R&D SHOT #' + SAVE.rndTests + ' · SERIES ' + S.result.seed + '</div>' +
+        '<div class="stamp-row">' + rt.measures.map(mCard).join('') + '</div>' +
+        (!o.fired && o.rootCause
+          ? '<div class="hint-callout"><span class="hc-kicker">NO DATA — ' + o.rootCause.title + '</span>' +
+            (o.hint || '') + '</div>'
+          : (o.hint && !rt.funcOk ? '<div class="hint-callout"><span class="hc-kicker">OFF CUE</span>' + o.hint + '</div>' : '')) +
+        '<table class="pay-table">' +
+          '<tr><td>ARTICLE, EXPENDED (PARTS &amp; REFINING)</td><td>−' + fmt$(S.result.shotCost) + '</td></tr>' +
+          '<tr class="net"><td>COMPANY ACCOUNT</td><td>' + fmt$(SAVE.cash) + '</td></tr>' +
+        '</table>' +
+        '<div class="score-btns">' +
+          '<button id="btn-rnd-retry" type="button">BACK TO THE BENCH<span class="sub">YOUR BUILD, AS YOU LEFT IT</span></button>' +
+          (certifiable
+            ? '<button id="btn-rnd-cert" type="button">SUBMIT FOR TYPE CERTIFICATION<span class="sub">FREEZE THE DESIGN · 3-TEST SERIES · ' + fmt$(fee) + '</span></button>'
+            : '') +
+        '</div>' +
+        '<div class="score-navrow"><button id="btn-rnd-hq" type="button">THE COMPOUND</button></div>' +
+        '<div class="score-seed">SERIES ' + S.result.seed + ' · SAME BUILD + SAME SERIES = SAME RESULT · ALL SCIENCE INVENTED</div>' +
+      '</div>';
+    showScreen('scr-score');
+    $('btn-rnd-retry').addEventListener('click', function () {
+      PGAudio.tap();
+      S.seed = PG2.makeSeed().toUpperCase();   // a fresh evening, a fresh series
+      enterBuild(true);
+      $('btn-hq').classList.remove('hidden');
+    });
+    if (certifiable) $('btn-rnd-cert').addEventListener('click', function () { PGAudio.tap(); certifyDesign(); });
+    $('btn-rnd-hq').addEventListener('click', function () { PGAudio.tap(); saveBench(); showHQ(); });
+  }
+
+  /* ---------- TYPE CERTIFICATION: three tests, design frozen ---------- */
+  function certifyDesign() {
+    var fee = certFee();
+    if (SAVE.cash < fee) {
+      PGAudio.buzz();
+      toast('The series costs ' + fmt$(fee) + '; the company holds ' + fmt$(SAVE.cash) + '. The Authority does not run tabs.');
+      return;
+    }
+    SAVE.cash -= fee;
+    var certSeed = PG2.makeSeed().toUpperCase();
+    var series = PG2.certSeries(S.assembly, certSeed, S.rndTarget);
+    var doc = $('cert-doc');
+    var t = series.target;
+    function stampRow(st) {
+      return '<div class="cert-row"><div><div class="cr-lbl">' + st.label + '</div>' +
+        '<span class="cr-note">' + st.spec + (st.note ? ' · ' + st.note : '') + '</span></div>' +
+        '<div class="cr-val">' + st.value + '<br><span class="cert-stamp ' + (st.ok ? 'pass' : 'fail') + '">' +
+        (st.ok ? 'PASS' : 'FAIL') + '</span></div></div>';
+    }
+    doc.innerHTML =
+      '<div class="doc-headrow"><span>FORM RD-2200-T</span><span>STANDARDS SERIES ' + certSeed + '</span></div>' +
+      '<div class="rfp-no">TYPE CERTIFICATION · ' + t.name + '</div>' +
+      '<div class="rfp-title" style="font-size:16px">THE DESIGN IS FROZEN. THREE TESTS. NO TWEAKS.</div>' +
+      '<hr class="doc-rule">' +
+      series.stamps.map(stampRow).join('') +
+      '<div class="cert-verdict">' + (series.pass
+        ? '★ PRODUCTION READY ★'
+        : 'NOT CERTIFIED — THE FEE IS NOT REFUNDED.<br><span style="font-size:10px;font-weight:400">The Authority thanks you for the fireworks.</span>') + '</div>';
+    $('cert-overlay').classList.remove('hidden');
+    $('cert-close').classList.add('hidden');
+    var rows = doc.querySelectorAll('.cert-row');
+    rows.forEach(function (row, i) {
+      later(700 + i * 1100, function () { row.classList.add('shown'); PGAudio.stampThud(); });
+    });
+    later(700 + rows.length * 1100 + 400, function () {
+      doc.querySelector('.cert-verdict').classList.add('shown');
+      if (series.pass) PGAudio.fanfare(); else PGAudio.sadDrone();
+      $('cert-close').classList.remove('hidden');
+    });
+    $('cert-close').onclick = function () {
+      PGAudio.tap();
+      $('cert-overlay').classList.add('hidden');
+      clearLater();
+      if (series.pass) mintType(series, certSeed);
+      else { persist(); showRndScore(); }
+    };
+  }
+  function mintType(series, certSeed) {
+    SAVE.rsk++;
+    var plate = 'RSK-' + SAVE.rsk;
+    var name = PG2.certCodename(certSeed);
+    var s1 = series.shots[0];
+    var ty = {
+      plate: plate, name: name, target: S.rndTarget,
+      grade: series.grade, band: series.band, primary: s1.primary,
+      unitCost: S.result && S.result.shotCost != null ? S.result.shotCost : PG2.derive(S.assembly, rfp()).cost,
+      abuseKind: series.abuseKind, incidents: 0,
+      assembly: JSON.parse(JSON.stringify(S.assembly)),
+      certSeed: certSeed, t: Date.now()
+    };
+    SAVE.types.push(ty);
+    persist();
+    var t = series.target;
+    $('plate-doc').innerHTML =
+      '<div class="type-plate">' +
+        '<div class="tp-kicker">REDSKY INC · TYPE PLATE</div>' +
+        '<div class="tp-plate">' + plate + '</div>' +
+        '<div class="tp-name">“' + name + '”</div>' +
+        '<span class="tp-ready">PRODUCTION READY</span>' +
+        '<div class="tp-spec">' +
+          '<div>' + t.metric + ', CERTIFIED <b>' + series.band.lo + '–' + series.band.hi + ' ' + t.unit + '</b></div>' +
+          '<div>CONSISTENCY <b>GRADE ' + series.grade + '</b></div>' +
+          '<div>ABUSE · ' + (series.abuseKind === 'hotsoak' ? 'HOT SOAK' : 'WASHBOARD') + ' <b>PASSED</b></div>' +
+          '<div>UNIT COST, AS BUILT <b>' + fmt$(ty.unitCost) + '</b></div>' +
+        '</div>' +
+      '</div>';
+    $('plate-overlay').classList.remove('hidden');
+    PGAudio.stampThud();
+  }
+  $('plate-close').addEventListener('click', function () {
+    PGAudio.tap();
+    $('plate-overlay').classList.add('hidden');
+    saveBench();
+    showHQ();
+  });
+
+  /* ---------- THE PRODUCTION BID BOARD ---------- */
+  function weekKey() { return 'W' + Math.floor(Date.now() / 6048e5); }
+  function showBids() {
+    S.phase = 'bids';
+    showUI(null);
+    var wall = $('bids-wall');
+    wall.innerHTML = '';
+    var orders = PG2.genOrders(SAVE.types, weekKey(), wonCountAll())
+      .filter(function (o) { return !SAVE.doneOrders[o.id]; });
+    $('bids-sub').textContent = 'PROCUREMENT ' + weekKey() + ' · ' + orders.length + ' OPEN ORDER' + (orders.length === 1 ? '' : 'S') +
+      ' · ACCOUNT ' + fmt$(SAVE.cash);
+    if (!SAVE.types.length) {
+      wall.innerHTML = '<div class="bids-empty">No certified types on file.</div>';
+    }
+    SAVE.types.forEach(function (ty) {
+      var t = PG2.TARGETS[ty.target];
+      var box = document.createElement('div');
+      box.className = 'bid-type';
+      var mine = orders.filter(function (o) { return o.plate === ty.plate; });
+      box.innerHTML =
+        '<div class="bt-head"><span class="bt-plate">' + ty.plate + ' “' + ty.name + '”</span>' +
+        '<span class="bt-grade">GRADE ' + ty.grade + (ty.incidents ? ' · ' + ty.incidents + ' QA CALLBACK' + (ty.incidents > 1 ? 'S' : '') : '') + '</span></div>' +
+        '<div class="bt-spec">' + t.metric + ' ' + ty.band.lo + '–' + ty.band.hi + ' ' + t.unit +
+        ' · UNIT COST ' + fmt$(ty.unitCost) + '</div>' +
+        (mine.length ? '' : '<div class="bt-spec" style="margin-top:8px">No open orders this week. The paper says demand is “seasonal”.</div>');
+      mine.forEach(function (order) {
+        var row = document.createElement('div');
+        row.className = 'bid-order';
+        row.innerHTML = '<div class="bo-txt"><b>' + order.buyer + '</b><br>' + order.units + ' UNITS · SEALED BIDS</div>';
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.textContent = SAVE.run ? 'WORKSHOP BOOKED' : 'OPEN THE BIDDING';
+        btn.disabled = !!SAVE.run;
+        btn.addEventListener('click', function () { PGAudio.tap(); runAuction(ty, order); });
+        row.appendChild(btn);
+        wall.appendChild(box);
+        box.appendChild(row);
+      });
+      wall.appendChild(box);
+    });
+    showScreen('scr-bids');
+  }
+  $('btn-bids-back').addEventListener('click', function () { PGAudio.tap(); showHQ(); });
+
+  /* the auction beat: watch the number climb, then decide */
+  function runAuction(ty, order) {
+    var au = PG2.auctionRun(ty, order, wonCountAll());
+    var doc = $('auction-doc');
+    doc.innerHTML =
+      '<div class="doc-headrow"><span>FORM RD-3300-B</span><span>' + weekKey() + '</span></div>' +
+      '<div class="rfp-no">SEALED-BID OPENING · ' + ty.plate + ' “' + ty.name + '”</div>' +
+      '<div class="rfp-title" style="font-size:15px">' + order.units + ' UNITS FOR ' + order.buyer + '</div>' +
+      '<hr class="doc-rule">' +
+      au.steps.map(function (s) {
+        return '<div class="auc-row"><span>' + s.buyer + '</span><span class="au-amt">' + fmt$(s.unit) + ' / UNIT</span></div>';
+      }).join('') +
+      '<div class="auc-final">GAVEL — ' + fmt$(au.finalUnit) + ' / UNIT<br>' +
+        '<span style="font-size:10px;font-weight:400">REVENUE ' + fmt$(au.revenue) + ' · MATERIALS −' + fmt$(au.matCost) +
+        ' · <b>NET ' + fmt$(au.net) + '</b> · RUN TIME ' + au.durMin + ' MIN</span></div>';
+    $('auction-overlay').classList.remove('hidden');
+    $('auction-accept').classList.add('hidden');
+    $('auction-decline').classList.add('hidden');
+    var rows = doc.querySelectorAll('.auc-row');
+    rows.forEach(function (row, i) {
+      later(500 + i * 800, function () { row.classList.add('shown'); PGAudio.tick(); });
+    });
+    later(500 + rows.length * 800 + 300, function () {
+      doc.querySelector('.auc-final').classList.add('shown');
+      PGAudio.stampThud();
+      $('auction-accept').classList.remove('hidden');
+      $('auction-decline').classList.remove('hidden');
+    });
+    $('auction-accept').onclick = function () {
+      PGAudio.tap();
+      clearLater();
+      $('auction-overlay').classList.add('hidden');
+      SAVE.doneOrders[order.id] = 1;
+      SAVE.run = {
+        orderId: order.id, plate: ty.plate, name: ty.name, buyer: order.buyer,
+        units: order.units, finalUnit: au.finalUnit, net: au.net,
+        seedKey: order.seedKey, t0: Date.now(), durMs: au.durMin * 60000
+      };
+      persist();
+      toast('The workshop books the run. ' + order.units + ' articles, ' + au.durMin + ' minutes of honest noise.');
+      showHQ();
+    };
+    $('auction-decline').onclick = function () {
+      PGAudio.tap();
+      clearLater();
+      $('auction-overlay').classList.add('hidden');
+      SAVE.doneOrders[order.id] = 1;   // a spurned buyer does not call twice in one week
+      persist();
+      showBids();
+    };
+  }
+
+  /* ---------- delivery day (and the occasional letter) ---------- */
+  function deliverRun() {
+    var run = SAVE.run;
+    if (!run || runRemainMs() > 0) return;
+    var ty = typeByPlate(run.plate);
+    var qa = ty ? PG2.qaRoll(ty, { seedKey: run.seedKey, units: run.units }) : null;
+    var doc = $('delivery-doc');
+    doc.innerHTML =
+      '<div class="doc-headrow"><span>FORM RD-4400-D</span><span>' + run.plate + '</span></div>' +
+      '<div class="rfp-no">DELIVERY RECEIPT · ' + run.buyer + '</div>' +
+      '<div class="rfp-title" style="font-size:15px">' + run.units + '× ' + run.plate + ' “' + run.name + '” — DELIVERED</div>' +
+      '<hr class="doc-rule">' +
+      '<div class="payline"><span>' + run.units + ' UNITS @ ' + fmt$(run.finalUnit) + '</span><b>' + fmt$(run.finalUnit * run.units) + '</b></div>' +
+      '<div class="payline"><span>MATERIALS, AS BUILT</span><b>−' + fmt$(run.finalUnit * run.units - run.net) + '</b></div>' +
+      '<div class="payline" style="font-weight:800"><span>NET TO REDSKY</span><b>' + fmt$(run.net) + '</b></div>' +
+      (qa ? '<hr class="doc-rule thin"><p class="spec-clause"><span class="cl">' + qa.title + '</span> — ' + qa.cause + '</p>' +
+            '<p class="spec-clause fine">' + qa.receipt + '</p>' : '');
+    $('delivery-overlay').classList.remove('hidden');
+    PGAudio.typeDing();
+    $('delivery-close').onclick = function () {
+      PGAudio.tap();
+      $('delivery-overlay').classList.add('hidden');
+      SAVE.cash += run.net;
+      if (qa && ty) {
+        ty.incidents = (ty.incidents || 0) + 1;
+        SAVE.museum.irs.push({
+          t: Date.now(), c: run.plate + ' · FIELD QA', seed: run.seedKey, attempt: 0,
+          outcome: qa.title, cause: qa.cause, receipt: qa.receipt,
+          where: 'CUSTOMER ACCEPTANCE', phase: 'PRODUCTION', disposition: 'RETURNED WITH LETTER'
+        });
+        museumFirst('qaletter', 'FIRST QA CALLBACK — THE CUSTOMER MEASURES TOO');
+      }
+      SAVE.run = null;
+      persist();
+      showHQ();
+    };
+  }
+
   /* ================= DEBUG / TEST API ================= */
   window.__pg = {
     state: function () {
       return {
         phase: S.phase, seed: S.seed, contract: S.contract, attempt: S.attempt,
+        mode: S.mode, rndTarget: S.rndTarget,
         assembly: JSON.parse(JSON.stringify(S.assembly))
       };
+    },
+    /* M3b — the Workshop */
+    rnd: function () { return S.result && S.result.rnd ? JSON.parse(JSON.stringify({
+      target: S.result.rnd.target.id, primary: S.result.rnd.primary,
+      funcOk: S.result.rnd.funcOk, measures: S.result.rnd.measures })) : null; },
+    debugGrant: function (opts) {
+      opts = opts || {};
+      if (opts.wins) {
+        for (var i = 0; i < Math.min(opts.wins, PG2.CONTRACTS.length); i++) {
+          var rec = contractRec(i);
+          rec.won = true; rec.tests = rec.tests || 1; rec.stars = rec.stars || 2;
+        }
+      }
+      if (typeof opts.cash === 'number') SAVE.cash = opts.cash;
+      if (opts.finishRun && SAVE.run) SAVE.run.t0 = Date.now() - SAVE.run.durMs - 1000;
+      persist();
+      refreshTitle();
+    },
+    showHQ: function () { showHQ(); },
+    debugFinishCloseout: function () {
+      // tests only: a correct panel, a gentle hand, an armed switch
+      PG2.wireCorrect(S.assembly, S.seed, rfp());
+      S.assembly.det = { seated: true, slam: 0.1 };
+      S.assembly.armed = true;
+      refreshHUD();
     },
     refineState: function () {
       return {
@@ -5639,8 +6377,9 @@
       };
     },
     save: function () {
-      return JSON.parse(JSON.stringify({ settings: SETTINGS, contracts: SAVE.contracts,
-        stock: SAVE.stock, museum: SAVE.museum, scars: SAVE.scars }));
+      var s = JSON.parse(JSON.stringify(SAVE));
+      s.settings = JSON.parse(JSON.stringify(SETTINGS));
+      return s;
     },
     dialState: function () {
       return { phase: S.phase, cur: dial.cur, set: S.assembly.timerSet };

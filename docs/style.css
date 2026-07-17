@@ -1605,3 +1605,8 @@ body.lefty #undo-bar { left: auto; right: 10px; }
 .rnd-measures { display: flex; gap: 8px; margin: 12px 0 4px; }
 .rnd-measures .stamp-card { flex: 1; }
 .rnd-func { font-family: var(--mono); font-size: 8.5px; letter-spacing: .1em; text-align: center; color: var(--ink-soft); margin-top: 6px; }
+/* the bench's door home: small, left, above the still */
+.bay-cta.hq { left: 12px; right: auto; bottom: calc(88px + var(--sab));
+  background: var(--bp-panel); color: var(--bp-bright); border: 1.5px solid var(--bp-line);
+  box-shadow: 0 4px 0 #0a1826; font-size: 10px; padding: 10px 13px; }
+body.lefty .bay-cta.hq { left: auto; right: 12px; }

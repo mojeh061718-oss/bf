@@ -42,13 +42,18 @@ A teaching ladder where every RFP adds one idea: restraint on a mean budget (FIR
 
 ---
 
-## 📋 NEXT — M3b: The Workshop (starts when M3a ships)
+## ✅ SHIPPED — M3b: The Workshop
 
-- **The HQ:** an establishing shot of the Redsky compound as the main menu — Contract Office, Weapons Assembly, the Still, the Museum.
-- **Weapons Assembly (free R&D):** build anything from your unlocked catalog on your own dime — no spec sheet watching.
-- **The Target Range:** test R&D builds against **objects** — derelict trucks, concrete wall sections, a decommissioned bunker, glass instrumentation arrays — each measuring differently (breach %, penetration, overpressure), each with its own long-lens payoff.
-- **Type Certification:** freeze a design and pass a 3-test standards series (performance, consistency repeat, abuse test) → stamped **PRODUCTION READY** with a type plate (RSK-7 "Sledge") and a spec card of *measured* results.
-- **The Production Bid Board:** fictional buyers post orders and bid on your certified types — a short, tense auction; better measured specs and cleaner incident history pull bigger money. Production runs book the workshop and pay on delivery, with occasional field-QA callbacks that feed the next design generation.
+- **The HQ:** the Redsky compound at dusk is the main menu — CONTRACT OFFICE, WEAPONS ASSEMBLY (unlocks with your first won contract), PRODUCTION BID BOARD (certified types only), THE MUSEUM — with the **company account** on the wall and a live production ticker when the floor is booked.
+- **The company account:** development awards bank once per contract win; R&D shots and certification fees draw it down; production runs feed it. Old saves migrate with everything they ever banked.
+- **Weapons Assembly (free R&D):** your bench, your dime, no spec sheet — the full bay + close-out, a persistent workbench that survives reload, and every shot expends the article at its as-built cost.
+- **The Target Range (wave 1 — 3 objects):** DERELICT HAULER (penetration, mm-e — holes, tilts, and at full pen *leaves the ground*), WALL SECTION (breach % — off-centre opens less door; the lintel holds, embarrassed), INSTRUMENT ARRAY (overpressure in brandt, 12 panels shattering in order of honesty). No convoy — out the back gate, after hours, straight to Station 7.
+- **Type Certification:** freeze the design, three tests (performance vs. the object's floor, consistency repeat graded A/B/C, a seeded abuse test — hot soak or washboard), stamped **PRODUCTION READY** on a brass type plate (RSK-1 "MULE") with a spec card of *measured* results. Calm builds certify ~90% mostly grade A; hot twitchy builds ~37% — repeatability punishes lucky builds, as contracted.
+- **The Production Bid Board:** weekly seeded orders per certified type; a sealed-bid opening where the number climbs (grade, measured specs, reputation, and incident history set the ceiling); accepting books the workshop in real time and pays on delivery — with seeded **field-QA callbacks** root-caused to the design's true weak point, framed in the museum, and priced into the next auction.
+
+## 📋 NEXT — M3b wave 2 (polish)
+
+- More target objects (the decommissioned bunker, stacked containers), per-object range scarring, richer auction drama, production-run vignettes.
 
 ## 🗺 THE ROAD BEYOND (M4–M6, planned in FULL_GAME_PLAN.md)
 
