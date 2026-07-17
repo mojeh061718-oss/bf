@@ -1742,3 +1742,31 @@ body.lefty .bay-cta.gyro { left: auto; right: 12px; }
 /* presentation layers never eat the recon plane's touch input */
 #cam-overlay, #flash, #dustwall, #range-caption { pointer-events: none; }
 #cam-overlay * { pointer-events: none; }
+
+/* ============ LANDSCAPE: fill the wide frame, no filler bars ============ */
+@media (orientation: landscape) and (max-height: 620px) {
+  /* THE HQ — the compound spans the whole width; doors become a 2-col deck over it */
+  .hq-frame { max-width: none; }
+  .hq-sky { height: 100%; }                        /* backdrop fills top-to-bottom behind the deck */
+  .hq-scape { height: 42%; }
+  .hq-head { padding-top: calc(10px + var(--sat)); }
+  .hq-doors {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px;
+    align-content: end; padding: 10px 20px calc(12px + var(--sab)); max-width: 900px; margin: 0 auto;
+  }
+  .hq-door { padding: 11px 14px 10px 18px; }
+  .hq-door .hd-sub { font-size: 10px; }
+  #hq-gate { grid-column: 1 / -1; }
+  .hq-foot { display: none; }                       /* the footer strip just eats vertical room here */
+
+  /* CONTRACT BOARD / BID BOARD / MUSEUM — widen and add columns */
+  .board-frame, .bids-frame { max-width: none; }
+  .board-wall { grid-template-columns: repeat(4, 1fr); }
+  .bids-scroll { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 14px; align-content: start; }
+  .museum-scroll { max-width: none; column-count: 2; column-gap: 16px; }
+  #board-sub, .bids-frame .board-sub { max-width: none; }
+
+  /* TITLE — let the blueprint sheet breathe wider, buttons side by side */
+  .bp-sheet { max-width: 620px; }
+  .title-nav { max-width: 620px; }
+}
