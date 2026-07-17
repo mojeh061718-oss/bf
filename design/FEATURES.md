@@ -73,6 +73,15 @@ A teaching ladder where every RFP adds one idea: restraint on a mean budget (FIR
 - **The survey is yours now:** while flying the aftermath, the auto-advance waits. **Tap the ground to drop survey stakes** — dashed range lines plot live from ground zero with distances — then **FILE THE SURVEY →** when you're done. The long lens remains the default; the plane is one tap away.
 - **A desert worth flying over:** seeded ground dressing — creosote scrub, rock scatter, and red-flag survey stakes at 25/50/75/100 m on the cardinal lines (the aerial ruler).
 
+## ✅ SHIPPED — The full graphics rework (three-artist pass)
+
+A ground-up visual rebuild by three specialists working in parallel, integrated and re-verified:
+- **The Assembly Bay is a workshop now** — painted concrete floor with saw-cut joints, an amber "ASSEMBLY ZERO · KEEP CIRCLE CLEAR" work circle, hazard-striped roll-up door, workbench with a shadow-board (one spanner missing), stores rack, waste-oil drum, traffic cones; a real hydraulic work stand (barrel, polished ram, cradle pads, hanging pendant control); tungsten cage lamps with dust motes drifting in the key light. (~6k tris, 2048px floor.)
+- **The desert is a surveyed test range** — a 2048px macro terrain skin (bleached playa disc, mud-crack polygons, a braided dry wash, tire-track history, chalk datum circles at 25/50/75/100 m, "RANGE 7" ground stencil); a full pad complex (concrete apron with expansion joints + stencils, blockhouse, lattice camera tower, sandbag ring, cable runs, light poles that glow at dusk, wind sock); strata-banded mesas; three genuinely cinematic hours (dawn pale-gold, noon bleached, dusk ember-violet). (~5k tris.)
+- **Every part is a crafted product** — canvas texture skins on the shells (rolled-steel panel lines, rivets, stenciled designations + lot numbers, hazard bands, edge-wear AO), embossed ribbed canisters, machined system parts (dials, terminal blocks, brass gimbal), and the targets rebuilt (a real truck silhouette with rust patina, board-formed concrete wall with rebar stubs, proper instrument racks); layered crater rim. (~4k tris.)
+
+Determinism preserved bit-identical (RFP-041 crater 21.744239379489592); zero page errors across bay-build, career range-day, and aerial-survey harnesses.
+
 ## ✅ SHIPPED — The premium rendering pass (M3b wave 2, part 4)
 
 - **Real shadows on the range:** the sun casts a 2048 PCF-soft shadow map over the play area — walls throw long dusk shadows, the article shades the pad, scrub and stakes anchor to the dirt. The aerial view earns it most.
