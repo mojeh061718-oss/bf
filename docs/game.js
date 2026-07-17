@@ -4139,38 +4139,70 @@
   /* ================= RANGE SCENE (v2 — the stage, not the play) ================= */
   /* time-of-day palettes: each contract picks one; the convoy always drives at dawn */
   var RANGE_PAL = {
-    dawn: {
-      sky: [[0, '#16264a'], [0.36, '#54628c'], [0.56, '#c8825e'], [0.72, '#eda86e'], [1, '#f5c98c']],
-      fog: 0xd9a878, fogNear: 1250, fogFar: 4100,
-      hemiSky: 0xb9c6e4, hemiGnd: 0x7a5638, hemiI: 0.58,
-      sun: 0xffc182, sunI: 1.2, sunPos: [-950, 210, 480],
-      mesas: [0x8a5a40, 0x9c6d5c, 0xa07890, 0x9884ab],   // warm near → violet far
-      terrTint: 0xffd9b8,
-      shimmer: 0.45, longShadow: true
+    dawn: {   // pale gold, the air still cold, shadows a hundred metres long
+      sky: [[0, '#0e1a38'], [0.22, '#2e3d6b'], [0.36, '#6d5f8e'], [0.445, '#c07a5e'],
+            [0.492, '#f5aa66'], [0.53, '#ffdba2'], [0.60, '#e8b98c'], [1, '#c9a17c']],
+      fog: 0xe4b088, fogNear: 980, fogFar: 4300,
+      hemiSky: 0xb4c2e4, hemiGnd: 0x8f6a46, hemiI: 0.66,
+      sun: 0xffc078, sunI: 1.34, sunPos: [-950, 235, 480], sunScale: 860,
+      mesas: [0x9a5f46, 0xa26b5e, 0x99738f, 0x8b78a4],   // warm near → violet far
+      terrTint: 0xffd6ae,
+      haze: 0xe8a97e, hazeOp: 0.36,
+      cloudTint: 0xffd2a4, cloudOp: 0.5,
+      practicals: 0.5,
+      shimmer: 0.4, longShadow: true
     },
-    noon: {
-      sky: [[0, '#4f97d6'], [0.5, '#a9cade'], [0.78, '#e9e3cf'], [1, '#efe6c6']],
-      fog: 0xe8dfc6, fogNear: 1600, fogFar: 4900,
-      hemiSky: 0xdcecf8, hemiGnd: 0xa08a62, hemiI: 1.02,
-      sun: 0xfff6e0, sunI: 1.15, sunPos: [140, 1100, 300],
-      mesas: [0xb08258, 0xc09a76, 0xccb69c, 0xd2c8b8],                 // bleached, blue-shifted far
-      terrTint: 0xffffff,
+    noon: {   // bleached and brutal — the light has opinions and no mercy
+      sky: [[0, '#2d7ecf'], [0.26, '#5aa3d8'], [0.42, '#a4c9dc'], [0.492, '#e4dfc8'],
+            [0.56, '#eee6cd'], [1, '#e5dabb']],
+      fog: 0xece3ca, fogNear: 1750, fogFar: 5300,
+      hemiSky: 0xe9f2fa, hemiGnd: 0xb0996c, hemiI: 1.08,
+      sun: 0xfff8e6, sunI: 1.3, sunPos: [160, 1150, 260], sunScale: 620,
+      mesas: [0xb98f66, 0xc4a37e, 0xcdb99e, 0xd6cab4],   // bleached, dust-shifted far
+      terrTint: 0xfffdf4,
+      haze: 0xe6ddc2, hazeOp: 0.5,
+      cloudTint: 0xffffff, cloudOp: 0.3,
+      practicals: 0,
       shimmer: 1.0, longShadow: false
     },
-    dusk: {
-      sky: [[0, '#1a1533'], [0.34, '#43305e'], [0.55, '#8c4a5e'], [0.74, '#d97a50'], [1, '#f2b56a']],
-      fog: 0xb07a6a, fogNear: 1100, fogFar: 3800,
-      hemiSky: 0x8f7fb0, hemiGnd: 0x5e4030, hemiI: 0.5,
-      sun: 0xff9a5e, sunI: 1.05, sunPos: [980, 160, 420],
-      mesas: [0x6e4550, 0x5e4060, 0x554373, 0x4c4480],   // ember-lit near → violet-night far
-      terrTint: 0xe8a988,
-      shimmer: 0.2, longShadow: true
+    dusk: {   // ember-violet: the sun goes down angry, the pad lights come up warm
+      sky: [[0, '#0f0c28'], [0.22, '#2c2150'], [0.36, '#5c3560'], [0.44, '#a04b58'],
+            [0.487, '#e07444'], [0.525, '#ffa054'], [0.60, '#d0855c'], [1, '#7e5850']],
+      fog: 0xb07468, fogNear: 930, fogFar: 3900,
+      hemiSky: 0x9080b4, hemiGnd: 0x74503c, hemiI: 0.64,
+      sun: 0xff8a4a, sunI: 1.14, sunPos: [980, 205, 420], sunScale: 940,
+      mesas: [0x6e4148, 0x64405c, 0x55406e, 0x453e76],   // ember-lit near → violet-night far
+      terrTint: 0xdfa98d,
+      haze: 0x8f5570, hazeOp: 0.4,
+      cloudTint: 0xf7a070, cloudOp: 0.55,
+      practicals: 1.0,
+      shimmer: 0.18, longShadow: true
     }
   };
+  function rangeSkyTexture(p) {
+    // vertical gradient + horizon bloom + dither grain: the dome without the banding
+    var c = document.createElement('canvas');
+    c.width = 64; c.height = 512;
+    var x = c.getContext('2d');
+    var g = x.createLinearGradient(0, 0, 0, 512);
+    p.sky.forEach(function (s) { g.addColorStop(s[0], s[1]); });
+    x.fillStyle = g;
+    x.fillRect(0, 0, 64, 512);
+    var r = PG2.stream('RANGE', 'skygrain');
+    x.globalAlpha = 0.028;
+    for (var i = 0; i < 1400; i++) {
+      x.fillStyle = r() < 0.5 ? '#000' : '#fff';
+      x.fillRect(Math.floor(r() * 64), Math.floor(r() * 512), 1, 1);
+    }
+    x.globalAlpha = 1;
+    var t = new THREE.CanvasTexture(c);
+    t.encoding = THREE.sRGBEncoding;
+    return t;
+  }
   function applyRangePalette(name) {
     var p = RANGE_PAL[name] || RANGE_PAL.dawn;
     if (!range.skyCache) range.skyCache = {};
-    if (!range.skyCache[name]) range.skyCache[name] = gradientTexture(p.sky, true);
+    if (!range.skyCache[name]) range.skyCache[name] = rangeSkyTexture(p);
     range.scene.background = range.skyCache[name];
     range.skyDome.material.map = range.skyCache[name];   // the dome wears the hour
     range.skyDome.material.needsUpdate = true;
@@ -4187,12 +4219,24 @@
     range.sun.position.copy(sv.clone().multiplyScalar(600));
     range.sunSpr.position.copy(sv.clone().multiplyScalar(3800));
     range.sunSpr.material.color.setHex(p.sun);
+    range.sunSpr.scale.set(p.sunScale || 700, p.sunScale || 700, 1);
     range.cloudG.children.forEach(function (cs) {
-      cs.material.color.setHex(name === 'dusk' ? 0xf0a878 : name === 'dawn' ? 0xf3ddc0 : 0xffffff);
-      cs.material.opacity = name === 'noon' ? 0.32 : 0.5;
+      cs.material.color.setHex(p.cloudTint);
+      cs.material.opacity = p.cloudOp;
     });
     range.mesas.forEach(function (m, i) { m.material.color.setHex(p.mesas[Math.min(i, p.mesas.length - 1)]); });
     range.terrain.material.color.setHex(p.terrTint);
+    if (range.terrainMacro) range.terrainMacro.material.color.setHex(p.terrTint);
+    if (range.hazeBands) range.hazeBands.forEach(function (hb, i) {
+      hb.material.color.setHex(p.haze);
+      hb.material.opacity = p.hazeOp * (i ? 0.65 : 1);
+    });
+    // the pad practicals: warm heads that mean something at dusk, dead glass at noon
+    if (range.practicals) range.practicals.forEach(function (pr) {
+      pr.mat.emissiveIntensity = 1.5 * p.practicals;
+      pr.spr.material.opacity = 0.8 * p.practicals;
+      pr.spr.visible = p.practicals > 0.02;
+    });
     range.shimmerBase = p.shimmer;
     range.palette = name;
   }
@@ -4244,41 +4288,94 @@
       var h = 0;
       if (r2 > 60) {
         h = Math.sin(x * 0.004 + 1.7) * Math.cos(y * 0.0031) * 7 +
-            Math.sin(x * 0.013 + y * 0.009) * 2.5;
+            Math.sin(x * 0.013 + y * 0.009) * 2.5 +
+            Math.sin(x * 0.031 + y * 0.043) * 0.8;                     // dune ripple
+        var farK = clamp((r2 - 420) / 2400, 0, 1);                     // long swells out by the mesas
+        h += farK * Math.sin(x * 0.0016 - 2.1) * Math.cos(y * 0.0013 + 0.8) * 17;
         h *= clamp((r2 - 60) / 300, 0, 1);
         h *= clamp((Math.abs(wz - 26) - 14) / 26, 0, 1);   // road corridor stays drivable
       }
       pos.setZ(i, h);
-      var shade = 0.84 + Math.sin(x * 0.05) * Math.cos(y * 0.043) * 0.09 + Math.sin(x * 0.21 + y * 0.17) * 0.045;
-      col.setRGB(0.82 * shade, 0.615 * shade, 0.37 * shade);
+      // multi-zone vertex shading: warm sand near, desert-varnish darkening with
+      // distance, patchy gravel sheets — the macro canvas paints the details on top
+      var shade = 0.89 + Math.sin(x * 0.05) * Math.cos(y * 0.043) * 0.06 + Math.sin(x * 0.21 + y * 0.17) * 0.035;
+      var dK = clamp((r2 - 240) / 2600, 0, 1);                          // distance varnish
+      var patch = Math.max(0, Math.sin(x * 0.0021 + 1.2) * Math.sin(y * 0.0017 - 0.4)) * dK * 0.09;
+      col.setRGB((0.865 - dK * 0.100 - patch) * shade,
+                 (0.665 - dK * 0.095 - patch * 0.9) * shade,
+                 (0.450 - dK * 0.065 - patch * 0.5) * shade);
       colors.push(col.r, col.g, col.b);
     }
     tg.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
     tg.computeVertexNormals();
-    // high-res ground detail: seeded speckle + strata, repeated and anisotropic —
-    // the desert reads like dirt now instead of vinyl
+    // ground detail skin: multi-scale speckle, pebbles with painted shadows, crack
+    // webs and alluvial grain — repeated fine, so the dirt reads at boot height
     var dtc = document.createElement('canvas');
     dtc.width = dtc.height = 1024;
     var dtx = dtc.getContext('2d');
-    dtx.fillStyle = '#8f867a';
+    dtx.fillStyle = '#a49a8a';
     dtx.fillRect(0, 0, 1024, 1024);
     var dnR = PG2.stream('RANGE', 'dirt');
-    for (var dn = 0; dn < 9000; dn++) {
-      var l = 120 + Math.floor(dnR() * 46);
-      dtx.fillStyle = 'rgb(' + l + ',' + Math.round(l * 0.94) + ',' + Math.round(l * 0.84) + ')';
-      var ds = dnR() < 0.9 ? 1 + dnR() * 2.5 : 3 + dnR() * 6;
+    // low-frequency mottle: soft warm/cool patches
+    for (var dm = 0; dm < 240; dm++) {
+      var mr = 30 + dnR() * 90, mx = dnR() * 1024, my = dnR() * 1024;
+      var mg = dtx.createRadialGradient(mx, my, 2, mx, my, mr);
+      var warm = dnR() < 0.5;
+      mg.addColorStop(0, warm ? 'rgba(178,156,120,0.08)' : 'rgba(132,126,118,0.08)');
+      mg.addColorStop(1, 'rgba(0,0,0,0)');
+      dtx.fillStyle = mg;
+      dtx.fillRect(mx - mr, my - mr, mr * 2, mr * 2);
+    }
+    // alluvial grain: faint directional wind strata
+    dtx.globalAlpha = 0.07;
+    for (var dl2 = 0; dl2 < 54; dl2++) {
+      dtx.strokeStyle = dnR() < 0.5 ? '#6e6458' : '#b3a68f';
+      dtx.lineWidth = 1 + dnR() * 2;
+      dtx.beginPath();
+      var gy0 = dnR() * 1024;
+      dtx.moveTo(0, gy0);
+      dtx.bezierCurveTo(300, gy0 + dnR() * 60 - 30, 700, gy0 + dnR() * 60 - 30, 1024, gy0);
+      dtx.stroke();
+    }
+    dtx.globalAlpha = 1;
+    // fine speckle
+    for (var dn = 0; dn < 11000; dn++) {
+      var l = 134 + Math.floor(dnR() * 56);
+      dtx.fillStyle = 'rgb(' + l + ',' + Math.round(l * 0.93) + ',' + Math.round(l * 0.82) + ')';
+      var ds = dnR() < 0.92 ? 0.7 + dnR() * 2.2 : 3 + dnR() * 4;
       dtx.globalAlpha = 0.10 + dnR() * 0.22;
       dtx.beginPath();
       dtx.arc(dnR() * 1024, dnR() * 1024, ds, 0, 6.3);
       dtx.fill();
     }
-    dtx.globalAlpha = 0.09;
-    for (var dl2 = 0; dl2 < 42; dl2++) {   // faint wind strata
-      dtx.strokeStyle = dnR() < 0.5 ? '#6e6458' : '#b0a390';
-      dtx.lineWidth = 1 + dnR() * 2;
+    // pebbles: painted shadow + lit crown, the 3D the polygons can't afford
+    for (var dp = 0; dp < 460; dp++) {
+      var px2 = dnR() * 1024, py2 = dnR() * 1024, pr2 = 1.6 + dnR() * 3.4;
+      dtx.globalAlpha = 0.22;
+      dtx.fillStyle = '#584e40';
+      dtx.beginPath(); dtx.arc(px2 + pr2 * 0.45, py2 + pr2 * 0.5, pr2, 0, 6.3); dtx.fill();
+      var pl = 140 + Math.floor(dnR() * 70);
+      dtx.globalAlpha = 0.55;
+      dtx.fillStyle = 'rgb(' + pl + ',' + Math.round(pl * 0.94) + ',' + Math.round(pl * 0.85) + ')';
+      dtx.beginPath(); dtx.arc(px2, py2, pr2 * 0.85, 0, 6.3); dtx.fill();
+      dtx.globalAlpha = 0.4;
+      dtx.fillStyle = '#e8ddc8';
+      dtx.beginPath(); dtx.arc(px2 - pr2 * 0.3, py2 - pr2 * 0.32, pr2 * 0.32, 0, 6.3); dtx.fill();
+    }
+    // hairline crack web
+    dtx.globalAlpha = 0.07;
+    dtx.strokeStyle = '#584e40';
+    dtx.lineWidth = 1;
+    for (var dc = 0; dc < 120; dc++) {
+      var cx0 = dnR() * 1024, cy0 = dnR() * 1024, ca0 = dnR() * 6.3;
       dtx.beginPath();
-      dtx.moveTo(0, dnR() * 1024);
-      dtx.bezierCurveTo(300, dnR() * 1024, 700, dnR() * 1024, 1024, dnR() * 1024);
+      dtx.moveTo(cx0, cy0);
+      for (var cs2 = 0; cs2 < 4; cs2++) {
+        ca0 += dnR() * 1.4 - 0.7;
+        cx0 += Math.cos(ca0) * (8 + dnR() * 16);
+        cy0 += Math.sin(ca0) * (8 + dnR() * 16);
+        dtx.lineTo(cx0, cy0);
+      }
       dtx.stroke();
     }
     dtx.globalAlpha = 1;
@@ -4292,37 +4389,233 @@
     terrain.receiveShadow = true;
     scene.add(terrain);
 
+    // MACRO SKIN — a 2048 canvas draped over the central 1500 m: the bleached playa,
+    // the dry wash, tire-track history, the Authority's painted datum. Same geometry,
+    // clamped UVs, transparent edges — it dissolves into the vertex-shaded distance.
+    var mcv = document.createElement('canvas');
+    mcv.width = mcv.height = 2048;
+    var mx2 = mcv.getContext('2d');
+    var mR = PG2.stream('RANGE', 'macro');
+    var MSPAN = 1100;                                   // metres the skin covers
+    var MSC = 2048 / MSPAN;                             // px per metre
+    function mpx(wx) { return 1024 + wx * MSC; }
+    function mpz(wzv) { return 1024 + wzv * MSC; }
+    // desert varnish blotches — density grows with distance from the pad
+    for (var vb = 0; vb < 900; vb++) {
+      var va = mR() * Math.PI * 2, vd = Math.pow(mR(), 0.55) * 530;
+      if (vd < 150) continue;
+      var vx = mpx(Math.cos(va) * vd), vy = mpz(Math.sin(va) * vd);
+      var vr = 8 + mR() * 34;
+      var vgr = mx2.createRadialGradient(vx, vy, 1, vx, vy, vr);
+      vgr.addColorStop(0, 'rgba(74,52,36,' + (0.05 + mR() * 0.10) + ')');
+      vgr.addColorStop(1, 'rgba(74,52,36,0)');
+      mx2.fillStyle = vgr;
+      mx2.fillRect(vx - vr, vy - vr, vr * 2, vr * 2);
+    }
+    // gravel-sheet streaks: long soft diagonals
+    mx2.globalAlpha = 0.06;
+    for (var gs = 0; gs < 26; gs++) {
+      mx2.strokeStyle = mR() < 0.5 ? '#6a5a44' : '#cbb79a';
+      mx2.lineWidth = 10 + mR() * 26;
+      mx2.beginPath();
+      var gx0 = mR() * 2048, gyy = mR() * 2048;
+      mx2.moveTo(gx0, gyy);
+      mx2.bezierCurveTo(gx0 + 300, gyy + 160, gx0 + 700, gyy + 240, gx0 + 1100, gyy + 300);
+      mx2.stroke();
+    }
+    mx2.globalAlpha = 1;
+    // THE DRY WASH — a braided sand ribbon meandering NW → SE, skirting the pad
+    var washPts = [[-700, -760], [-430, -430], [-290, -190], [-205, -55], [-140, 140], [-40, 300], [130, 460], [320, 640], [470, 780]];
+    function drawWash(wd, style) {
+      mx2.strokeStyle = style;
+      mx2.lineWidth = wd;
+      mx2.lineCap = 'round'; mx2.lineJoin = 'round';
+      mx2.beginPath();
+      mx2.moveTo(mpx(washPts[0][0]), mpz(washPts[0][1]));
+      for (var wi2 = 1; wi2 < washPts.length - 1; wi2++) {
+        var xc = (mpx(washPts[wi2][0]) + mpx(washPts[wi2 + 1][0])) / 2;
+        var yc = (mpz(washPts[wi2][1]) + mpz(washPts[wi2 + 1][1])) / 2;
+        mx2.quadraticCurveTo(mpx(washPts[wi2][0]), mpz(washPts[wi2][1]), xc, yc);
+      }
+      mx2.stroke();
+    }
+    drawWash(46, 'rgba(96,74,52,0.22)');               // dark banks
+    drawWash(34, 'rgba(224,204,166,0.5)');             // sand bed
+    drawWash(18, 'rgba(238,222,188,0.45)');            // bleached center braid
+    mx2.save();
+    mx2.translate(6, 4);
+    drawWash(5, 'rgba(206,184,148,0.5)');              // side braid
+    mx2.restore();
+    // THE PLAYA — bleached clay disc around the pad, mud-crack polygons painted in
+    var pg2 = mx2.createRadialGradient(1024, 1024, 10, 1024, 1024, 95 * MSC);
+    pg2.addColorStop(0, 'rgba(235,224,200,0.55)');
+    pg2.addColorStop(0.55, 'rgba(230,218,192,0.45)');
+    pg2.addColorStop(0.85, 'rgba(222,208,178,0.24)');
+    pg2.addColorStop(1, 'rgba(218,204,172,0)');
+    mx2.fillStyle = pg2;
+    mx2.beginPath(); mx2.arc(1024, 1024, 95 * MSC, 0, 6.3); mx2.fill();
+    // wobble the rim with a few offset lobes so it isn't a perfect coin
+    for (var pl2 = 0; pl2 < 7; pl2++) {
+      var pa2 = mR() * Math.PI * 2, pd2 = 80 * MSC + mR() * 24;
+      var plx = 1024 + Math.cos(pa2) * pd2 * 0.55, ply = 1024 + Math.sin(pa2) * pd2 * 0.55;
+      var pgl = mx2.createRadialGradient(plx, ply, 2, plx, ply, 60 + mR() * 50);
+      pgl.addColorStop(0, 'rgba(230,218,190,0.28)');
+      pgl.addColorStop(1, 'rgba(230,218,190,0)');
+      mx2.fillStyle = pgl;
+      mx2.beginPath(); mx2.arc(plx, ply, 120, 0, 6.3); mx2.fill();
+    }
+    // mud-crack polygons
+    mx2.strokeStyle = 'rgba(150,133,106,0.16)';
+    mx2.lineWidth = 1;
+    for (var mc2 = 0; mc2 < 110; mc2++) {
+      var ma2 = mR() * Math.PI * 2, md2 = Math.sqrt(mR()) * 88 * MSC;
+      var mcx = 1024 + Math.cos(ma2) * md2, mcy = 1024 + Math.sin(ma2) * md2;
+      var seg = 3 + Math.floor(mR() * 3), aa = mR() * 6.3;
+      mx2.beginPath(); mx2.moveTo(mcx, mcy);
+      for (var ms2 = 0; ms2 < seg; ms2++) {
+        aa += mR() * 2 - 1;
+        mcx += Math.cos(aa) * (6 + mR() * 10); mcy += Math.sin(aa) * (6 + mR() * 10);
+        mx2.lineTo(mcx, mcy);
+      }
+      mx2.stroke();
+    }
+    // TIRE-TRACK HISTORY — every survey, every convoy, ground into the clay
+    function track(pts2, alpha) {
+      mx2.strokeStyle = 'rgba(94,72,50,' + alpha + ')';
+      mx2.lineWidth = 1.5;
+      [-2.4, 2.4].forEach(function (off) {
+        mx2.beginPath();
+        for (var ti2 = 0; ti2 < pts2.length; ti2++) {
+          var tx2 = mpx(pts2[ti2][0]) + off, ty2 = mpz(pts2[ti2][1]) + off * 0.4;
+          if (ti2 === 0) mx2.moveTo(tx2, ty2); else mx2.lineTo(tx2, ty2);
+        }
+        mx2.stroke();
+      });
+    }
+    // arcs looping the pad + spurs from the road (z=26) in to the apron
+    for (var ta = 0; ta < 8; ta++) {
+      var tr2 = 16 + ta * 6 + mR() * 4, t0 = mR() * 6.3, tlen = 1.2 + mR() * 2.6;
+      var arc2 = [];
+      for (var tk = 0; tk <= 16; tk++) {
+        var ang2 = t0 + tlen * tk / 16;
+        arc2.push([Math.cos(ang2) * tr2 * (1 + 0.08 * Math.sin(tk)), Math.sin(ang2) * tr2]);
+      }
+      track(arc2, 0.08 + mR() * 0.08);
+    }
+    [[-60, 26], [-20, 26], [30, 26], [70, 26]].forEach(function (sp2) {
+      var spur = [];
+      for (var sk = 0; sk <= 12; sk++) {
+        var st2 = sk / 12;
+        spur.push([sp2[0] + (12 - sp2[0]) * st2 * st2 * 0.9, 26 - (26 - 9) * st2 * st2]);
+      }
+      track(spur, 0.13);
+    });
+    // the road corridor itself — history of the convoy, painted under the mesh
+    mx2.strokeStyle = 'rgba(90,70,48,0.12)';
+    mx2.lineWidth = 11;
+    mx2.beginPath(); mx2.moveTo(0, mpz(26)); mx2.lineTo(2048, mpz(26)); mx2.stroke();
+    [-2.2, 2.2].forEach(function (rz2) {
+      mx2.strokeStyle = 'rgba(84,64,44,0.18)';
+      mx2.lineWidth = 2;
+      mx2.beginPath(); mx2.moveTo(0, mpz(26 + rz2)); mx2.lineTo(2048, mpz(26 + rz2)); mx2.stroke();
+    });
+    // THE AUTHORITY'S DATUM — chalk circles every 25 m, cardinal lines, a survey stencil
+    mx2.strokeStyle = 'rgba(242,238,226,0.62)';
+    mx2.setLineDash([8, 7]);
+    [25, 50, 75, 100].forEach(function (dr2) {
+      mx2.lineWidth = dr2 === 100 ? 2.6 : 1.6;
+      mx2.beginPath(); mx2.arc(1024, 1024, dr2 * MSC, 0, 6.3); mx2.stroke();
+    });
+    mx2.setLineDash([]);
+    mx2.lineWidth = 1.7;
+    mx2.beginPath();
+    mx2.moveTo(mpx(-112), 1024); mx2.lineTo(mpx(112), 1024);
+    mx2.moveTo(1024, mpz(-112)); mx2.lineTo(1024, mpz(112));
+    mx2.stroke();
+    mx2.fillStyle = 'rgba(242,238,226,0.55)';
+    mx2.font = '700 34px Menlo, monospace';
+    mx2.textAlign = 'center';
+    mx2.fillText('RANGE 7', 1024, mpz(-122));
+    mx2.font = '700 24px Menlo, monospace';
+    mx2.fillText('N', 1024, mpz(-104));
+    // edge fade: the skin dissolves before the clamped border
+    var fade = mx2.createRadialGradient(1024, 1024, 860, 1024, 1024, 1015);
+    fade.addColorStop(0, 'rgba(0,0,0,0)');
+    fade.addColorStop(1, 'rgba(0,0,0,1)');
+    mx2.globalCompositeOperation = 'destination-out';
+    mx2.fillStyle = fade;
+    mx2.fillRect(0, 0, 2048, 2048);
+    mx2.clearRect(0, 0, 2048, 8); mx2.clearRect(0, 2040, 2048, 8);
+    mx2.clearRect(0, 0, 8, 2048); mx2.clearRect(2040, 0, 8, 2048);
+    mx2.globalCompositeOperation = 'source-over';
+    var macroTex = new THREE.CanvasTexture(mcv);
+    macroTex.wrapS = macroTex.wrapT = THREE.ClampToEdgeWrapping;
+    var MREP = 6000 / MSPAN;                            // whole plane → central MSPAN metres
+    macroTex.repeat.set(MREP, MREP);
+    macroTex.offset.set((1 - MREP) / 2, (1 - MREP) / 2);
+    macroTex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    macroTex.encoding = THREE.sRGBEncoding;
+    var terrainMacro = new THREE.Mesh(tg, new THREE.MeshLambertMaterial({
+      map: macroTex, transparent: true, depthWrite: false,
+      polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+    terrainMacro.rotation.x = -Math.PI / 2;
+    terrainMacro.renderOrder = -2;                      // under every decal and scar
+    scene.add(terrainMacro);
+
     // THE SKY — a real dome, not a backdrop: gradient by hour, a sun with a
     // disc and a halo, and a few patient clouds. The aerial rig can look up now.
     var skyDome = new THREE.Mesh(new THREE.SphereGeometry(4200, 28, 18),
       new THREE.MeshBasicMaterial({ side: THREE.BackSide, fog: false, depthWrite: false }));
     scene.add(skyDome);
+    // the sun gets a real disc: hard core, warm falloff halo — not an FX flash
+    var sunCv = document.createElement('canvas');
+    sunCv.width = sunCv.height = 256;
+    var sctx = sunCv.getContext('2d');
+    var sg2 = sctx.createRadialGradient(128, 128, 4, 128, 128, 128);
+    sg2.addColorStop(0, 'rgba(255,255,255,1)');
+    sg2.addColorStop(0.14, 'rgba(255,252,240,1)');
+    sg2.addColorStop(0.20, 'rgba(255,244,214,0.62)');
+    sg2.addColorStop(0.45, 'rgba(255,234,190,0.18)');
+    sg2.addColorStop(1, 'rgba(255,226,178,0)');
+    sctx.fillStyle = sg2;
+    sctx.fillRect(0, 0, 256, 256);
     var sunSpr = new THREE.Sprite(new THREE.SpriteMaterial({
-      map: fxTextures().flash, transparent: true, depthWrite: false,
-      blending: THREE.AdditiveBlending, opacity: 0.85, fog: false }));
+      map: new THREE.CanvasTexture(sunCv), transparent: true, depthWrite: false,
+      blending: THREE.AdditiveBlending, opacity: 0.9, fog: false }));
     sunSpr.scale.set(700, 700, 1);
     scene.add(sunSpr);
+    // patient desert stratocumulus: puff clusters with shaded bases
     var cloudG = new THREE.Group();
     var cloudTexC = document.createElement('canvas');
-    cloudTexC.width = 256; cloudTexC.height = 128;
+    cloudTexC.width = 512; cloudTexC.height = 192;
     var ctx2 = cloudTexC.getContext('2d');
     var cR = PG2.stream('RANGE', 'clouds');
-    for (var cb = 0; cb < 26; cb++) {
-      var cg = ctx2.createRadialGradient(40 + cR() * 176, 40 + cR() * 48, 2, 40 + cR() * 176, 44 + cR() * 40, 22 + cR() * 26);
-      cg.addColorStop(0, 'rgba(255,255,255,0.55)');
+    for (var cb = 0; cb < 40; cb++) {
+      var ccx = 60 + cR() * 392, ccy = 56 + cR() * 70, ccr = 24 + cR() * 34;
+      var cg = ctx2.createRadialGradient(ccx, ccy - ccr * 0.2, 2, ccx, ccy, ccr);
+      cg.addColorStop(0, 'rgba(255,255,255,0.6)');
+      cg.addColorStop(0.6, 'rgba(255,255,255,0.28)');
       cg.addColorStop(1, 'rgba(255,255,255,0)');
       ctx2.fillStyle = cg;
-      ctx2.fillRect(0, 0, 256, 128);
+      ctx2.fillRect(0, 0, 512, 192);
     }
+    // flat shaded bases: the desert sky's signature
+    ctx2.globalCompositeOperation = 'source-atop';
+    var cbg = ctx2.createLinearGradient(0, 40, 0, 180);
+    cbg.addColorStop(0, 'rgba(255,255,255,0)');
+    cbg.addColorStop(1, 'rgba(150,132,128,0.5)');
+    ctx2.fillStyle = cbg;
+    ctx2.fillRect(0, 0, 512, 192);
+    ctx2.globalCompositeOperation = 'source-over';
     var cloudTex = new THREE.CanvasTexture(cloudTexC);
-    for (var cl = 0; cl < 7; cl++) {
+    for (var cl = 0; cl < 8; cl++) {
       var cs = new THREE.Sprite(new THREE.SpriteMaterial({
         map: cloudTex, transparent: true, depthWrite: false, opacity: 0.5, fog: false }));
       var ca = cR() * Math.PI * 2;
       var cd = 1400 + cR() * 1800;
-      cs.position.set(Math.cos(ca) * cd, 320 + cR() * 420, Math.sin(ca) * cd - 600);
-      var csw = 500 + cR() * 700;
-      cs.scale.set(csw, csw * 0.32, 1);
+      cs.position.set(Math.cos(ca) * cd, 340 + cR() * 460, Math.sin(ca) * cd - 600);
+      var csw = 620 + cR() * 820;
+      cs.scale.set(csw, csw * 0.26, 1);
       cloudG.add(cs);
     }
     scene.add(cloudG);
@@ -4331,25 +4624,68 @@
     // creosote scrub, rocks and survey stakes, seeded so the desert is always the same desert
     var dressG = new THREE.Group();
     var dRand = PG2.stream('RANGE', 'dressing');
-    for (var di = 0; di < 64; di++) {
+    // the dry wash line (must match the macro skin painting below)
+    var washLine = [[-430, -430], [-290, -190], [-205, -55], [-140, 140], [-40, 300], [130, 460]];
+    function washDist(wx2, wz2) {
+      var best = 1e9;
+      for (var wl = 0; wl < washLine.length; wl++) {
+        var dd = Math.hypot(wx2 - washLine[wl][0], wz2 - washLine[wl][1]);
+        if (dd < best) best = dd;
+      }
+      return best;
+    }
+    var tuftMats = [mat(0x5c6038, { shin: 2 }), mat(0x6b6444, { shin: 2 }), mat(0x77704c, { shin: 2 })];
+    var rockMats = [mat(0x8a7a62, { shin: 4 }), mat(0x7a6a54, { shin: 4 })];
+    for (var di = 0; di < 150; di++) {
       var da = dRand() * Math.PI * 2;
-      var dr = 24 + Math.pow(dRand(), 0.6) * 240;
+      var dr = 24 + Math.pow(dRand(), 0.6) * 300;
       var dx2 = Math.cos(da) * dr, dz2 = Math.sin(da) * dr;
       if (Math.abs(dz2 - 26) < 9) continue;              // the road stays drivable
-      if (dRand() < 0.68) {
-        var tuft = new THREE.Mesh(new THREE.ConeGeometry(0.5 + dRand() * 0.9, 0.8 + dRand() * 1.1, 6),
-          mat(dRand() < 0.5 ? 0x5c6038 : 0x6b6444, { shin: 2 }));
-        tuft.position.set(dx2, 0.4, dz2);
-        tuft.rotation.y = dRand() * 3;
-        dressG.add(tuft);
+      var wD = washDist(dx2, dz2);
+      if (wD < 11) continue;                             // nothing grows in the channel
+      if (dr < 92 && dRand() < 0.8) continue;            // the playa is bare clay
+      // scrub crowds the wash banks where the water was
+      if (wD > 60 && dRand() < 0.34) continue;
+      if (dRand() < 0.7) {
+        var tuftG = new THREE.Group();
+        var tm = tuftMats[Math.floor(dRand() * 3)];
+        var t1 = new THREE.Mesh(new THREE.ConeGeometry(0.5 + dRand() * 0.8, 0.8 + dRand() * 1.0, 6), tm);
+        t1.position.y = 0.4;
+        tuftG.add(t1);
+        var t2 = new THREE.Mesh(new THREE.ConeGeometry(0.3 + dRand() * 0.4, 0.5 + dRand() * 0.6, 5), tm);
+        t2.position.set(0.4 + dRand() * 0.3, 0.28, (dRand() - 0.5) * 0.6);
+        tuftG.add(t2);
+        tuftG.position.set(dx2, 0, dz2);
+        tuftG.rotation.y = dRand() * 3;
+        var ts2 = 0.8 + dRand() * 0.5;
+        tuftG.scale.set(ts2, ts2, ts2);
+        dressG.add(tuftG);
       } else {
         var rock = new THREE.Mesh(new THREE.DodecahedronGeometry(0.5 + dRand() * 1.1, 0),
-          mat(0x8a7a62, { shin: 4 }));
+          rockMats[Math.floor(dRand() * 2)]);
         rock.position.set(dx2, 0.3, dz2);
         rock.rotation.set(dRand() * 3, dRand() * 3, dRand() * 3);
         rock.scale.y = 0.55;
         dressG.add(rock);
       }
+    }
+    // a few proper outcrops in the middle distance — anchors for the aerial eye
+    for (var oc = 0; oc < 5; oc++) {
+      var oa = dRand() * Math.PI * 2;
+      var od = 180 + dRand() * 240;
+      var ox2 = Math.cos(oa) * od, oz2 = Math.sin(oa) * od;
+      if (Math.abs(oz2 - 26) < 16 || washDist(ox2, oz2) < 24) continue;
+      var outG = new THREE.Group();
+      for (var ob = 0; ob < 4; ob++) {
+        var slabR = new THREE.Mesh(new THREE.DodecahedronGeometry(1.6 + dRand() * 2.6, 0),
+          rockMats[ob % 2]);
+        slabR.position.set((dRand() - 0.5) * 5, 0.5 + dRand() * 0.7, (dRand() - 0.5) * 5);
+        slabR.rotation.set(dRand() * 3, dRand() * 3, dRand() * 3);
+        slabR.scale.y = 0.4 + dRand() * 0.25;
+        outG.add(slabR);
+      }
+      outG.position.set(ox2, 0, oz2);
+      dressG.add(outG);
     }
     // survey stakes on the cardinal lines every 25 m — the aerial ruler
     [25, 50, 75, 100].forEach(function (sd) {
@@ -4366,51 +4702,274 @@
     dressG.traverse(function (m) { if (m.isMesh) m.castShadow = true; });
     scene.add(dressG);
 
-    // mesas — four ridge lines now, blue-shifting into the fog with distance
-    var mesas = [];
-    [{ z: -900, h: 48, sp: 2200 }, { z: -1500, h: 74, sp: 3000 },
-     { z: -2200, h: 104, sp: 4200 }, { z: -3050, h: 128, sp: 5800 }].forEach(function (m, mi) {
-      var pts = [], n = 26;
-      for (var i = 0; i <= n; i++) {
-        var x = -m.sp / 2 + m.sp * i / n;
-        var hh = (Math.sin(i * 2.3 + mi * 5) * 0.5 + 0.5) * m.h * (i % 5 === 2 ? 1 : 0.55) + 8;
-        pts.push({ x: x, h: hh });
+    // mesas — four ridge lines of true table-rock: flat caprock tops, talus slopes,
+    // painted strata banding on a canvas skin, blue-shifting into the fog
+    var strataCv = document.createElement('canvas');
+    strataCv.width = 256; strataCv.height = 256;
+    var stx = strataCv.getContext('2d');
+    var stR = PG2.stream('RANGE', 'strata');
+    // near-white base so the palette tint owns the hue; value does the drawing
+    stx.fillStyle = '#ddd2c4';
+    stx.fillRect(0, 0, 256, 256);
+    // caprock: a dark decisive band at the very top (canvas top = mesa top)
+    stx.fillStyle = 'rgba(74,60,50,0.5)';
+    stx.fillRect(0, 0, 256, 10);
+    stx.fillStyle = 'rgba(255,246,232,0.45)';
+    stx.fillRect(0, 10, 256, 5);                        // sunlit ledge under the cap
+    // strata bands down the cliff face
+    var sy = 18;
+    while (sy < 176) {
+      var bh = 4 + stR() * 14;
+      var dark = stR() < 0.45;
+      stx.fillStyle = dark ? 'rgba(96,78,62,' + (0.14 + stR() * 0.2) + ')'
+                           : 'rgba(255,244,226,' + (0.10 + stR() * 0.16) + ')';
+      stx.fillRect(0, sy, 256, bh);
+      if (dark && stR() < 0.6) {                        // shadowed ledge line
+        stx.fillStyle = 'rgba(60,48,40,0.3)';
+        stx.fillRect(0, sy, 256, 1.5);
       }
+      sy += bh + stR() * 6;
+    }
+    // talus apron: smooth light scree fading to the desert floor
+    var tg2 = stx.createLinearGradient(0, 168, 0, 256);
+    tg2.addColorStop(0, 'rgba(232,220,202,0)');
+    tg2.addColorStop(1, 'rgba(240,230,212,0.85)');
+    stx.fillStyle = tg2;
+    stx.fillRect(0, 168, 256, 88);
+    // vertical erosion streaks
+    stx.globalAlpha = 0.12;
+    for (var es = 0; es < 60; es++) {
+      stx.strokeStyle = stR() < 0.5 ? '#7a6450' : '#f0e6d4';
+      stx.lineWidth = 1 + stR() * 2.5;
+      var ex2 = stR() * 256;
+      stx.beginPath();
+      stx.moveTo(ex2, 8 + stR() * 30);
+      stx.lineTo(ex2 + (stR() * 14 - 7), 140 + stR() * 90);
+      stx.stroke();
+    }
+    stx.globalAlpha = 1;
+    var mesas = [];
+    var mesaR = PG2.stream('RANGE', 'mesas');
+    [{ z: -900, h: 52, sp: 2200 }, { z: -1500, h: 78, sp: 3000 },
+     { z: -2200, h: 108, sp: 4200 }, { z: -3050, h: 132, sp: 5800 }].forEach(function (m, mi) {
+      // silhouette walk: plateau tables joined by talus saddles
+      var pts = [], xw = -m.sp / 2;
+      pts.push({ x: xw, h: 6 });
+      while (xw < m.sp / 2 - m.sp * 0.1) {
+        var run = m.sp * (0.06 + mesaR() * 0.10);
+        var isMesa = mesaR() < 0.48;
+        if (isMesa) {
+          var th = m.h * (0.52 + mesaR() * 0.48);
+          var shoulder = run * (0.16 + mesaR() * 0.1);
+          xw += shoulder; pts.push({ x: xw, h: th * 0.55 });        // talus toe
+          xw += shoulder * 0.4; pts.push({ x: xw, h: th });         // cliff to cap
+          var topRun = run * (0.5 + mesaR() * 0.5);
+          xw += topRun; pts.push({ x: xw, h: th * (0.96 + mesaR() * 0.04) });  // the table
+          xw += shoulder * 0.4; pts.push({ x: xw, h: th * 0.5 });
+          xw += shoulder; pts.push({ x: xw, h: m.h * (0.08 + mesaR() * 0.08) });
+        } else {
+          xw += run;
+          pts.push({ x: xw, h: m.h * (0.06 + mesaR() * 0.16) });    // low saddle
+        }
+      }
+      pts.push({ x: m.sp / 2, h: 6 });
       var shape = new THREE.Shape();
       shape.moveTo(pts[0].x, 0);
       pts.forEach(function (p2) { shape.lineTo(p2.x, p2.h); });
-      shape.lineTo(pts[n].x, 0);
+      shape.lineTo(pts[pts.length - 1].x, 0);
       shape.closePath();
-      var geo = new THREE.ExtrudeGeometry(shape, { depth: 60, bevelEnabled: false });
-      var mesh = new THREE.Mesh(geo, mat(0xb08258, { shin: 2 }));
+      var geo = new THREE.ExtrudeGeometry(shape, { depth: 70, bevelEnabled: false });
+      var mtex = new THREE.CanvasTexture(strataCv);
+      mtex.wrapS = THREE.RepeatWrapping;
+      mtex.wrapT = THREE.ClampToEdgeWrapping;
+      mtex.encoding = THREE.sRGBEncoding;
+      // ExtrudeGeometry UVs are shape coordinates: scale so v spans the ridge height
+      mtex.repeat.set(1 / 620, 1 / (m.h * 1.04));
+      var mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ color: 0xb08258, map: mtex }));
       mesh.position.set(0, 0, m.z);
       scene.add(mesh);
       mesas.push(mesh);
     });
+    // haze bands — the distance made visible: soft air pooled in front of the ridges
+    var hazeCv = document.createElement('canvas');
+    hazeCv.width = 16; hazeCv.height = 128;
+    var hcx = hazeCv.getContext('2d');
+    var hg2 = hcx.createLinearGradient(0, 0, 0, 128);
+    hg2.addColorStop(0, 'rgba(255,255,255,0)');
+    hg2.addColorStop(0.55, 'rgba(255,255,255,0.5)');
+    hg2.addColorStop(1, 'rgba(255,255,255,0.9)');
+    hcx.fillStyle = hg2;
+    hcx.fillRect(0, 0, 16, 128);
+    var hazeTex = new THREE.CanvasTexture(hazeCv);
+    var hazeBands = [];
+    [{ z: -860, h: 190 }, { z: -1950, h: 340 }].forEach(function (hb) {
+      var hm = new THREE.Mesh(new THREE.PlaneGeometry(6000, hb.h),
+        new THREE.MeshBasicMaterial({ map: hazeTex, color: 0xe8a97e, transparent: true,
+          opacity: 0.36, depthWrite: false, fog: false }));
+      hm.position.set(0, hb.h * 0.4, hb.z);
+      scene.add(hm);
+      hazeBands.push(hm);
+    });
 
-    // pad
+    // painted contact shadows — one shared radial decal grounds everything
+    var ctCv = document.createElement('canvas');
+    ctCv.width = ctCv.height = 128;
+    var ctx3 = ctCv.getContext('2d');
+    var ctg = ctx3.createRadialGradient(64, 64, 4, 64, 64, 62);
+    ctg.addColorStop(0, 'rgba(28,20,12,0.5)');
+    ctg.addColorStop(0.6, 'rgba(28,20,12,0.28)');
+    ctg.addColorStop(1, 'rgba(28,20,12,0)');
+    ctx3.fillStyle = ctg;
+    ctx3.fillRect(0, 0, 128, 128);
+    var ctTex = new THREE.CanvasTexture(ctCv);
+    function contactShadow(r, x, z, sx) {
+      var m = new THREE.Mesh(new THREE.PlaneGeometry(r * 2 * (sx || 1), r * 2),
+        new THREE.MeshBasicMaterial({ map: ctTex, transparent: true, depthWrite: false }));
+      m.rotation.x = -Math.PI / 2;
+      m.position.set(x, 0.07, z);
+      return m;
+    }
+
+    // THE PAD — a real concrete apron: expansion joints, stains, stencils, a datum ring
+    var padCv = document.createElement('canvas');
+    padCv.width = padCv.height = 1024;
+    var pcx = padCv.getContext('2d');
+    var pR = PG2.stream('RANGE', 'padskin');
+    pcx.fillStyle = '#c8c2b2';
+    pcx.fillRect(0, 0, 1024, 1024);
+    for (var pn = 0; pn < 4200; pn++) {                 // aggregate noise
+      var pv = 164 + Math.floor(pR() * 56);
+      pcx.fillStyle = 'rgb(' + pv + ',' + Math.round(pv * 0.985) + ',' + Math.round(pv * 0.94) + ')';
+      pcx.globalAlpha = 0.10 + pR() * 0.16;
+      pcx.fillRect(pR() * 1024, pR() * 1024, 1 + pR() * 2.5, 1 + pR() * 2.5);
+    }
+    pcx.globalAlpha = 1;
+    // expansion joints: 4×4 panels, shadow line + sun-caught chamfer
+    for (var pj = 1; pj < 4; pj++) {
+      var jp = pj * 256;
+      pcx.fillStyle = 'rgba(60,55,48,0.4)';
+      pcx.fillRect(jp - 2, 0, 4, 1024);
+      pcx.fillRect(0, jp - 2, 1024, 4);
+      pcx.fillStyle = 'rgba(240,236,226,0.32)';
+      pcx.fillRect(jp + 2, 0, 2, 1024);
+      pcx.fillRect(0, jp + 2, 1024, 2);
+    }
+    // panel-corner wear + a few chips
+    for (var pw = 0; pw < 26; pw++) {
+      var wx2 = pR() * 1024, wy2 = pR() * 1024;
+      var wg2 = pcx.createRadialGradient(wx2, wy2, 1, wx2, wy2, 10 + pR() * 26);
+      wg2.addColorStop(0, 'rgba(92,84,70,' + (0.12 + pR() * 0.18) + ')');
+      wg2.addColorStop(1, 'rgba(92,84,70,0)');
+      pcx.fillStyle = wg2;
+      pcx.fillRect(0, 0, 1024, 1024);
+    }
+    // oil bleed where the trestle stands + scorch history
+    var oil = pcx.createRadialGradient(560, 480, 4, 560, 480, 90);
+    oil.addColorStop(0, 'rgba(38,32,24,0.36)');
+    oil.addColorStop(1, 'rgba(38,32,24,0)');
+    pcx.fillStyle = oil;
+    pcx.fillRect(0, 0, 1024, 1024);
+    // tire scuff arcs
+    pcx.strokeStyle = 'rgba(52,46,38,0.18)';
+    for (var psc = 0; psc < 8; psc++) {
+      pcx.lineWidth = 5 + pR() * 7;
+      pcx.beginPath();
+      pcx.arc(300 + pR() * 500, 640 + pR() * 300, 120 + pR() * 200, pR() * 3, pR() * 3 + 0.5 + pR() * 0.8);
+      pcx.stroke();
+    }
+    // the Authority's paint: amber datum ring, centre cross, hazard band, stencils
+    pcx.strokeStyle = 'rgba(216,158,58,0.85)';
+    pcx.lineWidth = 10;
+    pcx.beginPath(); pcx.arc(512, 512, 190, 0, 6.3); pcx.stroke();
+    pcx.strokeStyle = 'rgba(238,234,222,0.8)';
+    pcx.lineWidth = 6;
+    pcx.beginPath();
+    pcx.moveTo(512 - 70, 512); pcx.lineTo(512 + 70, 512);
+    pcx.moveTo(512, 512 - 70); pcx.lineTo(512, 512 + 70);
+    pcx.stroke();
+    pcx.save();                                          // hazard chevrons, south edge
+    pcx.beginPath(); pcx.rect(0, 960, 1024, 64); pcx.clip();
+    for (var hz = -2; hz < 18; hz++) {
+      pcx.fillStyle = hz % 2 ? 'rgba(216,158,58,0.85)' : 'rgba(40,38,34,0.8)';
+      pcx.beginPath();
+      pcx.moveTo(hz * 64, 1024); pcx.lineTo(hz * 64 + 64, 960);
+      pcx.lineTo(hz * 64 + 128, 960); pcx.lineTo(hz * 64 + 64, 1024);
+      pcx.fill();
+    }
+    pcx.restore();
+    pcx.fillStyle = 'rgba(235,231,220,0.78)';
+    pcx.font = '700 64px Menlo, monospace';
+    pcx.textAlign = 'center';
+    pcx.fillText('PAD A', 512, 160);
+    pcx.font = '700 30px Menlo, monospace';
+    pcx.fillStyle = 'rgba(235,231,220,0.5)';
+    pcx.fillText('AUTHORITY SURVEY 7-41 · NO SMOKING', 512, 890);
+    // painted edge AO: the slab sits IN the desert, not on it
+    pcx.fillStyle = 'rgba(70,62,52,0.30)';
+    pcx.fillRect(0, 0, 1024, 14); pcx.fillRect(0, 1010, 1024, 14);
+    pcx.fillRect(0, 0, 14, 1024); pcx.fillRect(1010, 0, 14, 1024);
+    var padTex = new THREE.CanvasTexture(padCv);
+    padTex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    padTex.encoding = THREE.sRGBEncoding;
     var pad = new THREE.Group();
-    var slab = new THREE.Mesh(new THREE.BoxGeometry(10, 0.6, 10), mat(0xb9b3a4, { shin: 4 }));
+    var padSideM = mat(0x9d978a, { shin: 3 });
+    var padTopM = new THREE.MeshLambertMaterial({ map: padTex });
+    var slab = new THREE.Mesh(new THREE.BoxGeometry(15, 0.6, 15),
+      [padSideM, padSideM, padTopM, padSideM, padSideM, padSideM]);
     slab.position.y = 0.3;
+    slab.receiveShadow = true;
     pad.add(slab);
-    var mast = new THREE.Mesh(new THREE.BoxGeometry(0.5, 7, 0.5), mat(0x8f2f24));
+    pad.add(contactShadow(9.6, 0, 0.4, 1.06));
+    // the mast: candy-striped so the theodolites have something to argue about
+    var mastCv = document.createElement('canvas');
+    mastCv.width = 32; mastCv.height = 128;
+    var mcx2 = mastCv.getContext('2d');
+    for (var msb = 0; msb < 8; msb++) {
+      mcx2.fillStyle = msb % 2 ? '#e8e2d4' : '#b03426';
+      mcx2.fillRect(0, msb * 16, 32, 16);
+    }
+    var mastTex = new THREE.CanvasTexture(mastCv);
+    mastTex.encoding = THREE.sRGBEncoding;
+    var mast = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.22, 7, 8),
+      new THREE.MeshLambertMaterial({ map: mastTex }));
     mast.position.set(-4.5, 3.5, -4);
+    mast.castShadow = true;
     pad.add(mast);
+    var mastTip = new THREE.Mesh(new THREE.SphereGeometry(0.24, 8, 6), mat(0xd8dde2, { shin: 60 }));
+    mastTip.position.set(-4.5, 7.1, -4);
+    pad.add(mastTip);
     scene.add(pad);
 
-    // pad dressing — sandbags and cable runs (consumed by any real detonation)
+    // pad dressing — sandbag ring, junction gear, cable runs (consumed by any real detonation)
     var padDress = new THREE.Group();
     var bagRand = PG2.stream('RANGE', 'bags');
-    for (var bi = 0; bi < 9; bi++) {
-      var bag = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.55, 0.8), mat(0xa89468, { shin: 3 }));
-      var ba = 2.2 + bi * 0.16 + bagRand() * 0.1;
-      bag.position.set(14 + Math.cos(ba) * 3.2 + bagRand(), 0.28 + (bi % 3 === 2 ? 0.5 : 0), 8 + Math.sin(ba) * 2.4);
-      bag.rotation.y = bagRand() * 0.8;
+    var bagMats = [mat(0xa89468, { shin: 3 }), mat(0x9c8a60, { shin: 3 }), mat(0xb29e74, { shin: 3 })];
+    // a proper two-course ring around the instrument point
+    for (var bi = 0; bi < 14; bi++) {
+      var ba = (bi / 14) * Math.PI * 2;
+      var bag = new THREE.Mesh(new THREE.BoxGeometry(1.35, 0.5, 0.75), bagMats[bi % 3]);
+      bag.position.set(14.5 + Math.cos(ba) * 3.1, 0.26, 7.6 + Math.sin(ba) * 2.6);
+      bag.rotation.y = -ba + bagRand() * 0.3;
+      bag.rotation.z = (bagRand() - 0.5) * 0.08;
       padDress.add(bag);
+      if (bi % 2 === 0) {
+        var bag2 = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.48, 0.72), bagMats[(bi + 1) % 3]);
+        bag2.position.set(14.5 + Math.cos(ba + 0.22) * 3.05, 0.74, 7.6 + Math.sin(ba + 0.22) * 2.55);
+        bag2.rotation.y = -ba + 0.3 + bagRand() * 0.3;
+        padDress.add(bag2);
+      }
     }
+    padDress.add(contactShadow(4.6, 14.5, 7.6, 1.15));
     var jbox = new THREE.Mesh(new THREE.BoxGeometry(1.1, 1, 0.8), mat(0x445260, { shin: 10 }));
     jbox.position.set(14.5, 0.5, 7.4);
     padDress.add(jbox);
+    var jboxLid = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.08, 0.9), mat(0x37424e, { shin: 16 }));
+    jboxLid.position.set(14.5, 1.03, 7.4);
+    padDress.add(jboxLid);
+    var jlamp = new THREE.Mesh(new THREE.SphereGeometry(0.09, 6, 5), mat(0xc94f38, { emissive: 0xc94f38, ei: 0.8 }));
+    jlamp.position.set(14.9, 1.14, 7.4);
+    padDress.add(jlamp);
+    // cable runs snake across the playa — firing line, instrument line, camera line
     var cablePts = [V3(-4.5, 0.12, -3), V3(2, 0.1, 4), V3(9, 0.1, 6.4), V3(14.2, 0.12, 7.2)];
     var cable = new THREE.Mesh(
       new THREE.TubeGeometry(new THREE.CatmullRomCurve3(cablePts), 20, 0.07, 5, false),
@@ -4420,34 +4979,212 @@
       new THREE.TubeGeometry(new THREE.CatmullRomCurve3([V3(14.6, 0.12, 7.8), V3(30, 0.1, 22), V3(52, 0.1, 44)]), 12, 0.06, 5, false),
       mat(0x1d232a, { shin: 8 }));
     padDress.add(cable2);
+    var cable3 = new THREE.Mesh(                        // to the blockhouse
+      new THREE.TubeGeometry(new THREE.CatmullRomCurve3(
+        [V3(13.9, 0.1, 7.9), V3(2, 0.09, 14), V3(-16, 0.1, 24), V3(-30, 0.1, 36), V3(-36.5, 0.12, 42.5)]), 22, 0.06, 5, false),
+      mat(0x232019, { shin: 6 }));
+    padDress.add(cable3);
+    var cable4 = new THREE.Mesh(                        // to the camera tower
+      new THREE.TubeGeometry(new THREE.CatmullRomCurve3(
+        [V3(14.8, 0.1, 6.9), V3(19, 0.09, -2), V3(24, 0.1, -10), V3(26.5, 0.12, -15)]), 14, 0.055, 5, false),
+      mat(0x232019, { shin: 6 }));
+    padDress.add(cable4);
     scene.add(padDress);
 
-    // further out (survives the blast): wind sock, bunker, the volunteer's helmet on a post
+    // further out (survives the blast): wind sock, blockhouse, camera tower,
+    // light poles with warm heads, and the volunteer's helmet on a post
     var farDress = new THREE.Group();
-    var wsPole = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.12, 7, 8), mat(0xd8dde2, { shin: 30 }));
+    var wsPole = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.13, 7, 8), mat(0xd8dde2, { shin: 30 }));
     wsPole.position.set(-46, 3.5, -22);
+    wsPole.castShadow = true;
     farDress.add(wsPole);
+    farDress.add(contactShadow(1.1, -46, -22));
+    // the sock itself: segmented, half traffic-orange, half bleached — FAA by way of the Authority
     var sock = new THREE.Group();
-    var sockCone = new THREE.Mesh(new THREE.ConeGeometry(0.55, 3.2, 8, 1, true), mat(0xe07b2a, { shin: 6 }));
-    sockCone.rotation.z = Math.PI / 2;
-    sockCone.position.x = 1.6;
-    sock.add(sockCone);
+    var sockR = [0.5, 0.42, 0.34, 0.27, 0.19];
+    for (var sg3 = 0; sg3 < 4; sg3++) {
+      var seg = new THREE.Mesh(new THREE.CylinderGeometry(sockR[sg3 + 1], sockR[sg3], 0.82, 8, 1, true),
+        mat(sg3 % 2 ? 0xf2ede0 : 0xe8641e, { shin: 5 }));
+      seg.rotation.z = -Math.PI / 2;
+      seg.position.x = 0.55 + sg3 * 0.82;
+      sock.add(seg);
+    }
+    var sockRing = new THREE.Mesh(new THREE.TorusGeometry(0.5, 0.035, 5, 12), mat(0x8f9aa5, { shin: 40 }));
+    sockRing.rotation.y = Math.PI / 2;
+    sockRing.position.x = 0.14;
+    sock.add(sockRing);
+    var swivel = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.3, 8), mat(0x6a737c, { shin: 30 }));
+    sock.add(swivel);
     sock.position.set(-46, 6.8, -22);
     sock.rotation.z = -1.05;
     farDress.add(sock);
-    var bunker = new THREE.Mesh(new THREE.BoxGeometry(9, 2.4, 5), mat(0x8a7a58, { shin: 2 }));
-    bunker.position.set(-38, 1.0, 44);
-    bunker.rotation.y = 0.3;
-    farDress.add(bunker);
-    var slit = new THREE.Mesh(new THREE.BoxGeometry(4.6, 0.5, 0.3), mat(0x14181d, { shin: 2 }));
-    slit.position.set(-37.2, 1.7, 46.4);
-    slit.rotation.y = 0.3;
-    farDress.add(slit);
+    // THE BLOCKHOUSE — cast concrete, slit window, earth berms; where the brave hide
+    var bhG = new THREE.Group();
+    var bhCv = document.createElement('canvas');
+    bhCv.width = 512; bhCv.height = 256;
+    var bcx = bhCv.getContext('2d');
+    bcx.fillStyle = '#a29478';
+    bcx.fillRect(0, 0, 512, 256);
+    var bR = PG2.stream('RANGE', 'blockhouse');
+    for (var bn2 = 0; bn2 < 900; bn2++) {
+      var bl2 = 135 + Math.floor(bR() * 50);
+      bcx.fillStyle = 'rgb(' + bl2 + ',' + Math.round(bl2 * 0.93) + ',' + Math.round(bl2 * 0.78) + ')';
+      bcx.globalAlpha = 0.12 + bR() * 0.14;
+      bcx.fillRect(bR() * 512, bR() * 256, 1 + bR() * 3, 1 + bR() * 3);
+    }
+    bcx.globalAlpha = 1;
+    for (var fb = 1; fb < 5; fb++) {                    // formwork board lines
+      bcx.fillStyle = 'rgba(70,60,46,0.25)';
+      bcx.fillRect(0, fb * 50, 512, 2);
+    }
+    bcx.fillStyle = 'rgba(24,26,30,0.95)';              // the slit, painted deep
+    bcx.fillRect(96, 60, 320, 30);
+    bcx.fillStyle = 'rgba(240,236,226,0.25)';
+    bcx.fillRect(96, 92, 320, 3);                       // sill catch-light
+    var dg2 = bcx.createLinearGradient(0, 150, 0, 256); // dust gradient at grade
+    dg2.addColorStop(0, 'rgba(120,96,64,0)');
+    dg2.addColorStop(1, 'rgba(120,96,64,0.5)');
+    bcx.fillStyle = dg2;
+    bcx.fillRect(0, 150, 512, 106);
+    [70, 260, 430].forEach(function (sx2) {             // rain-streaks off the roofline
+      bcx.fillStyle = 'rgba(74,64,50,0.28)';
+      bcx.fillRect(sx2, 0, 4 + bR() * 5, 40 + bR() * 90);
+    });
+    bcx.fillStyle = 'rgba(235,231,220,0.7)';
+    bcx.font = '700 26px Menlo, monospace';
+    bcx.textAlign = 'left';
+    bcx.fillText('OBS 1', 24, 140);
+    bcx.font = '700 13px Menlo, monospace';
+    bcx.fillStyle = 'rgba(216,158,58,0.75)';
+    bcx.fillText('LOT 7-1148 · RATED 40 KT·M', 24, 162);
+    var bhTex = new THREE.CanvasTexture(bhCv);
+    bhTex.encoding = THREE.sRGBEncoding;
+    var bhPlainM = mat(0x94886c, { shin: 2 });
+    var bhFrontM = new THREE.MeshLambertMaterial({ map: bhTex });
+    var bunker = new THREE.Mesh(new THREE.BoxGeometry(9, 2.6, 5),
+      [bhPlainM, bhPlainM, bhPlainM, bhPlainM, bhFrontM, bhPlainM]);
+    bunker.position.y = 1.1;
+    bunker.castShadow = true;
+    bhG.add(bunker);
+    var bhRoof = new THREE.Mesh(new THREE.BoxGeometry(9.7, 0.45, 5.7), mat(0x86795e, { shin: 2 }));
+    bhRoof.position.y = 2.6;
+    bhRoof.castShadow = true;
+    bhG.add(bhRoof);
+    [-1, 1].forEach(function (bs) {                      // earth berms shoulder the walls
+      var berm = new THREE.Mesh(new THREE.BoxGeometry(2.6, 2.0, 5.4), mat(0x97835f, { shin: 2 }));
+      berm.position.set(bs * 5.1, 0.6, 0);
+      berm.rotation.z = bs * 0.42;
+      bhG.add(berm);
+    });
+    var vent = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 1.0, 6), mat(0x5a6068, { shin: 20 }));
+    vent.position.set(-2.6, 3.2, -0.8);
+    bhG.add(vent);
+    var whip = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.045, 4.2, 5), mat(0x2e343a, { shin: 40 }));
+    whip.position.set(3.6, 4.8, -1.4);
+    bhG.add(whip);
+    bhG.add(contactShadow(6.4, 0, 0.3, 1.5));
+    bhG.position.set(-38, 0, 44);
+    bhG.rotation.y = 0.3;
+    farDress.add(bhG);
+    // THE CAMERA TOWER — a lattice with a Fastax shack on top; film is the only witness
+    var twr = new THREE.Group();
+    var twrM = mat(0x7c8288, { shin: 26 });
+    var twrH = 12.5, twrB = 1.45, twrT = 0.8;
+    [[1, 1], [1, -1], [-1, 1], [-1, -1]].forEach(function (cn) {
+      var leg = new THREE.Mesh(new THREE.BoxGeometry(0.15, twrH, 0.15), twrM);
+      leg.position.set(cn[0] * (twrB + twrT) / 2, twrH / 2, cn[1] * (twrB + twrT) / 2);
+      leg.rotation.z = -cn[0] * Math.atan((twrB - twrT) / twrH);
+      leg.rotation.x = cn[1] * Math.atan((twrB - twrT) / twrH);
+      leg.castShadow = true;
+      twr.add(leg);
+    });
+    for (var lv = 1; lv <= 3; lv++) {
+      var ly = lv * twrH / 4;
+      var lw = twrB - (twrB - twrT) * ly / twrH;
+      [[0, 1], [0, -1], [1, 0], [-1, 0]].forEach(function (fc) {
+        var girt = new THREE.Mesh(new THREE.BoxGeometry(fc[1] ? lw * 2 : 0.1, 0.09, fc[0] ? lw * 2 : 0.1), twrM);
+        girt.position.set(fc[0] * lw, ly, fc[1] * lw);
+        twr.add(girt);
+      });
+      [1, -1].forEach(function (dg3) {                   // X-bracing on the camera faces
+        var diag = new THREE.Mesh(new THREE.BoxGeometry(lw * 2.55, 0.06, 0.06), twrM);
+        diag.position.set(0, ly - twrH / 8, lw);
+        diag.rotation.z = dg3 * Math.atan((twrH / 4) / (lw * 2));
+        twr.add(diag);
+        var diag2 = diag.clone();
+        diag2.position.z = -lw;
+        twr.add(diag2);
+      });
+    }
+    var deck = new THREE.Mesh(new THREE.BoxGeometry(2.3, 0.14, 2.3), mat(0x666d74, { shin: 20 }));
+    deck.position.y = twrH;
+    deck.castShadow = true;
+    twr.add(deck);
+    [[0, 1], [0, -1], [1, 0], [-1, 0]].forEach(function (rl) {
+      var rail = new THREE.Mesh(new THREE.BoxGeometry(rl[1] ? 2.3 : 0.06, 0.06, rl[0] ? 2.3 : 0.06), twrM);
+      rail.position.set(rl[0] * 1.12, twrH + 0.95, rl[1] * 1.12);
+      twr.add(rail);
+    });
+    var camShack = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.0, 1.05), mat(0xb6ad98, { shin: 6 }));
+    camShack.position.set(-0.35, twrH + 0.57, 0);
+    camShack.castShadow = true;
+    twr.add(camShack);
+    var camLens = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.2, 0.5, 8), mat(0x1d232a, { shin: 80 }));
+    camLens.rotation.x = Math.PI / 2;
+    camLens.position.set(-0.35, twrH + 0.62, 0.75);
+    twr.add(camLens);
+    var dish = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.4, 0.16, 10), mat(0xd8dde2, { shin: 40 }));
+    dish.position.set(0.75, twrH + 1.35, -0.4);
+    dish.rotation.x = 1.1;
+    twr.add(dish);
+    twr.add(contactShadow(2.3, 0, 0.2));
+    twr.position.set(27, 0, -16);
+    twr.rotation.y = 2.55;                               // lens aimed at the pad
+    farDress.add(twr);
+    // LIGHT POLES — four warm practicals ringing the pad; dusk belongs to them
+    var practicals = [];
+    var glowCv = document.createElement('canvas');
+    glowCv.width = glowCv.height = 64;
+    var gcx = glowCv.getContext('2d');
+    var gg2 = gcx.createRadialGradient(32, 32, 2, 32, 32, 32);
+    gg2.addColorStop(0, 'rgba(255,214,150,0.9)');
+    gg2.addColorStop(0.4, 'rgba(255,190,110,0.32)');
+    gg2.addColorStop(1, 'rgba(255,180,100,0)');
+    gcx.fillStyle = gg2;
+    gcx.fillRect(0, 0, 64, 64);
+    var glowTex = new THREE.CanvasTexture(glowCv);
+    [[18, -13], [-17, -15], [-21, 14], [21, 13]].forEach(function (pp) {
+      var pole = new THREE.Group();
+      var shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.11, 6.6, 6), mat(0x4c545c, { shin: 24 }));
+      shaft.position.y = 3.3;
+      shaft.castShadow = true;
+      pole.add(shaft);
+      var arm = new THREE.Mesh(new THREE.BoxGeometry(1.15, 0.08, 0.08), mat(0x4c545c, { shin: 24 }));
+      arm.position.set(0.5, 6.5, 0);
+      pole.add(arm);
+      var headMat = new THREE.MeshPhongMaterial({
+        color: 0x3a4046, emissive: 0xffc46a, emissiveIntensity: 0, shininess: 30, flatShading: true });
+      var head = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.2, 0.32), headMat);
+      head.position.set(1.0, 6.42, 0);
+      pole.add(head);
+      var spr = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: glowTex, transparent: true, depthWrite: false,
+        blending: THREE.AdditiveBlending, opacity: 0 }));
+      spr.position.set(1.0, 6.36, 0);
+      spr.scale.set(3.4, 3.4, 1);
+      pole.add(spr);
+      pole.add(contactShadow(0.9, 0, 0));
+      pole.position.set(pp[0], 0, pp[1]);
+      pole.rotation.y = Math.atan2(pp[1], -pp[0]);       // head leans toward the pad
+      farDress.add(pole);
+      practicals.push({ mat: headMat, spr: spr });
+    });
+    // the volunteer's helmet on a post — two sizes too large, same as ever
     var post = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.14, 2.4, 7), mat(0x6b4a2a));
     post.position.set(-30, 1.2, 40);
     farDress.add(post);
     var helmet = new THREE.Mesh(new THREE.SphereGeometry(0.85, 12, 7, 0, Math.PI * 2, 0, Math.PI / 2),
-      mat(0x7a8452, { shin: 24 }));   // two sizes too large
+      mat(0x7a8452, { shin: 24 }));
     helmet.position.set(-30, 2.35, 40);
     helmet.rotation.z = 0.22;
     farDress.add(helmet);
@@ -4531,18 +5268,68 @@
 
     // convoy-only dressing: road, telephone poles, long fake dawn shadows
     var convoyG = new THREE.Group();
+    // the corridor: a painted double-track dirt road — ruts, washboard, a scrub median
+    var rdCv = document.createElement('canvas');
+    rdCv.width = 1024; rdCv.height = 128;
+    var rcx = rdCv.getContext('2d');
+    var rdR = PG2.stream('RANGE', 'road');
+    rcx.fillStyle = '#a0855e';
+    rcx.fillRect(0, 0, 1024, 128);
+    // soft edges blending into the desert
+    [[0, 16], [112, 128]].forEach(function (ed) {
+      var edg = rcx.createLinearGradient(0, ed[0], 0, ed[1]);
+      edg.addColorStop(ed[0] === 0 ? 0 : 1, 'rgba(140,116,82,0.55)');
+      edg.addColorStop(ed[0] === 0 ? 1 : 0, 'rgba(140,116,82,0)');
+      rcx.fillStyle = edg;
+      rcx.fillRect(0, ed[0], 1024, ed[1] - ed[0]);
+    });
+    // the two wheel tracks: compacted pale centres with dark rut shoulders
+    [[26, 46], [82, 102]].forEach(function (tk2) {
+      rcx.fillStyle = 'rgba(72,56,38,0.5)';
+      rcx.fillRect(0, tk2[0] - 3, 1024, tk2[1] - tk2[0] + 6);
+      var tg3 = rcx.createLinearGradient(0, tk2[0], 0, tk2[1]);
+      tg3.addColorStop(0, 'rgba(190,166,126,0.9)');
+      tg3.addColorStop(0.5, 'rgba(200,178,138,1)');
+      tg3.addColorStop(1, 'rgba(184,160,120,0.9)');
+      rcx.fillStyle = tg3;
+      rcx.fillRect(0, tk2[0], 1024, tk2[1] - tk2[0]);
+    });
+    // the median: scrub tufts and stones no axle has touched
+    for (var md = 0; md < 90; md++) {
+      rcx.fillStyle = rdR() < 0.5 ? 'rgba(104,102,62,0.6)' : 'rgba(88,74,50,0.5)';
+      rcx.beginPath();
+      rcx.arc(rdR() * 1024, 56 + rdR() * 16, 1 + rdR() * 3, 0, 6.3);
+      rcx.fill();
+    }
+    // washboard: the suspension already knows
+    rcx.globalAlpha = 0.07;
+    for (var wb = 0; wb < 1024; wb += 7 + Math.floor(rdR() * 8)) {
+      rcx.fillStyle = '#4e3e2a';
+      rcx.fillRect(wb, 18, 2, 92);
+    }
+    rcx.globalAlpha = 1;
+    // scattered stones + dust patches
+    for (var st3 = 0; st3 < 240; st3++) {
+      var sl3 = 150 + Math.floor(rdR() * 60);
+      rcx.fillStyle = 'rgb(' + sl3 + ',' + Math.round(sl3 * 0.9) + ',' + Math.round(sl3 * 0.74) + ')';
+      rcx.globalAlpha = 0.14 + rdR() * 0.2;
+      rcx.beginPath();
+      rcx.arc(rdR() * 1024, rdR() * 128, 0.6 + rdR() * 1.8, 0, 6.3);
+      rcx.fill();
+    }
+    rcx.globalAlpha = 1;
+    var roadTex = new THREE.CanvasTexture(rdCv);
+    roadTex.wrapS = THREE.RepeatWrapping;
+    roadTex.wrapT = THREE.ClampToEdgeWrapping;
+    roadTex.repeat.set(14, 1);
+    roadTex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    roadTex.encoding = THREE.sRGBEncoding;
     var road = new THREE.Mesh(new THREE.PlaneGeometry(620, 7.5),
-      new THREE.MeshLambertMaterial({ color: 0x9a815c }));
+      new THREE.MeshLambertMaterial({ map: roadTex }));
     road.rotation.x = -Math.PI / 2;
     road.position.set(-100, 0.14, 26);
+    road.receiveShadow = true;
     convoyG.add(road);
-    [-1.6, 1.6].forEach(function (dz) {
-      var rut = new THREE.Mesh(new THREE.PlaneGeometry(620, 0.5),
-        new THREE.MeshLambertMaterial({ color: 0x82694a }));
-      rut.rotation.x = -Math.PI / 2;
-      rut.position.set(-100, 0.16, 26 + dz);
-      convoyG.add(rut);
-    });
     for (var pi = 0; pi < 16; pi++) {
       var px = -330 + pi * 24;
       var pole = new THREE.Group();
@@ -4568,17 +5355,41 @@
     // dust pool — washboard-road dust kicking from wheels
     var dustPool = [];
 
-    // heat shimmer bands + a low near-ground layer over the pan
+    // heat shimmer bands + a low near-ground mirage layer over the pan —
+    // streaked alpha so the air tears horizontally instead of glowing flatly
+    var shimCv = document.createElement('canvas');
+    shimCv.width = 256; shimCv.height = 64;
+    var shx = shimCv.getContext('2d');
+    var shR = PG2.stream('RANGE', 'shimmer');
+    for (var sl2 = 0; sl2 < 46; sl2++) {
+      var sy2 = shR() * 64, sw2 = 30 + shR() * 160, sxx = shR() * 256;
+      var slg = shx.createLinearGradient(sxx - sw2 / 2, 0, sxx + sw2 / 2, 0);
+      slg.addColorStop(0, 'rgba(255,255,255,0)');
+      slg.addColorStop(0.5, 'rgba(255,255,255,' + (0.25 + shR() * 0.5) + ')');
+      slg.addColorStop(1, 'rgba(255,255,255,0)');
+      shx.fillStyle = slg;
+      shx.fillRect(sxx - sw2 / 2, sy2, sw2, 1.5 + shR() * 2.5);
+    }
+    var shimTex = new THREE.CanvasTexture(shimCv);
+    shimTex.wrapS = THREE.RepeatWrapping;
     var shimmer = [];
     for (var si = 0; si < 3; si++) {
+      var smTex = shimTex.clone();
+      smTex.needsUpdate = true;
+      smTex.repeat.set(4 + si, 1);
       var sm = new THREE.Mesh(new THREE.PlaneGeometry(2400, 14 + si * 9),
-        new THREE.MeshBasicMaterial({ color: 0xfff4dc, transparent: true, opacity: 0.05, depthWrite: false }));
+        new THREE.MeshBasicMaterial({ map: smTex, color: 0xfff4dc, transparent: true,
+          opacity: 0.05, depthWrite: false }));
       sm.position.set(0, 9 + si * 12, -420 - si * 260);
       scene.add(sm);
       shimmer.push(sm);
     }
+    var nsTex = shimTex.clone();
+    nsTex.needsUpdate = true;
+    nsTex.repeat.set(2, 1);
     var nearShimmer = new THREE.Mesh(new THREE.PlaneGeometry(420, 5),
-      new THREE.MeshBasicMaterial({ color: 0xfff4dc, transparent: true, opacity: 0.06, depthWrite: false }));
+      new THREE.MeshBasicMaterial({ map: nsTex, color: 0xfff4dc, transparent: true,
+        opacity: 0.06, depthWrite: false }));
     nearShimmer.position.set(0, 2.4, 70);
     scene.add(nearShimmer);
 
@@ -4588,9 +5399,10 @@
       truck: truck, truckWheels: truckWheels, escort: escort, escortWheels: escortWheels,
       convoyG: convoyG, truckShadow: truckShadow, escortShadow: escortShadow,
       dustPool: dustPool,
-      hemi: hemi, sun: sun, terrain: terrain,
+      hemi: hemi, sun: sun, terrain: terrain, terrainMacro: terrainMacro,
       skyDome: skyDome, sunSpr: sunSpr, cloudG: cloudG,
-      mesas: mesas, shimmer: shimmer, nearShimmer: nearShimmer, shimmerBase: 1,
+      mesas: mesas, hazeBands: hazeBands, practicals: practicals,
+      shimmer: shimmer, nearShimmer: nearShimmer, shimmerBase: 1,
       fx: null, shake: 0, convoyShake: 0, mode: 'idle', palette: null
     };
   }
@@ -7808,6 +8620,13 @@
     setOrbit: function (t, p, r) {
       bay.orbit.theta = t; bay.orbit.phi = p; bay.orbit.radius = r;
       bay.velTheta = 0; bay.velPhi = 0; bay.lastTouch = performance.now();
+    },
+    setRangePalette: function (n) { if (range) applyRangePalette(n); },   // tests: hour swap
+    aerialTo: function (theta, radius, tx, tz) {                          // tests: park the recon plane
+      if (!range) return;
+      aerial.theta = theta; aerial.radius = radius;
+      if (tx != null) aerial.tx = tx;
+      if (tz != null) aerial.tz = tz;
     },
     nodes: function () {
       var out = {};
