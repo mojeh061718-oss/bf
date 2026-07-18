@@ -9722,7 +9722,7 @@
      matched to the terminal look so the thing you build is the thing you fly. */
   var lsBench = null;
   var LS_AF_DIM = { dart: { len: 1.9, rad: 0.15 }, lance: { len: 2.7, rad: 0.19 }, pillar: { len: 3.5, rad: 0.25 } };
-  var LS_WH_DIM = { light: 0.5, std: 0.74, heavy: 1.0 };
+  var LS_WH_DIM = { light: 0.5, std: 0.74, heavy: 1.0, special: 1.35 };
   var LS_MO_STAGES = { single: 1, dual: 2, triple: 3 };
   function lsBenchInit() {
     if (lsBench) return lsBench;
@@ -10117,7 +10117,8 @@
         'Terminal. The desert comes up to meet it.'];
       $('ls-mc-caption').textContent = caps[stIdx];
     }
-    if (k >= 1) { lsFly.done = true; lsImpact(); return; }
+    // hand off to the 3D view at apogee — the whole descent plays in 3D, the 2D arc is just the boost/ascent pre-roll
+    if (k >= 0.58) { lsFly.done = true; lsImpact(); return; }
     lsFly.raf = requestAnimationFrame(lsFlyStep);
   }
   $('ls-warp').addEventListener('click', function () {
@@ -10195,6 +10196,58 @@
     TEXCACHE['lsgroundN'] = tex;
     return tex;
   }
+  /* ---- destructible targets: a real installation / bunker / convoy that
+     comes apart on the hit. Each piece carries its own physics for the break. */
+  function lsTargetMat(kind) {
+    var m = { concrete: [0x8f897b, 0.05, 0.93], concrete2: [0x6f6a5e, 0.05, 0.96], steel: [0x59636f, 0.8, 0.4],
+      rust: [0x7c4c36, 0.5, 0.72], tire: [0x1b1b1f, 0.1, 0.9], glass: [0x2a3f4a, 0.3, 0.2] }[kind] || [0x888888, 0.1, 0.9];
+    return new THREE.MeshStandardMaterial({ color: m[0], metalness: m[1], roughness: m[2], envMapIntensity: 0.7 });
+  }
+  function lsAddPiece(g, geo, kind, x, y, z, ry) {
+    var mesh = new THREE.Mesh(geo, lsTargetMat(kind));
+    mesh.position.set(x, y, z); if (ry) mesh.rotation.y = ry;
+    mesh.castShadow = true; mesh.receiveShadow = true;
+    g.add(mesh); return mesh;
+  }
+  function lsBuildTarget(g, type) {
+    while (g.children.length) { var c = g.children.pop(); if (c.geometry) c.geometry.dispose(); }
+    if (type === 'hardened') {
+      lsAddPiece(g, new THREE.CylinderGeometry(4.3, 4.9, 1.3, 32), 'concrete2', 0, 0.65, 0);
+      lsAddPiece(g, new THREE.SphereGeometry(2.7, 26, 13, 0, 6.2832, 0, Math.PI / 2), 'concrete', 0, 1.15, 0);
+      lsAddPiece(g, new THREE.CylinderGeometry(0.75, 0.75, 0.55, 16), 'steel', 0.9, 3.3, 0.5);
+      for (var i = 0; i < 5; i++) { var a = i * 1.257 + 0.4; lsAddPiece(g, new THREE.BoxGeometry(1.1, 1.1, 1.1), 'concrete2', Math.sin(a) * 3.9, 0.55, Math.cos(a) * 3.9, a); }
+    } else if (type === 'moving') {
+      lsAddPiece(g, new THREE.BoxGeometry(2.3, 0.45, 8), 'steel', 0, 0.72, 0);
+      lsAddPiece(g, new THREE.BoxGeometry(2.5, 2.4, 5.4), 'rust', 0, 2.1, 1.3);
+      lsAddPiece(g, new THREE.BoxGeometry(2.3, 1.9, 2.1), 'steel', 0, 1.85, -3.1);
+      lsAddPiece(g, new THREE.BoxGeometry(1.9, 0.9, 0.12), 'glass', 0, 2.3, -4.16);
+      [[-1.15, -2.8], [1.15, -2.8], [-1.15, 1.6], [1.15, 1.6], [-1.15, 3.3], [1.15, 3.3]].forEach(function (w) {
+        var wh = lsAddPiece(g, new THREE.CylinderGeometry(0.72, 0.72, 0.5, 16), 'tire', w[0], 0.72, w[1]); wh.rotation.z = Math.PI / 2;
+      });
+    } else {
+      lsAddPiece(g, new THREE.BoxGeometry(4.6, 3.3, 4.6), 'concrete', 0, 1.65, 0);
+      lsAddPiece(g, new THREE.BoxGeometry(5.1, 0.55, 5.1), 'concrete2', 0, 3.55, 0);
+      lsAddPiece(g, new THREE.BoxGeometry(1.4, 2.0, 0.2), 'steel', 0, 1.0, 2.35);
+      lsAddPiece(g, new THREE.CylinderGeometry(0.13, 0.17, 6.4, 10), 'steel', 1.7, 3.2, 1.7);
+      var dish = lsAddPiece(g, new THREE.SphereGeometry(0.85, 16, 8, 0, 6.2832, 0, 1.3), 'steel', 1.7, 6.3, 1.7); dish.rotation.x = Math.PI;
+      lsAddPiece(g, new THREE.BoxGeometry(2.3, 1.9, 2.3), 'concrete2', -3.6, 0.95, 1.6, 0.3);
+      lsAddPiece(g, new THREE.BoxGeometry(1.9, 1.5, 1.9), 'concrete', 3.4, 0.75, -2.5, -0.4);
+    }
+    g.children.forEach(function (p) { p.userData.rest = p.position.clone(); });
+    return g.children.slice();
+  }
+  function lsBreakTarget(res, y01) {
+    var lt = lsTerm;
+    if (S.ls.type === 'hardened' && !res.destroyed) return;   // struck but not defeated — the bunker holds
+    lt.targetBroken = true;
+    var rand = PG2.stream(S.ls.seed || 'x', 'lsbreak'), c = V3(lt.impact.x * 0.3, 0.5, lt.impact.z * 0.3);
+    lt.targetG.children.forEach(function (p) {
+      var dir = p.position.clone().sub(c); if (dir.length() < 0.1) dir.set(rand() - 0.5, 1, rand() - 0.5); dir.normalize();
+      var force = (2.5 + rand() * 4) * (0.55 + y01);
+      p.userData.vel = V3(dir.x * force * (0.6 + rand()), (2 + rand() * 4.5) * (0.5 + y01), dir.z * force * (0.6 + rand()));
+      p.userData.ang = V3((rand() - 0.5) * 7, (rand() - 0.5) * 7, (rand() - 0.5) * 7);
+    });
+  }
   function lsTermInit() {
     if (lsTerm) return lsTerm;
     try {
@@ -10235,6 +10288,7 @@
       var bull = new THREE.Mesh(new THREE.CircleGeometry(0.7, 24), new THREE.MeshBasicMaterial({ color: 0xff6a52, transparent: true, opacity: 0.9, depthWrite: false }));
       bull.rotation.x = -Math.PI / 2; bull.position.y = 0.07; ringG.add(bull);
       scene.add(ringG);
+      var targetG = new THREE.Group(); scene.add(targetG);   // the real installation/bunker/convoy, built per shot
       // the missile: smooth machined-metal airframe (PBR, reflects the env),
       // a reentry-hot nose, swept fins — casts a real shadow on the sand
       var m = new THREE.Group();
@@ -10264,7 +10318,7 @@
         scene.add(cs); contrail.push(cs);
       }
       var flare = new THREE.PointLight(0xffd9a6, 0, 170, 1.7); scene.add(flare);   // the detonation lights the desert
-      lsTerm = { scene: scene, camera: camera, ring: ringG, bull: bull, missile: m, nose: nose, sheath: sheath, trail: trail, contrail: contrail, scorch: scorch, flare: flare, fx: null };
+      lsTerm = { scene: scene, camera: camera, ring: ringG, bull: bull, targetG: targetG, missile: m, nose: nose, sheath: sheath, trail: trail, contrail: contrail, scorch: scorch, flare: flare, fx: null };
     } catch (e) { lsTerm = null; }
     return lsTerm;
   }
@@ -10274,20 +10328,27 @@
     var hitMi = Math.max(0.5, res.targetMi * 0.006), scale = 5 / hitMi;
     var ix = clamp(res.crossMi * scale, -22, 22), iz = clamp(-res.downMi * scale, -22, 22);
     lt.impact = V3(ix, 0, iz);
-    lt.start = V3(ix * 0.2 - 5, 62, iz * 0.2 - 48);
+    var apo = res.apogeeMi || 0;
+    var startY = 62 + clamp(apo, 0, 700) * 0.055;                 // a higher loft starts the descent higher
+    lt.start = V3(ix * 0.2 - 6, startY, iz * 0.2 - 52);
     var dir = lt.impact.clone().sub(lt.start).normalize();
     lt.missile.quaternion.setFromUnitVectors(V3(0, 1, 0), dir);   // nose leads the descent
     lt.missile.position.copy(lt.start);
     lt.missile.visible = true;
-    // camera keyframes: sit downrange of the target and look back up the
-    // trajectory, so the article visibly grows as it screams toward you.
+    // build the target for this mission, intact
+    lsBuildTarget(lt.targetG, S.ls.type);
+    lt.targetG.children.forEach(function (p) { p.userData.vel = null; p.userData.sleep = false; });
+    lt.targetBroken = false; lt.endT = 2.0;
+    // camera keyframes: high reentry entry → downrange dolly → punch on the target
     var flat = V3(lt.impact.x - lt.start.x, 0, lt.impact.z - lt.start.z);
     if (flat.length() < 0.001) flat.set(0, 0, 1);
     flat.normalize();
     var sdv = V3(flat.z, 0, -flat.x);
+    lt.camHigh = lt.impact.clone().add(flat.clone().multiplyScalar(30)).add(sdv.clone().multiplyScalar(8)).add(V3(0, 27, 0));
     lt.camFar = lt.impact.clone().add(flat.clone().multiplyScalar(16)).add(sdv.clone().multiplyScalar(5)).add(V3(0, 11, 0));
-    lt.camNear = lt.impact.clone().add(flat.clone().multiplyScalar(6.5)).add(sdv.clone().multiplyScalar(1.4)).add(V3(0, 3, 0));
-    lt.t0 = null; lt.t = 0; lt.dur = 2.6; lt.postT = 0; lt.blownAt = 0; lt.holdAt = 0; lt.blown = false; lt.done = false; lt.shake = 0;
+    lt.camNear = lt.impact.clone().add(flat.clone().multiplyScalar(7.5)).add(sdv.clone().multiplyScalar(1.7)).add(V3(0, 3.6, 0));
+    lt.camBlast = lt.impact.clone().add(flat.clone().multiplyScalar(26)).add(sdv.clone().multiplyScalar(4)).add(V3(0, 16, 0));   // pull back to reveal a mushroom
+    lt.t0 = null; lt.t = 0; lt.dur = clamp(2.8 + apo * 0.0016, 2.9, 4.4); lt.postT = 0; lt.blownAt = 0; lt.holdAt = 0; lt.blown = false; lt.done = false; lt.shake = 0;
     var col = res.hit ? 0x8effb0 : 0xff6a52;
     lt.ring.children.forEach(function (c) { if (c.geometry && c.geometry.type === 'RingGeometry') c.material.color.setHex(col); });
     lt.bull.material.color.setHex(col); lt.bull.material.opacity = 0.9;
@@ -10296,7 +10357,9 @@
     lt.sheath.material.opacity = 0;
     lt.scorch.material.opacity = 0; lt.flare.intensity = 0;
     lt.camera.fov = 46; lt.camera.updateProjectionMatrix();
+    renderer.toneMappingExposure = 1.45;
     if (lt.fx) { lt.scene.remove(lt.fx); lt.fx = null; }
+    if (lt.mush) { lt.scene.remove(lt.mush.group); lt.mush = null; }
     S.phase = 'lsterm';
     $('lth-clock').textContent = 'TERMINAL';
     $('lth-caption').textContent = res.reachable ? 'Tracking Seven has it — terminal phase.' : 'Out of fuel. Watch it fall short.';
@@ -10344,30 +10407,54 @@
     } else {
       lt.postT = (now - lt.blownAt) / 1000; k = 1;
       var p = lt.postT;
-      lt.flare.intensity = Math.max(0, 8.5 * (1 - p * 1.1));   // the flash lights the desert, then fades
+      lt.flare.intensity = Math.max(0, (lt.flarePeak || 8.5) * (1 - p * 0.9));   // the flash lights the desert, then fades
+      if (lt.expPeak) renderer.toneMappingExposure = 1.45 + (lt.expPeak - 1.45) * clamp(1 - p / 0.3, 0, 1);   // blinding exposure spike
       lt.scorch.material.opacity = Math.min(0.85, p * 1.6);
       if (lt.fx) {
         lt.fx.children.forEach(function (ch) {
-          if (ch.userData.kind === 'flash') { ch.material.opacity = Math.max(0, 0.98 - p * 2.0); var fs = 14 + p * 26; ch.scale.set(fs, fs, 1); }
+          if (ch.userData.kind === 'flash') { ch.material.opacity = Math.max(0, 0.98 - p * 2.0); var fs = (ch.userData.g0 || 14) + p * 26; ch.scale.set(fs, fs, 1); }
           else if (ch.userData.kind === 'ring') { var rs = 1 + p * 30; ch.scale.set(rs, rs, rs); ch.material.opacity = Math.max(0, 0.9 - p * 0.85); }
-          else if (ch.userData.kind === 'gring') { var gs2 = 1 + p * 46; ch.scale.set(gs2, gs2, gs2); ch.material.opacity = Math.max(0, 0.7 - p * 0.6); }
+          else if (ch.userData.kind === 'gring') { var gs2 = 1 + p * (ch.userData.gscale || 46); ch.scale.set(gs2, gs2, gs2); ch.material.opacity = Math.max(0, 0.7 - p * 0.6); }
           else if (ch.userData.kind === 'fire') { ch.position.y += ch.userData.rise * dt; var gs = ch.userData.grow * (0.4 + p * 1.7); ch.scale.set(gs, gs, 1); ch.material.opacity = Math.max(0, 1 - p * 1.05); }
           else if (ch.userData.kind === 'smoke') { ch.position.y += ch.userData.rise * dt; var ss = ch.userData.grow * (0.6 + p * 1.4); ch.scale.set(ss, ss, 1); ch.material.opacity = Math.max(0, ch.userData.o * (1 - p * 0.5)); }
         });
       }
+      // mushroom cloud: the cap rises and inflates, the stem billows, the Wilson ring flashes out
+      if (lt.mush) {
+        var mm = lt.mush; mm.group.position.y = Math.min(mm.maxH, p * mm.rise);
+        mm.stem.forEach(function (st) { st.material.opacity = clamp(0.55 - p * 0.12, 0, 0.6); });
+        mm.cap.forEach(function (cp) { var cg = mm.capGrow * (0.5 + p * 0.9); cp.scale.set(cg, cg, 1); cp.material.opacity = clamp(0.62 - p * 0.14, 0, 0.7); });
+        var wr = 1 + p * 34; mm.wil.scale.set(wr, wr, wr); mm.wil.material.opacity = Math.max(0, 0.5 - p * 1.1);
+      }
       lt.sheath.material.opacity = 0;
       lt.trail.forEach(function (s) { s.material.opacity = Math.max(0, s.material.opacity - dt * 3.5); });
       lt.contrail.forEach(function (s) { s.material.opacity = Math.max(0, s.material.opacity - dt * 0.5); });
-      if (lt.postT > 2.0 && !lt.done) {
+      // the target comes apart — each piece flies, spins, falls, and settles
+      if (lt.targetBroken) {
+        lt.targetG.children.forEach(function (pc) {
+          var v = pc.userData.vel; if (!v || pc.userData.sleep) return;
+          v.y -= 26 * dt;
+          pc.position.x += v.x * dt; pc.position.y += v.y * dt; pc.position.z += v.z * dt;
+          var av = pc.userData.ang; if (av) { pc.rotation.x += av.x * dt; pc.rotation.y += av.y * dt; pc.rotation.z += av.z * dt; }
+          if (pc.position.y <= 0.22) { pc.position.y = 0.22; v.y *= -0.24; v.x *= 0.6; v.z *= 0.6; if (av) av.multiplyScalar(0.55); if (v.length() < 0.5) pc.userData.sleep = true; }
+        });
+      }
+      if (lt.postT > (lt.endT || 2.0) && !lt.done) {
         lt.done = true;
+        if (lt.expPeak) { renderer.toneMappingExposure = 1.45; lt.expPeak = null; }
+        if (lt.mush) { lt.scene.remove(lt.mush.group); lt.mush = null; }
         $('ls-term-hud').classList.add('hidden');
         S.phase = 'longshot'; showScreen('scr-longshot'); lsResult();
         return;
       }
     }
-    // ---- camera choreography: ride it down, punch in on the bull at impact ----
-    var ce = k < 1 ? (k * k * (3 - 2 * k)) : 1;           // smoothstep dolly
-    c.position.copy(lt.camFar).lerp(lt.camNear, ce);
+    // ---- camera choreography: high reentry entry → downrange dolly → punch on the target → pull back for a mushroom ----
+    if (k >= 1) {
+      if (lt.mush && lt.camBlast) { var pb = clamp(lt.postT / 1.6, 0, 1); c.position.copy(lt.camNear).lerp(lt.camBlast, pb * pb * (3 - 2 * pb)); }
+      else { c.position.copy(lt.camNear); }
+    }
+    else if (k < 0.4) { var a2 = k / 0.4; c.position.copy(lt.camHigh).lerp(lt.camFar, a2 * a2 * (3 - 2 * a2)); }
+    else { var a3 = (k - 0.4) / 0.6; c.position.copy(lt.camFar).lerp(lt.camNear, a3 * a3 * (3 - 2 * a3)); }
     var fov = 46 - (k > 0.8 ? (k - 0.8) / 0.2 * 7 : 0);
     if (lt.blown) fov = 39 + Math.min(7, lt.postT * 10);
     if (Math.abs(c.fov - fov) > 0.01) { c.fov = fov; c.updateProjectionMatrix(); }
@@ -10378,48 +10465,74 @@
       lt.shake = Math.max(0, lt.shake - dt * 5);
     }
     var settle = clamp((k - 0.5) / 0.5, 0, 1); settle = settle * settle * (3 - 2 * settle);
-    var lookP = lt.missile.position.clone().lerp(lt.impact.clone().add(V3(0, 0.4, 0)), settle);
+    var lookY = 0.4;
+    if (lt.mush && lt.blown) lookY = 0.4 + clamp(lt.postT / 1.6, 0, 1) * 6;   // tilt up to follow the rising cloud
+    var lookP = lt.missile.position.clone().lerp(lt.impact.clone().add(V3(0, lookY, 0)), settle);
     c.lookAt(lookP);
     renderScene(lt.scene, lt.camera);
   }
   function lsTermBurst() {
     var lt = lsTerm, res = S.ls.result, tx = fxTextures();
-    lt.blown = true; lt.blownAt = performance.now(); lt.missile.visible = false; lt.shake = 2.8;
-    var bang = clamp(res.cap.bang, 0.4, 1.6);
-    lt.flare.position.copy(lt.impact); lt.flare.position.y = 2; lt.flare.intensity = 8.5;
+    var yld = PG2.lsYield(res), y = yld.y01, tier = yld.tier;
+    lt.blown = true; lt.blownAt = performance.now(); lt.missile.visible = false;
+    lt.shake = 1.4 + y * 6.5;
+    lt.endT = tier === 'nuclear' ? 3.6 : tier === 'heavy' ? 2.8 : 2.0;
+    lt.flarePeak = 5 + y * 42; lt.flare.distance = 120 + y * 240;
+    lt.flare.position.copy(lt.impact); lt.flare.position.y = 2 + y * 3; lt.flare.intensity = lt.flarePeak;
+    lt.expPeak = 1.45 + y * 1.05;
+    // break the target — unless a hardened bunker held, or a small warhead missed wide
+    if (res.hit || Math.hypot(lt.impact.x, lt.impact.z) < (3 + y * 13)) lsBreakTarget(res, y);
     var fx = new THREE.Group(); fx.position.copy(lt.impact);
-    // white flash
     var flash = new THREE.Sprite(new THREE.SpriteMaterial({ map: tx.flash, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
-    flash.position.y = 1.6; flash.userData.kind = 'flash'; fx.add(flash);
-    // vertical fire ring
+    flash.position.y = 1.6 + y * 2; flash.userData = { kind: 'flash', g0: 12 + y * 42 }; fx.add(flash);
     var ring = new THREE.Mesh(new THREE.RingGeometry(0.5, 1.3, 44), new THREE.MeshBasicMaterial({ color: 0xffe0a8, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending }));
     ring.rotation.x = -Math.PI / 2; ring.position.y = 0.14; ring.userData.kind = 'ring'; fx.add(ring);
-    // ground shockwave dust ring, racing outward across the deck
-    var gring = new THREE.Mesh(new THREE.RingGeometry(0.8, 1.6, 48), new THREE.MeshBasicMaterial({ color: 0xcaa06a, transparent: true, opacity: 0.7, side: THREE.DoubleSide, depthWrite: false }));
-    gring.rotation.x = -Math.PI / 2; gring.position.y = 0.09; gring.userData.kind = 'gring'; fx.add(gring);
-    var rand = PG2.stream(S.ls.seed, 'lsterm');
-    // fireball
-    for (var i = 0; i < 10; i++) {
+    // ground shockwave — a dust ring, plus a faster inner ring for big yields
+    [{ c: 0xcaa06a, g: 22 + y * 82, o: 0.7 }, { c: 0xe8d3a8, g: 14 + y * 52, o: 0.5 }].forEach(function (rc, ri) {
+      if (ri === 1 && y < 0.4) return;
+      var gr = new THREE.Mesh(new THREE.RingGeometry(0.8, 1.5, 48), new THREE.MeshBasicMaterial({ color: rc.c, transparent: true, opacity: rc.o, side: THREE.DoubleSide, depthWrite: false }));
+      gr.rotation.x = -Math.PI / 2; gr.position.y = 0.09 + ri * 0.02; gr.userData = { kind: 'gring', gscale: rc.g }; fx.add(gr);
+    });
+    var rand = PG2.stream(S.ls.seed || 'x', 'lsterm');
+    // fireball — count + size scale with yield
+    var fc = 6 + Math.round(y * 16);
+    for (var i = 0; i < fc; i++) {
       var sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tx.fire, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
-      sp.material.color.setRGB(1, 0.5 + rand() * 0.2, 0.15);
-      sp.position.set((rand() - 0.5) * 3.2, 1 + rand() * 2.4, (rand() - 0.5) * 3.2);
-      sp.userData = { kind: 'fire', grow: (5 + rand() * 7) * bang, rise: 3 + rand() * 4 };
+      sp.material.color.setRGB(1, 0.5 + rand() * 0.25, 0.14);
+      sp.position.set((rand() - 0.5) * (3 + y * 4), 1 + rand() * (2 + y * 3), (rand() - 0.5) * (3 + y * 4));
+      sp.userData = { kind: 'fire', grow: (5 + rand() * 7) * (0.7 + y * 2.2), rise: 3 + rand() * 4 };
       fx.add(sp);
     }
-    // rising smoke column, lingers after the fire dies
     for (var j = 0; j < 8; j++) {
       var sm = new THREE.Sprite(new THREE.SpriteMaterial({ map: tx.smoke, transparent: true, depthWrite: false, opacity: 0 }));
       sm.position.set((rand() - 0.5) * 2.4, 1 + j * 0.7, (rand() - 0.5) * 2.4);
-      sm.userData = { kind: 'smoke', grow: (5 + rand() * 5) * bang, rise: 2 + rand() * 2.5, o: 0.5 - j * 0.03 };
+      sm.userData = { kind: 'smoke', grow: (5 + rand() * 5) * (0.7 + y * 1.6), rise: 2 + rand() * 2.5, o: 0.5 - j * 0.03 };
       fx.add(sm);
     }
     lt.scene.add(fx); lt.fx = fx;
-    PGAudio.detonation(bang, false);
+    // MUSHROOM CLOUD for the big tiers — rising stem + inflating cap + a Wilson ring
+    lt.mush = null;
+    if (y > 0.62) {
+      var mg = new THREE.Group(); mg.position.copy(lt.impact); lt.scene.add(mg);
+      var stem = [], cap = [];
+      for (var s2 = 0; s2 < 7; s2++) {
+        var st = new THREE.Sprite(new THREE.SpriteMaterial({ map: tx.smoke, transparent: true, depthWrite: false, opacity: 0 }));
+        st.position.set((rand() - 0.5) * 2, s2 * 2.1, (rand() - 0.5) * 2); var ss = 4 + s2 * 0.3; st.scale.set(ss, ss, 1); mg.add(st); stem.push(st);
+      }
+      for (var c2 = 0; c2 < 10; c2++) {
+        var a = c2 / 10 * 6.2832;
+        var cs2 = new THREE.Sprite(new THREE.SpriteMaterial({ map: tx.smoke, transparent: true, depthWrite: false, opacity: 0 }));
+        cs2.position.set(Math.cos(a) * 4.6, 15, Math.sin(a) * 4.6); mg.add(cs2); cap.push(cs2);
+      }
+      var wil = new THREE.Mesh(new THREE.RingGeometry(1, 2.4, 40), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending }));
+      wil.rotation.x = -Math.PI / 2; wil.position.y = 3.2; mg.add(wil);
+      lt.mush = { group: mg, stem: stem, cap: cap, wil: wil, rise: 7, maxH: 9, capGrow: 6 + y * 5 };
+    }
+    PGAudio.detonation(clamp(yld.bang, 0.4, 2.5), false);
     if (res.hit) PGAudio.fanfare(); else PGAudio.sadDrone();
-    // screen punch — the compositor kick that stands in for a rumble on iOS
-    try { var app = $('app'); if (app && app.animate) app.animate([{ transform: 'scale(1.032) translateY(5px)' }, { transform: 'none' }], { duration: 220, easing: 'cubic-bezier(.2,.9,.3,1)' }); } catch (e) {}
+    try { var app = $('app'); if (app && app.animate) app.animate([{ transform: 'scale(' + (1.02 + y * 0.06).toFixed(3) + ') translateY(' + Math.round(3 + y * 6) + 'px)' }, { transform: 'none' }], { duration: 240, easing: 'cubic-bezier(.2,.9,.3,1)' }); } catch (e) {}
     $('lth-clock').textContent = 'IMPACT';
-    $('lth-caption').textContent = res.hit ? res.grade + '.'
+    $('lth-caption').textContent = res.hit ? (tier === 'nuclear' ? 'Thermonuclear. ' : '') + res.grade + '.'
       : res.reachable ? 'Impact — ' + res.missMi.toFixed(res.missMi < 10 ? 2 : 1) + ' mi off. ' + res.grade + '.'
       : 'Fell short — out of fuel by ' + Math.round(res.targetMi - res.cap.rangeMax) + ' mi.';
   }

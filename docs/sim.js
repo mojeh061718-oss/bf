@@ -1669,15 +1669,16 @@ var PG2 = (function () {
     star:    { id: 'star',    name: 'STAR-TRACKER',   sub: 'SELF-CORRECTING · TIGHT',  corr: 0.85, driftK: 0.18, cepBase: 0.0010, cost: 9800 }
   };
   var LS_WARHEADS = {
-    light:  { id: 'light',  name: 'LIGHT',    sub: 'FAR REACH, SMALL BANG', mass: 90,  bang: 0.7, cost: 1400 },
-    std:    { id: 'std',    name: 'STANDARD', sub: 'THE SENSIBLE ONE',       mass: 180, bang: 1.0, cost: 2200 },
-    heavy:  { id: 'heavy',  name: 'HEAVY',    sub: 'SHORT REACH, BIG BANG',  mass: 340, bang: 1.5, cost: 3800 }
+    light:   { id: 'light',   name: 'LIGHT',        sub: 'FAR REACH · GRENADE POP',  mass: 90,  bang: 0.7, cost: 1400 },
+    std:     { id: 'std',     name: 'STANDARD',     sub: 'THE SENSIBLE ONE',          mass: 180, bang: 1.0, cost: 2200 },
+    heavy:   { id: 'heavy',   name: 'HEAVY',        sub: 'SHORT REACH · BIG BANG',    mass: 340, bang: 1.5, cost: 3800 },
+    special: { id: 'special', name: 'THERMONUCLEAR', sub: 'CITY-KILLER · HEAVY & SLOW', mass: 620, bang: 3.0, cost: 9800 }
   };
   var LS_STEPS = [
     { key: 'airframe', label: 'AIRFRAME',  cat: LS_AIRFRAMES, order: ['dart', 'lance', 'pillar'] },
     { key: 'motor',    label: 'PROPULSION',cat: LS_MOTORS,    order: ['single', 'dual', 'triple'] },
     { key: 'guidance', label: 'GUIDANCE',  cat: LS_GUIDANCE,  order: ['fin', 'inertial', 'star'] },
-    { key: 'warhead',  label: 'WARHEAD',   cat: LS_WARHEADS,  order: ['light', 'std', 'heavy'] }
+    { key: 'warhead',  label: 'WARHEAD',   cat: LS_WARHEADS,  order: ['light', 'std', 'heavy', 'special'] }
   ];
   var LS_REF_DRY = 800;   // reference dry mass for the range penalty
   function lsBuildDefault() { return { airframe: 'lance', motor: 'dual', guidance: 'inertial', warhead: 'std' }; }
@@ -1773,6 +1774,15 @@ var PG2 = (function () {
     if (!res.hit) return 0;
     return Math.round(res.targetMi * (1 + 2 / (1 + res.missMi)) * (res.hardened ? 1.4 : 1));
   }
+  /* one 0..1 yield scalar that drives the whole detonation — from a grenade
+     pop (light warhead) to a thermonuclear mushroom (the special tier). */
+  function lsYield(res) {
+    var bang = res && res.cap ? res.cap.bang : 1;
+    var q = (res && (res.grade === 'DIRECT HIT' || res.grade === 'BUNKER DESTROYED')) ? 1.2 : 1;
+    var y01 = clamp((Math.log(bang * q) / Math.LN2 + 0.8) / 2.3, 0, 1);   // light≈0.12 heavy≈0.72 nuke→1
+    var tier = y01 > 0.85 ? 'nuclear' : y01 > 0.6 ? 'heavy' : y01 > 0.3 ? 'conventional' : 'grenade';
+    return { y01: y01, tier: tier, bang: bang };
+  }
   /* a competent canned solution — harness + the 'nominal' hint */
   function lsCannedDial(b, aimMi, aimBearing) {
     var o = lsOptimal(b, aimMi, aimBearing);
@@ -1808,7 +1818,7 @@ var PG2 = (function () {
     LS_AIRFRAMES: LS_AIRFRAMES, LS_MOTORS: LS_MOTORS, LS_GUIDANCE: LS_GUIDANCE, LS_WARHEADS: LS_WARHEADS, LS_STEPS: LS_STEPS,
     lsBuildDefault: lsBuildDefault, lsCapability: lsCapability, lsOptimal: lsOptimal,
     lsResolve: lsResolve, lsFlightTime: lsFlightTime, lsCannedDial: lsCannedDial, lsAngDiff: angDiffDeg,
-    LS_TARGET_TYPES: LS_TARGET_TYPES, lsIntercept: lsIntercept, lsScore: lsScore
+    LS_TARGET_TYPES: LS_TARGET_TYPES, lsIntercept: lsIntercept, lsScore: lsScore, lsYield: lsYield
   };
 })();
 
