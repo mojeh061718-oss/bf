@@ -129,14 +129,19 @@
           <button id="ls-mission-go" type="button" class="ls-go">BUILD THE ARTICLE →</button>
         </div>
       </div>
-      <!-- PHASE 2: BUILD -->
+      <!-- PHASE 2: BUILD — a live 3D rocket bench -->
       <div id="ls-build" class="ls-phase hidden">
-        <div class="ls-head"><span class="ls-kick" id="ls-build-target"></span><span class="ls-step-lbl">BUILD · PICK YOUR STACK</span></div>
-        <div class="ls-steps" id="ls-build-steps"></div>
-        <div class="ls-caps" id="ls-build-caps"></div>
-        <div class="ls-btns">
-          <button id="ls-build-back" type="button" class="ls-ghost">← MISSION</button>
-          <button id="ls-build-go" type="button" class="ls-go">TO THE PAD →</button>
+        <div id="ls-build-stage" class="ls-bench-stage">
+          <div class="ls-head over"><span class="ls-kick" id="ls-build-target"></span><span class="ls-step-lbl">BUILD · ASSEMBLE THE ROCKET</span></div>
+          <div class="ls-bench-hint">drag to rotate</div>
+        </div>
+        <div class="ls-bench-sheet">
+          <div class="ls-steps" id="ls-build-steps"></div>
+          <div class="ls-caps" id="ls-build-caps"></div>
+          <div class="ls-btns">
+            <button id="ls-build-back" type="button" class="ls-ghost">← MISSION</button>
+            <button id="ls-build-go" type="button" class="ls-go">TO THE PAD →</button>
+          </div>
         </div>
       </div>
       <!-- PHASE 3: DIAL-IN -->

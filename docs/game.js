@@ -7785,6 +7785,7 @@
     stepTweens(now);
 
     if (S.phase === 'lsterm') { if (lsTerm) lsTermStep(dt, now); return; }
+    if (lsBench && lsBench.active) { lsBenchStep(dt, now); return; }   // the live 3D build bench
     if (S.phase === 'title' || S.phase === 'rfp' || S.phase === 'score') return;
 
     if (S.phase === 'build' || S.phase === 'wiring' || S.phase === 'det' || S.phase === 'arm') {
@@ -9606,6 +9607,9 @@
     ['ls-mission', 'ls-build', 'ls-dial', 'ls-flight', 'ls-result'].forEach(function (p) {
       $(p).classList.toggle('hidden', p !== id);
     });
+    var onBench = (id === 'ls-build');
+    $('scr-longshot').classList.toggle('bench', onBench);      // transparent so the 3D rocket shows through
+    if (lsBench) { lsBench.active = onBench; if (onBench) lsBench.lastTouch = performance.now(); }
   }
   function lsDifficulty(mi) {
     return mi <= 50 ? { c: 'd-easy', t: 'SHORT RANGE · FORGIVING' }
@@ -9710,7 +9714,120 @@
     svg.addEventListener('pointercancel', function () { drag = false; });
   })();
   $('ls-mission-back').addEventListener('click', function () { PGAudio.tap(); showHQ(); });
-  $('ls-mission-go').addEventListener('click', function () { PGAudio.tap(); lsRenderBuild(); lsShowPhase('ls-build'); });
+  $('ls-mission-go').addEventListener('click', function () { PGAudio.tap(); lsBenchInit(); lsBuildRocket(S.ls.build); lsRenderBuild(); lsShowPhase('ls-build'); });
+
+  /* ---------- PHASE 2: the live 3D build bench ----------
+     A turntable rocket you assemble part by part — every choice reshapes the
+     3D article in real time. PBR metal + env reflections + a cast shadow,
+     matched to the terminal look so the thing you build is the thing you fly. */
+  var lsBench = null;
+  var LS_AF_DIM = { dart: { len: 1.9, rad: 0.15 }, lance: { len: 2.7, rad: 0.19 }, pillar: { len: 3.5, rad: 0.25 } };
+  var LS_WH_DIM = { light: 0.5, std: 0.74, heavy: 1.0 };
+  var LS_MO_STAGES = { single: 1, dual: 2, triple: 3 };
+  function lsBenchInit() {
+    if (lsBench) return lsBench;
+    try {
+      var scene = new THREE.Scene();
+      scene.background = gradientTexture([[0, '#0a121e'], [0.5, '#14273b'], [1, '#20374f']], true);   // studio backdrop
+      scene.environment = envMap('#33506e', '#4a5f78', '#141c26', 150, 'rgba(215,232,255,0.95)');    // studio IBL for the metal
+      var camera = new THREE.PerspectiveCamera(38, W / H, 0.1, 120);
+      scene.add(new THREE.HemisphereLight(0xcfe0f4, 0x2a3446, 0.75));
+      var key = new THREE.DirectionalLight(0xffffff, 1.55); key.position.set(5, 9, 6);
+      key.castShadow = true; key.shadow.mapSize.set(1024, 1024);
+      key.shadow.camera.near = 1; key.shadow.camera.far = 34;
+      key.shadow.camera.left = -5; key.shadow.camera.right = 5; key.shadow.camera.top = 7; key.shadow.camera.bottom = -4;
+      key.shadow.bias = -0.0005; key.shadow.radius = 3; scene.add(key);
+      var rim = new THREE.DirectionalLight(0x86acff, 0.75); rim.position.set(-6, 3, -6); scene.add(rim);   // cool product rim
+      var fill = new THREE.DirectionalLight(0xffe9cf, 0.42); fill.position.set(-4, 2, 7); scene.add(fill);
+      // turntable
+      var pad = new THREE.Mesh(new THREE.CylinderGeometry(2.5, 2.75, 0.28, 56),
+        new THREE.MeshStandardMaterial({ color: 0x1a2531, metalness: 0.7, roughness: 0.42, envMapIntensity: 0.8 }));
+      pad.position.y = -0.14; pad.receiveShadow = true; scene.add(pad);
+      var padTop = new THREE.Mesh(new THREE.CircleGeometry(2.42, 56),
+        new THREE.MeshStandardMaterial({ color: 0x27384a, metalness: 0.35, roughness: 0.7 }));
+      padTop.rotation.x = -Math.PI / 2; padTop.position.y = 0.005; padTop.receiveShadow = true; scene.add(padTop);
+      var rocket = new THREE.Group(); scene.add(rocket);
+      lsBench = { scene: scene, camera: camera, rocket: rocket, theta: -0.75, phi: 0.42, vel: 0, spin: true, lastTouch: 0, active: false };
+      lsBenchCam();
+    } catch (e) { lsBench = null; }
+    return lsBench;
+  }
+  function lsMetal(col, rough) { return new THREE.MeshStandardMaterial({ color: col, metalness: 0.9, roughness: rough != null ? rough : 0.3, envMapIntensity: 1.0 }); }
+  function lsBuildRocket(build) {
+    if (!lsBenchInit()) return;
+    var g = lsBench.rocket;
+    while (g.children.length) { var c = g.children.pop(); if (c.geometry) c.geometry.dispose(); }
+    var af = LS_AF_DIM[build.airframe], noseLen = LS_WH_DIM[build.warhead] * 1.4, stages = LS_MO_STAGES[build.motor];
+    var rad = af.rad, bodyLen = af.len, y0 = 0.45;   // body base above the pad; motor hangs below
+    // body
+    var body = new THREE.Mesh(new THREE.CylinderGeometry(rad, rad * 1.05, bodyLen, 44), lsMetal(0xc4ced8, 0.28));
+    body.position.y = y0 + bodyLen / 2; body.castShadow = true; g.add(body);
+    // painted service band + a stencil ring
+    var band = new THREE.Mesh(new THREE.CylinderGeometry(rad * 1.015, rad * 1.05, 0.16, 44), lsMetal(0xd8492f, 0.5));
+    band.position.y = y0 + bodyLen * 0.62; band.castShadow = true; g.add(band);
+    // warhead nose (bigger/blunter with mass)
+    var nose = new THREE.Mesh(new THREE.ConeGeometry(rad, noseLen, 44),
+      new THREE.MeshStandardMaterial({ color: 0xb23a2a, metalness: 0.45, roughness: 0.5, envMapIntensity: 0.9 }));
+    nose.position.y = y0 + bodyLen + noseLen / 2; nose.castShadow = true; g.add(nose);
+    // guidance: fin span + a star-tracker sensor ring
+    var finCount = build.guidance === 'star' ? 3 : 4;
+    var finSpan = build.guidance === 'fin' ? 0.6 : build.guidance === 'inertial' ? 0.44 : 0.3;
+    for (var i = 0; i < finCount; i++) {
+      var ang = i * (Math.PI * 2 / finCount);
+      var fin = new THREE.Mesh(new THREE.BoxGeometry(0.035, finSpan, finSpan * 1.35), lsMetal(0x9aa4ad, 0.4));
+      fin.position.set(Math.sin(ang) * (rad + finSpan * 0.48), y0 + finSpan * 0.7, Math.cos(ang) * (rad + finSpan * 0.48));
+      fin.rotation.y = ang; fin.castShadow = true; g.add(fin);
+    }
+    if (build.guidance === 'star') {
+      var sring = new THREE.Mesh(new THREE.TorusGeometry(rad * 1.16, 0.028, 10, 28),
+        new THREE.MeshStandardMaterial({ color: 0x63cfff, metalness: 0.4, roughness: 0.3, emissive: 0x1b6f9c, emissiveIntensity: 0.6 }));
+      sring.position.y = y0 + bodyLen * 0.9; sring.rotation.x = Math.PI / 2; g.add(sring);
+    }
+    // motor: a skirt + one nozzle bell per stage clustered at the base
+    var skirt = new THREE.Mesh(new THREE.CylinderGeometry(rad * 1.05, rad * 1.25, 0.32, 32), lsMetal(0x39434f, 0.5));
+    skirt.position.y = y0 - 0.14; skirt.castShadow = true; g.add(skirt);
+    var bellR = rad * (stages === 1 ? 0.9 : stages === 2 ? 0.62 : 0.5);
+    var offs = stages === 1 ? [[0, 0]] : stages === 2 ? [[-bellR * 0.9, 0], [bellR * 0.9, 0]]
+      : [[0, bellR * 1.0], [-bellR * 0.95, -bellR * 0.55], [bellR * 0.95, -bellR * 0.55]];
+    offs.forEach(function (o) {
+      var bell = new THREE.Mesh(new THREE.CylinderGeometry(bellR * 0.55, bellR, 0.34, 22),
+        new THREE.MeshStandardMaterial({ color: 0x2a2f36, metalness: 0.85, roughness: 0.35 }));
+      bell.position.set(o[0], y0 - 0.42, o[1]); bell.castShadow = true; g.add(bell);
+    });
+    // frame the whole article in the upper stage (the control sheet owns the lower ~45%)
+    var top = y0 + bodyLen + noseLen, bot = y0 - 0.6, Hr = top - bot, ctr = (top + bot) / 2;
+    lsBench.fitR = clamp(Hr / 0.33, 9, 18);
+    lsBench.fitEye = ctr + Hr * 0.06;
+    lsBench.fitLook = ctr - Hr * 0.22;                    // bias the article up out from behind the sheet
+    if (lsBench) lsBench.lastTouch = performance.now();   // reset idle-spin so the change is visible face-on
+  }
+  function lsBenchCam() {
+    var b = lsBench, r = b.fitR || 11;
+    b.camera.position.set(Math.sin(b.theta) * r * Math.cos(b.phi), (b.fitEye || 2.4) + Math.sin(b.phi) * r * 0.5, Math.cos(b.theta) * r * Math.cos(b.phi));
+    b.camera.lookAt(0, b.fitLook != null ? b.fitLook : 2, 0);
+  }
+  function lsBenchStep(dt, now) {
+    var b = lsBench;
+    if (b.spin && now - b.lastTouch > 2200) b.theta += dt * 0.32;
+    else if (Math.abs(b.vel) > 0.0008) { b.theta += b.vel * dt; b.vel *= Math.exp(-4 * dt); }
+    b.phi = clamp(b.phi, 0.06, 1.05);
+    lsBenchCam();
+    renderScene(b.scene, b.camera);
+  }
+  // drag the stage to orbit the rocket
+  (function () {
+    var stage = $('ls-build-stage'); if (!stage) return;
+    var drag = false, lx = 0, ly = 0;
+    stage.addEventListener('pointerdown', function (e) { if (!lsBench) return; drag = true; lx = e.clientX; ly = e.clientY; lsBench.lastTouch = performance.now(); stage.setPointerCapture(e.pointerId); });
+    stage.addEventListener('pointermove', function (e) {
+      if (!drag || !lsBench) return;
+      var dx = e.clientX - lx, dy = e.clientY - ly; lx = e.clientX; ly = e.clientY;
+      lsBench.theta -= dx * 0.01; lsBench.phi += dy * 0.006; lsBench.vel = -dx * 0.01 / Math.max(0.001, 0.016);
+      lsBench.lastTouch = performance.now();
+    });
+    stage.addEventListener('pointerup', function () { drag = false; });
+    stage.addEventListener('pointercancel', function () { drag = false; });
+  })();
 
   /* ---------- PHASE 2: the stepped builder ---------- */
   function lsRenderBuild() {
@@ -9732,6 +9849,7 @@
       b.addEventListener('click', function () {
         PGAudio.tick();
         S.ls.build[b.dataset.step] = b.dataset.opt;
+        lsBuildRocket(S.ls.build);     // reshape the 3D article live
         lsRenderBuild();
       });
     });
@@ -9741,7 +9859,6 @@
       'MAX RANGE <b>' + cap.rangeMax.toLocaleString() + ' mi</b>' +
       ' · ACCURACY <b>' + cap.accClass + '</b>' +
       ' · MASS <b>' + cap.mass + ' kg</b>' +
-      ' · COST <b>' + fmt$(cap.cost) + '</b>' +
       ' · <span class="' + (reaches ? 'reach-ok' : 'reach-no') + '">' + (reaches ? 'REACHES TARGET ✓' : 'CANNOT REACH — BIGGER MOTOR') + '</span>';
     $('ls-build-go').disabled = !reaches;
   }

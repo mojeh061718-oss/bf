@@ -1842,6 +1842,30 @@ body.lefty .bay-cta.gyro { left: auto; right: 12px; }
 .ls-caps b { color: var(--amber-hot); }
 .ls-caps .reach-ok { color: var(--green-hot); } .ls-caps .reach-no { color: #ff5b47; }
 
+/* ---- the live 3D build bench: screen goes transparent so the canvas rocket shows ---- */
+#scr-longshot.bench, #scr-longshot.bench .ls-frame { background: none; }
+#ls-build { padding: 0; gap: 0; }
+.ls-bench-stage { flex: 1; position: relative; min-height: 0; touch-action: none; }
+.ls-bench-stage .ls-head.over { position: absolute; top: calc(12px + var(--sat)); left: 16px; right: 16px; text-shadow: 0 2px 12px rgba(0,0,0,.95); }
+.ls-bench-hint { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); font-family: var(--mono); font-size: 8px; letter-spacing: .22em; color: rgba(243,237,224,.4); pointer-events: none; }
+.ls-bench-sheet {
+  background: linear-gradient(180deg, rgba(7,14,24,.62) 0%, rgba(7,14,24,.93) 20%, #060d17 100%);
+  border-top: 1px solid var(--bp-line-soft);
+  padding: 11px 16px calc(12px + var(--sab));
+  display: flex; flex-direction: column; gap: 9px;
+  -webkit-backdrop-filter: blur(9px); backdrop-filter: blur(9px);
+}
+.ls-bench-sheet .ls-steps { flex: none; max-height: 40vh; gap: 7px; }
+.ls-bench-sheet .ls-step-h { margin-bottom: 3px; }
+.ls-bench-sheet .ls-opt { padding: 6px 8px; }
+.ls-bench-sheet .ls-opt .lo-sub { margin-top: 2px; }
+@media (orientation: landscape) and (max-height: 620px) {
+  /* landscape: rocket left, controls in a right-hand rail */
+  #ls-build { flex-direction: row; }
+  .ls-bench-sheet { width: 300px; border-top: none; border-left: 1px solid var(--bp-line-soft); overflow-y: auto; }
+  .ls-bench-sheet .ls-steps { max-height: none; }
+}
+
 /* DIAL-IN — the firing solution */
 .ls-dials { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; display: flex; flex-direction: column; gap: 12px; }
 .ls-dial-row { border: 1px solid var(--bp-line-soft); border-radius: 10px; padding: 10px 12px; background: rgba(8,18,32,.7); }
