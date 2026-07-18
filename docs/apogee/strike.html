@@ -40,7 +40,7 @@
       var T = window.THREE, X = window.TX;
       var canvas = document.getElementById('gl');
       var renderer = new T.WebGLRenderer({ canvas: canvas, antialias: true, powerPreference: 'high-performance' });
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 3));
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2)); // DPR 2 buys the 120fps budget
       renderer.toneMapping = T.ACESFilmicToneMapping;
       renderer.toneMappingExposure = 1.0;
       var isP3 = false; try { isP3 = !!(window.matchMedia && window.matchMedia('(color-gamut: p3)').matches); } catch (e) {}
@@ -456,6 +456,7 @@
           'void main(){ vec3 c=texture2D(tDiffuse,vUv).rgb; vec2 q=vUv-0.5;' +
           ' float vig=smoothstep(1.1,0.32,length(q)*1.32); c*=mix(0.68,1.0,vig);' +
           ' c=(c-0.5)*1.05+0.5; float g=rnd(vUv*uRes+uTime)-0.5; c+=g*0.025;' +
+          ' float d=(rnd(gl_FragCoord.xy)-0.5)/255.0; c+=d;' +   // dither: kill night-sky banding
           ' gl_FragColor=vec4(c,1.0); }'
       });
       composer.addPass(grade);
