@@ -9867,76 +9867,155 @@
     PGAudio.tap();
     var aim = lsAim();
     var opt = PG2.lsOptimal(S.ls.build, aim.rangeMi, aim.bearingDeg);
-    // the pad hands you a rough, WRONG starting solution — dialing it in is the game
-    S.ls.dial = { elev: 45, azimuth: (aim.bearingDeg + 18) % 360, rangeSet: Math.round(opt.rangeSet * 0.7), gyro: null };
     S.ls.rangeMax = opt.rangeMax;
+    // THE ENGINEER — Ballistics preloads a solution that lands within 5–20% of
+    // target: close, but never a hit. You correct it and lock it in. Seeded, so
+    // a mission is a fixed puzzle, not a dice roll.
+    var r = PG2.stream(aim.rangeMi + ':' + aim.bearingDeg + ':' + S.ls.type, 'ls:preload');
+    var f = 0.05 + r() * 0.15, th = r() * 6.2832;
+    var cross = f * aim.rangeMi * Math.sin(th), down = f * aim.rangeMi * Math.cos(th);
+    S.ls.preErr = Math.max(1, Math.round(f * 100));
+    S.ls.dial = {
+      elev: 45 + (r() - 0.5) * 3,
+      azimuth: (aim.bearingDeg + Math.atan2(cross, aim.rangeMi) * 180 / Math.PI + 360) % 360,
+      rangeSet: clamp(Math.round(aim.rangeMi - down), 1, opt.rangeMax),
+      throttle: 1, gyro: null
+    };
     lsRenderDial(); lsShowPhase('ls-dial');
   });
 
-  /* ---------- PHASE 3: dial-in the firing solution ---------- */
-  function lsSlider(name, goal, valHtml, frac, onFrac, fine) {
-    var fineBtns = fine ? '<div class="ls-fine">' + fine.map(function (f, i) {
-      return '<button type="button" data-fine="' + f.d + '">' + f.t + '</button>'; }).join('') + '</div>' : '';
-    return '<div class="ls-dial-row" data-dial="' + name + '">' +
-      '<div class="ld-top"><span class="ld-name">' + name + '</span><span class="ld-goal">' + goal + '</span></div>' +
-      '<div class="ld-val">' + valHtml + '</div>' +
-      '<div class="ls-slider"><div class="lsl-fill" style="width:' + (frac * 100) + '%"></div><div class="lsl-knob" style="left:' + (frac * 100) + '%"></div></div>' +
-      fineBtns + '</div>';
+  /* ---------- PHASE 3: the flight-plan console ---------- */
+  // deterministic mean impact (no noise) + the CEP the gyro shrinks — the honest
+  // preview, from the exact numbers lsResolve will use at launch.
+  function lsProject(build, d, aimMi, aimBearing) {
+    var cap = PG2.lsCapability(build), gu = cap.guidance, g = d.gyro == null ? 0 : d.gyro;
+    var elevEff = Math.max(0, Math.sin(2 * d.elev * Math.PI / 180));
+    var thr = d.throttle == null ? 1 : d.throttle;
+    var achieved = Math.min(d.rangeSet, cap.rangeMax) * elevEff * thr;
+    var aRad = d.azimuth * Math.PI / 180, tRad = aimBearing * Math.PI / 180;
+    var ex = achieved * Math.sin(aRad) - aimMi * Math.sin(tRad);
+    var ey = achieved * Math.cos(aRad) - aimMi * Math.cos(tRad);
+    var down = ex * Math.sin(tRad) + ey * Math.cos(tRad);
+    var cross = ex * Math.cos(tRad) - ey * Math.sin(tRad);
+    var dispMi = gu.cepBase * aimMi + gu.driftK * (1 - g) * aimMi * 0.010 / Math.max(cap.stab, 0.4);
+    var missMi = Math.hypot(down, cross);
+    var hit = Math.max(0.5, aimMi * 0.006);
+    var reachable = aimMi <= cap.rangeMax * 1.02;
+    return { down: down, cross: cross, missMi: missMi, dispMi: dispMi,
+      bull: Math.max(0.15, aimMi * 0.0016), hit: hit, near: Math.max(2.5, aimMi * 0.025),
+      reachable: reachable, locked: reachable && (missMi + dispMi) <= hit,
+      azOk: Math.abs(cross) <= hit * 0.75, dnOk: Math.abs(down) <= hit * 0.75,
+      gyroOk: d.gyro != null && dispMi <= hit };
   }
   function lsRenderDial() {
-    S.phase = 'longshot';
-    showScreen('scr-longshot');
-    lsShowPhase('ls-dial');
-    var d = S.ls.dial, rmax = S.ls.rangeMax, aim = lsAim();
+    S.phase = 'longshot'; showScreen('scr-longshot'); lsShowPhase('ls-dial');
+    var aim = lsAim();
     $('ls-dial-target').textContent = (S.ls.type === 'moving' ? 'INTERCEPT ' : 'TARGET ') + aim.rangeMi.toLocaleString() + ' MI · BRG ' + Math.round(aim.bearingDeg) + '°' + (S.ls.type === 'hardened' ? ' · HARDENED' : S.ls.type === 'moving' ? ' · ' + S.ls.moveSpeed + ' MPH' : '');
-    var wrap = $('ls-dials');
-    wrap.innerHTML =
-      lsSlider('ELEVATION', 'LOFT · 45° IS EFFICIENT', d.elev.toFixed(1) + '<small>°</small>', (d.elev - 20) / 50, null,
-        [{ d: -1, t: '−1°' }, { d: -0.1, t: '−0.1°' }, { d: 0.1, t: '+0.1°' }, { d: 1, t: '+1°' }]) +
-      lsSlider('AZIMUTH', 'MATCH ' + (S.ls.type === 'moving' ? 'INTERCEPT ' : 'BEARING ') + Math.round(aim.bearingDeg) + '°', d.azimuth.toFixed(1) + '<small>°</small>', d.azimuth / 360, null,
-        [{ d: -1, t: '−1°' }, { d: -0.1, t: '−0.1°' }, { d: 0.1, t: '+0.1°' }, { d: 1, t: '+1°' }]) +
-      lsSlider('BURN CUTOFF', 'RANGE SET · ≤ ' + rmax.toLocaleString() + ' MI', Math.round(d.rangeSet).toLocaleString() + '<small> mi</small>', d.rangeSet / rmax, null,
-        [{ d: -50, t: '−50' }, { d: -5, t: '−5' }, { d: 5, t: '+5' }, { d: 50, t: '+50' }]) +
-      '<div class="ls-dial-row"><div class="ld-top"><span class="ld-name">GUIDANCE GYRO</span><span class="ld-goal">' + S.ls.build.guidance.toUpperCase() + ' PACKAGE</span></div>' +
-      '<button type="button" id="ls-gyro-btn" class="ls-gyro-btn' + (d.gyro == null ? ' warn' : '') + '">' +
-      (d.gyro == null ? '⟲ ALIGN THE GYRO — UNCAGED' : '⟲ GYRO ALIGNED ' + Math.round(d.gyro * 100) + '% · RE-RUN') + '</button></div>';
-    // wire sliders
-    wrap.querySelectorAll('.ls-dial-row[data-dial]').forEach(function (row) {
-      var name = row.dataset.dial, sl = row.querySelector('.ls-slider');
-      function setFrac(fr) {
-        fr = clamp(fr, 0, 1);
-        if (name === 'ELEVATION') d.elev = 20 + fr * 50;
-        else if (name === 'AZIMUTH') d.azimuth = fr * 360;
-        else d.rangeSet = fr * rmax;
-        lsRenderDial();
-      }
-      sl.addEventListener('pointerdown', function (e) { sl.setPointerCapture(e.pointerId); sl._drag = true; var r = sl.getBoundingClientRect(); setFrac((e.clientX - r.left) / r.width); });
-      sl.addEventListener('pointermove', function (e) { if (!sl._drag) return; var r = sl.getBoundingClientRect(); setFrac((e.clientX - r.left) / r.width); });
-      sl.addEventListener('pointerup', function () { sl._drag = false; });
-      row.querySelectorAll('.ls-fine button').forEach(function (fb) {
-        fb.addEventListener('click', function () {
-          PGAudio.tick();
-          var dv = parseFloat(fb.dataset.fine);
-          if (name === 'ELEVATION') d.elev = clamp(d.elev + dv, 20, 70);
-          else if (name === 'AZIMUTH') d.azimuth = (d.azimuth + dv + 360) % 360;
-          else d.rangeSet = clamp(d.rangeSet + dv, 1, rmax);
-          lsRenderDial();
+    $('ls-dials').innerHTML =
+      '<div class="fp-eng" id="fp-eng"></div>' +
+      '<svg id="fp-plot" class="fp-plot" viewBox="0 0 200 200" aria-label="impact plot"></svg>' +
+      '<div class="fp-inst-h">BURN PLAN · CUT THE ENGINE, GLIDE IT IN <span id="fp-burn-read"></span></div>' +
+      '<svg id="fp-burn" class="fp-burn" viewBox="0 0 300 122" aria-label="burn profile"></svg>' +
+      '<div class="fp-thr-row"><span>THROTTLE</span><div class="fp-thr" id="fp-thr"><div class="fp-thr-fill" id="fp-thr-fill"></div><div class="fp-thr-knob" id="fp-thr-knob"></div></div><b id="fp-thr-val"></b></div>' +
+      '<div class="fp-row">' +
+        '<div class="fp-inst"><div class="fp-inst-h">HEADING <span id="fp-head-read"></span></div><svg id="fp-head" class="fp-rose" viewBox="0 0 100 100"></svg>' +
+          '<div class="fp-fine" data-axis="head"><button type="button" data-d="-1">−1°</button><button type="button" data-d="-0.1">−.1</button><button type="button" data-d="0.1">+.1</button><button type="button" data-d="1">+1°</button></div></div>' +
+        '<div class="fp-inst"><div class="fp-inst-h">LOFT <span id="fp-loft-read"></span></div><svg id="fp-loft" class="fp-loft" viewBox="0 0 100 100"></svg>' +
+          '<div class="fp-fine" data-axis="loft"><button type="button" data-d="-1">−1°</button><button type="button" data-d="-0.1">−.1</button><button type="button" data-d="0.1">+.1</button><button type="button" data-d="1">+1°</button></div></div>' +
+      '</div>' +
+      '<button type="button" id="ls-gyro-btn" class="ls-gyro-btn"></button>';
+    lsWireDial();
+    lsDialUpdate();
+  }
+  function lsWireDial() {
+    var d = S.ls.dial, rmax = S.ls.rangeMax, aim = lsAim();
+    function dragEl(id, fn) {
+      var el = $(id); if (!el) return;
+      function at(e) { var r = el.getBoundingClientRect(); fn(clamp((e.clientX - r.left) / r.width, 0, 1), clamp((e.clientY - r.top) / r.height, 0, 1)); lsDialUpdate(); }
+      el.addEventListener('pointerdown', function (e) { el.setPointerCapture(e.pointerId); el._drag = true; PGAudio.tick(); at(e); });
+      el.addEventListener('pointermove', function (e) { if (el._drag) at(e); });
+      el.addEventListener('pointerup', function () { el._drag = false; });
+      el.addEventListener('pointercancel', function () { el._drag = false; });
+    }
+    var xMax = Math.min(rmax, Math.max(aim.rangeMi * 1.9, aim.rangeMi + 50));   // window the burn axis around the target
+    dragEl('fp-burn', function (fx) { d.rangeSet = clamp(Math.round(((fx * 300 - 12) / 276) * xMax), 1, rmax); });
+    dragEl('fp-thr', function (fx) { d.throttle = clamp(0.85 + fx * 0.30, 0.85, 1.15); });
+    dragEl('fp-head', function (fx, fy) { d.azimuth = (Math.atan2(fx * 100 - 50, -(fy * 100 - 50)) * 180 / Math.PI + 360) % 360; });
+    dragEl('fp-loft', function (fx, fy) { var e = clamp(20 + (1 - fy) * 50, 20, 70); if (Math.abs(e - 45) < 1.6) e = 45; d.elev = e; });
+    $('ls-dials').querySelectorAll('.fp-fine').forEach(function (grp) {
+      var axis = grp.dataset.axis;
+      grp.querySelectorAll('button').forEach(function (b) {
+        b.addEventListener('click', function () {
+          PGAudio.tick(); var dv = parseFloat(b.dataset.d);
+          if (axis === 'head') d.azimuth = (d.azimuth + dv + 360) % 360; else d.elev = clamp(d.elev + dv, 20, 70);
+          lsDialUpdate();
         });
       });
     });
-    $('ls-gyro-btn').addEventListener('click', function () {
-      PGAudio.tap();
-      openGyroBench();
-      gyroSt.lsTarget = true;   // route the capture back to the firing solution
-    });
-    // soft nav-computer read: how close the solution looks (never the exact answer)
-    var opt = PG2.lsOptimal(S.ls.build, aim.rangeMi, aim.bearingDeg);
-    var eAz = Math.abs(PG2.lsAngDiff(d.azimuth, aim.bearingDeg));
-    var eEl = Math.abs(d.elev - 45);
-    var eRs = Math.abs(d.rangeSet - opt.rangeSet) / Math.max(aim.rangeMi, 1);
-    var score = eAz / 3 + eEl / 8 + eRs * 6 + (d.gyro == null ? 1.5 : (1 - d.gyro) * 1.2);
-    var tag = score < 0.6 ? ['sol-nominal', 'NOMINAL — SEND IT'] : score < 1.8 ? ['sol-close', 'CLOSE — TIGHTEN IT'] : ['sol-coarse', 'COARSE — KEEP DIALING'];
-    $('ls-solution').innerHTML = 'NAV COMPUTER · SOLUTION QUALITY: <b class="' + tag[0] + '">' + tag[1] + '</b>';
+    $('ls-gyro-btn').addEventListener('click', function () { PGAudio.tap(); openGyroBench(); gyroSt.lsTarget = true; });
+  }
+  function lsDialUpdate() {
+    var d = S.ls.dial, rmax = S.ls.rangeMax, aim = lsAim();
+    var pr = lsProject(S.ls.build, d, aim.rangeMi, aim.bearingDeg);
+    var col = pr.locked ? '#7ed49a' : '#ffb570';
+    $('fp-eng').innerHTML = 'BALLISTICS · PROPOSED SOLUTION' +
+      '<span class="fp-eng-sub">You’re ~' + (S.ls.preErr || 10) + '% off. Correct heading, burn cutoff & throttle, align the gyro — walk it into the ring and LOCK.</span>';
+    // impact plot — auto-zooms as the marker closes on the bull
+    var span = Math.max(pr.missMi * 1.3, pr.hit * 3.0, pr.dispMi * 1.6, aim.rangeMi * 0.0008);
+    function R(mi) { return clamp(88 * mi / span, 0, 97); }
+    var mx = clamp(88 * pr.cross / span, -97, 97), my = clamp(88 * pr.down / span, -97, 97);
+    $('fp-plot').innerHTML =
+      '<circle cx="100" cy="100" r="' + R(pr.near).toFixed(1) + '" class="fpp-ring"/>' +
+      '<circle cx="100" cy="100" r="' + R(pr.hit).toFixed(1) + '" class="fpp-hit"/>' +
+      '<circle cx="100" cy="100" r="' + R(pr.bull).toFixed(1) + '" class="fpp-bull"/>' +
+      '<line x1="100" y1="84" x2="100" y2="116" class="fpp-cross"/><line x1="84" y1="100" x2="116" y2="100" class="fpp-cross"/>' +
+      '<circle cx="' + (100 + mx).toFixed(1) + '" cy="' + (100 - my).toFixed(1) + '" r="' + R(pr.dispMi).toFixed(1) + '" class="fpp-cep" style="stroke:' + col + '"/>' +
+      '<circle cx="' + (100 + mx).toFixed(1) + '" cy="' + (100 - my).toFixed(1) + '" r="4.5" fill="' + col + '"/>';
+    // burn graph — x windowed around the target so the control is precise where it matters
+    var thr = d.throttle == null ? 1 : d.throttle;
+    var xMax = Math.min(rmax, Math.max(aim.rangeMi * 1.9, aim.rangeMi + 50));
+    function BX(mi) { return 12 + clamp(mi / xMax, 0, 1) * 276; }
+    function TY(t) { return 106 - clamp((t - 0.6) / 0.6, 0, 1) * 92; }
+    var cutX = BX(d.rangeSet), py = TY(thr), tgtX = BX(aim.rangeMi), impX = BX(aim.rangeMi + pr.down);
+    $('fp-burn').innerHTML =
+      '<rect x="12" y="' + py.toFixed(1) + '" width="' + Math.max(0, cutX - 12).toFixed(1) + '" height="' + (106 - py).toFixed(1) + '" class="fpb-bar"/>' +
+      '<path d="M ' + cutX.toFixed(1) + ' ' + py.toFixed(1) + ' Q ' + ((cutX + impX) / 2).toFixed(1) + ' ' + (py - 12).toFixed(1) + ' ' + impX.toFixed(1) + ' 106" class="fpb-glide" style="stroke:' + col + '"/>' +
+      '<line x1="' + tgtX.toFixed(1) + '" y1="8" x2="' + tgtX.toFixed(1) + '" y2="106" class="fpb-tgt"/><text x="' + tgtX.toFixed(1) + '" y="119" class="fpb-txt" text-anchor="middle">TGT</text>' +
+      '<line x1="12" y1="106" x2="288" y2="106" class="fpb-ground"/>' +
+      '<line x1="' + cutX.toFixed(1) + '" y1="' + py.toFixed(1) + '" x2="' + cutX.toFixed(1) + '" y2="106" class="fpb-cut"/><circle cx="' + cutX.toFixed(1) + '" cy="' + py.toFixed(1) + '" r="6" class="fpb-cuth"/>';
+    $('fp-burn-read').textContent = 'CUT ' + Math.round(d.rangeSet).toLocaleString() + ' mi';
+    var tf = clamp((thr - 0.85) / 0.30, 0, 1);
+    $('fp-thr-fill').style.width = (tf * 100) + '%'; $('fp-thr-knob').style.left = (tf * 100) + '%';
+    $('fp-thr-val').textContent = Math.round(thr * 100) + '%';
+    // heading rose
+    var hAng = d.azimuth * Math.PI / 180, tAng = aim.bearingDeg * Math.PI / 180;
+    $('fp-head').innerHTML =
+      '<circle cx="50" cy="50" r="44" class="fpr-face"/><circle cx="50" cy="50" r="44" class="fpr-rim"/>' +
+      '<line x1="50" y1="50" x2="' + (50 + Math.sin(tAng) * 41).toFixed(1) + '" y2="' + (50 - Math.cos(tAng) * 41).toFixed(1) + '" class="fpr-tgt"/>' +
+      '<line x1="50" y1="50" x2="' + (50 + Math.sin(hAng) * 37).toFixed(1) + '" y2="' + (50 - Math.cos(hAng) * 37).toFixed(1) + '" class="fpr-needle" style="stroke:' + (pr.azOk ? '#7ed49a' : '#ffb570') + '"/>' +
+      '<circle cx="50" cy="50" r="3.2" fill="#cfe0f4"/>';
+    $('fp-head-read').textContent = d.azimuth.toFixed(1) + '°';
+    // loft arc
+    var lf = (d.elev - 20) / 50, apexY = 84 - lf * 66;
+    $('fp-loft').innerHTML =
+      '<line x1="10" y1="84" x2="90" y2="84" class="fpl-ground"/>' +
+      '<path d="M 12 84 Q 50 ' + apexY.toFixed(1) + ' 88 84" class="fpl-arc" style="stroke:' + (Math.abs(d.elev - 45) < 3 ? '#7ed49a' : '#ffb570') + '"/>';
+    $('fp-loft-read').textContent = d.elev.toFixed(1) + '°';
+    // gyro
+    $('ls-gyro-btn').className = 'ls-gyro-btn' + (d.gyro == null ? ' warn' : '');
+    $('ls-gyro-btn').innerHTML = d.gyro == null ? '⟲ ALIGN THE GYRO — UNCAGED' : '⟲ GYRO ALIGNED ' + Math.round(d.gyro * 100) + '% · RE-RUN';
+    // lock strip + launch
+    var launch = $('ls-dial-launch');
+    if (pr.locked) {
+      $('ls-solution').innerHTML = 'FIRE CONTROL · <b class="sol-nominal">● SOLUTION LOCKED — SEND IT</b>';
+      launch.classList.add('locked'); launch.textContent = 'LAUNCH ▲';
+    } else {
+      var need = [];
+      if (!pr.reachable) need.push('RANGE'); if (!pr.azOk) need.push('HEADING');
+      if (!pr.dnOk) need.push('BURN'); if (!pr.gyroOk) need.push('GYRO');
+      $('ls-solution').innerHTML = 'FIRE CONTROL · <b class="sol-coarse">CORRECT: ' + need.join(' · ') + '</b> <span class="fp-miss">proj. miss ' + pr.missMi.toFixed(pr.missMi < 10 ? 2 : 1) + ' mi</span>';
+      launch.classList.remove('locked'); launch.textContent = 'LAUNCH ▲ · UNLOCKED';
+    }
   }
   $('ls-dial-back').addEventListener('click', function () { PGAudio.tap(); lsRenderBuild(); lsShowPhase('ls-build'); });
   $('ls-dial-launch').addEventListener('click', function () {
@@ -10474,7 +10553,7 @@
       if (!S.ls || !S.ls.dial) return;
       var aim = lsAim();
       var o = PG2.lsOptimal(S.ls.build, aim.rangeMi, aim.bearingDeg);
-      S.ls.dial = { elev: 45, azimuth: o.azimuth, rangeSet: o.rangeSet, gyro: 0.95 };
+      S.ls.dial = { elev: 45, azimuth: o.azimuth, rangeSet: o.rangeSet, throttle: 1, gyro: 0.95 };
       lsRenderDial();
     },
     debugFinishCloseout: function () {

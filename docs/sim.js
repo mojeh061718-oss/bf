@@ -1728,7 +1728,10 @@ var PG2 = (function () {
     opts = opts || {};
     var cap = lsCapability(b), gu = cap.guidance, g = dial.gyro == null ? 0 : dial.gyro;
     var elevEff = Math.max(0, Math.sin(2 * dial.elev * Math.PI / 180));
-    var achieved = Math.min(dial.rangeSet, cap.rangeMax) * elevEff;
+    // THROTTLE: the burn-energy vernier. null → nominal 1 so every legacy dial
+    // (and lsOptimal/lsCannedDial, which never set it) resolves byte-identical.
+    var thr = dial.throttle == null ? 1 : dial.throttle;
+    var achieved = Math.min(dial.rangeSet, cap.rangeMax) * elevEff * thr;
     var aRad = dial.azimuth * Math.PI / 180, tRad = aimBearing * Math.PI / 180;
     // where the missile flies (the aimed point) minus where the target is — pure
     // dial/aim skill, NEVER auto-corrected: the missile delivers to the coordinates
