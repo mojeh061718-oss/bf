@@ -9958,19 +9958,73 @@
       }
     });
   }
+  /* a normal map baked from a height field (dunes + ripple grain) so the sand
+     catches real relief under the grazing dusk light. Linear-encoded — a
+     normal map through the sRGB path would light wrong. Built once, cached. */
+  function lsGroundNormalTex() {
+    if (TEXCACHE['lsgroundN']) return TEXCACHE['lsgroundN'];
+    var N = 256;
+    var hc = document.createElement('canvas'); hc.width = N; hc.height = N;
+    var hx = hc.getContext('2d');
+    hx.fillStyle = '#808080'; hx.fillRect(0, 0, N, N);
+    var r = PG2.stream('lsgroundN', 'h');
+    for (var i = 0; i < 34; i++) {                       // low-freq dunes
+      var bx = r() * N, by = r() * N, br = 22 + r() * 70, up = r() > 0.5;
+      var g = hx.createRadialGradient(bx, by, 0, bx, by, br);
+      g.addColorStop(0, up ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.22)');
+      g.addColorStop(1, 'rgba(128,128,128,0)');
+      hx.fillStyle = g; hx.beginPath(); hx.arc(bx, by, br, 0, 7); hx.fill();
+    }
+    for (var j = 0; j < 3600; j++) {                     // ripple grain
+      var v = r() > 0.5 ? 255 : 0;
+      hx.fillStyle = 'rgba(' + v + ',' + v + ',' + v + ',' + (0.05 + r() * 0.09).toFixed(3) + ')';
+      hx.fillRect(r() * N, r() * N, 1 + r() * 2, 1 + r());
+    }
+    var hd = hx.getImageData(0, 0, N, N).data;
+    function H(px, py) { px = (px + N) % N; py = (py + N) % N; return hd[(py * N + px) * 4] / 255; }
+    var nc = document.createElement('canvas'); nc.width = N; nc.height = N;
+    var nx = nc.getContext('2d'), nd = nx.createImageData(N, N), st = 2.4;
+    for (var y = 0; y < N; y++) for (var xx = 0; xx < N; xx++) {
+      var ddx = (H(xx - 1, y) - H(xx + 1, y)) * st, ddy = (H(xx, y - 1) - H(xx, y + 1)) * st;
+      var len = Math.hypot(ddx, ddy, 1), o = (y * N + xx) * 4;
+      nd.data[o] = Math.round((ddx / len * 0.5 + 0.5) * 255);
+      nd.data[o + 1] = Math.round((ddy / len * 0.5 + 0.5) * 255);
+      nd.data[o + 2] = Math.round((1 / len * 0.5 + 0.5) * 255);
+      nd.data[o + 3] = 255;
+    }
+    nx.putImageData(nd, 0, 0);
+    var tex = new THREE.CanvasTexture(nc);
+    tex.encoding = THREE.LinearEncoding;
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping; tex.repeat.set(10, 10);
+    TEXCACHE['lsgroundN'] = tex;
+    return tex;
+  }
   function lsTermInit() {
     if (lsTerm) return lsTerm;
     try {
       var scene = new THREE.Scene();
-      scene.background = gradientTexture([[0, '#0b1220'], [0.4, '#26344d'], [0.72, '#7a5838'], [1, '#bb8c55']], true);   // dusk sky → warm horizon
-      scene.fog = new THREE.Fog(0x3a3040, 95, 360);
-      var camera = new THREE.PerspectiveCamera(46, W / H, 0.1, 1200);
-      scene.add(new THREE.HemisphereLight(0xbcd0e6, 0x3a2c1e, 0.9));
-      var sun = new THREE.DirectionalLight(0xffe0b0, 1.3); sun.position.set(-60, 70, 22); scene.add(sun);
-      // textured desert floor, tiled out to the fog line
+      scene.background = gradientTexture([[0, '#0b1220'], [0.4, '#26344d'], [0.72, '#7a5838'], [1, '#c2914f']], true);   // dusk sky → warm horizon
+      scene.fog = new THREE.Fog(0x9a6b44, 130, 440);        // warm haze that matches the horizon (aerial depth)
+      scene.environment = envMap('#25334c', '#7a5838', '#2a2018', 200, 'rgba(255,222,170,0.95)');   // IBL: real reflections on the metal
+      var camera = new THREE.PerspectiveCamera(46, W / H, 0.1, 1400);
+      scene.add(new THREE.HemisphereLight(0xbcd0e6, 0x4a3826, 0.72));
+      // low warm dusk sun — long raking shadows, and it casts for real
+      var sun = new THREE.DirectionalLight(0xffdca6, 1.7); sun.position.set(-52, 40, 34);
+      sun.castShadow = true; sun.shadow.mapSize.set(1024, 1024);
+      sun.shadow.camera.near = 1; sun.shadow.camera.far = 160;
+      sun.shadow.camera.left = -34; sun.shadow.camera.right = 34; sun.shadow.camera.top = 34; sun.shadow.camera.bottom = -34;
+      sun.shadow.bias = -0.0006; sun.shadow.radius = 3; scene.add(sun);
+      var rim = new THREE.DirectionalLight(0x9ab6d6, 0.5); rim.position.set(50, 22, -34); scene.add(rim);   // cool back-rim separates the airframe from the dusk
+      // a real sun in the sky — bright enough that the bloom gives it a corona
+      var sunSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: fxTextures().flash, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.95 }));
+      sunSprite.material.color.setRGB(1, 0.9, 0.72); sunSprite.scale.set(90, 90, 1);
+      sunSprite.position.set(-150, 70, 150); scene.add(sunSprite);
+      // textured desert floor — PBR with a baked normal map, tiled to the fog line
       var gt = lsGroundTex(); gt.wrapS = gt.wrapT = THREE.RepeatWrapping; gt.repeat.set(10, 10);
-      var ground = new THREE.Mesh(new THREE.PlaneGeometry(1800, 1800), skinMat(gt, { shin: 3 }));
-      ground.rotation.x = -Math.PI / 2; scene.add(ground);
+      try { gt.anisotropy = renderer.capabilities.getMaxAnisotropy(); } catch (e) {}
+      var ground = new THREE.Mesh(new THREE.PlaneGeometry(1800, 1800),
+        new THREE.MeshStandardMaterial({ map: gt, normalMap: lsGroundNormalTex(), normalScale: new THREE.Vector2(1.25, 1.25), roughness: 0.96, metalness: 0.0 }));
+      ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
       // scorch scar, revealed at impact
       var scorch = new THREE.Mesh(new THREE.CircleGeometry(6, 40),
         new THREE.MeshBasicMaterial({ color: 0x120a06, transparent: true, opacity: 0, depthWrite: false }));
@@ -9985,11 +10039,20 @@
       var bull = new THREE.Mesh(new THREE.CircleGeometry(0.7, 24), new THREE.MeshBasicMaterial({ color: 0xff6a52, transparent: true, opacity: 0.9, depthWrite: false }));
       bull.rotation.x = -Math.PI / 2; bull.position.y = 0.07; ringG.add(bull);
       scene.add(ringG);
-      // the missile: slim body + hot glowing nose + fins + a plasma sheath
+      // the missile: smooth machined-metal airframe (PBR, reflects the env),
+      // a reentry-hot nose, swept fins — casts a real shadow on the sand
       var m = new THREE.Group();
-      m.add(new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.2, 2.3, 12), mat(0xd0d7de, { shin: 70 })));
-      var nose = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.66, 12), mat(0xc24a34, { emissive: 0xff5522, ei: 1.5 })); nose.position.y = 1.48; m.add(nose);
-      [0, 1, 2].forEach(function (i) { var f = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.04), mat(0x9aa4ad, { shin: 40 })); f.position.y = -1.0; f.rotation.y = i * 2.09; m.add(f); });
+      var body = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.22, 2.3, 40),
+        new THREE.MeshStandardMaterial({ color: 0xb9c2cb, metalness: 0.92, roughness: 0.3, envMapIntensity: 0.95 }));
+      body.castShadow = true; m.add(body);
+      var nose = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.7, 40),
+        new THREE.MeshStandardMaterial({ color: 0x6a2a1e, metalness: 0.5, roughness: 0.5, emissive: 0xff4e1e, emissiveIntensity: 0.6 }));
+      nose.position.y = 1.5; nose.castShadow = true; m.add(nose);
+      [0, 1, 2].forEach(function (i) {
+        var f = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.04),
+          new THREE.MeshStandardMaterial({ color: 0x9aa4ad, metalness: 0.85, roughness: 0.4, envMapIntensity: 0.9 }));
+        f.position.y = -1.0; f.rotation.y = i * 2.09; f.castShadow = true; m.add(f);
+      });
       var sheath = new THREE.Sprite(new THREE.SpriteMaterial({ map: fxTextures().fire, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0 }));
       sheath.material.color.setRGB(1, 0.8, 0.5); sheath.scale.set(1.6, 3.2, 1); sheath.position.y = -0.4; m.add(sheath);
       scene.add(m);
@@ -10005,7 +10068,7 @@
         scene.add(cs); contrail.push(cs);
       }
       var flare = new THREE.PointLight(0xffd9a6, 0, 170, 1.7); scene.add(flare);   // the detonation lights the desert
-      lsTerm = { scene: scene, camera: camera, ring: ringG, bull: bull, missile: m, sheath: sheath, trail: trail, contrail: contrail, scorch: scorch, flare: flare, fx: null };
+      lsTerm = { scene: scene, camera: camera, ring: ringG, bull: bull, missile: m, nose: nose, sheath: sheath, trail: trail, contrail: contrail, scorch: scorch, flare: flare, fx: null };
     } catch (e) { lsTerm = null; }
     return lsTerm;
   }
@@ -10059,6 +10122,7 @@
       // plasma sheath bites harder deeper in, and blooms in the slow-mo
       lt.sheath.material.opacity = clamp(0.35 + k * 0.65, 0, 1) * (k > 0.03 ? 1 : 0);
       var shs = 2.6 + k * 2.2; lt.sheath.scale.set(shs * 0.55, shs, 1);
+      if (lt.nose) lt.nose.material.emissiveIntensity = 0.6 + k * 2.6;   // the nose glows white-hot on the way in
       // hot plasma trail sampled behind the nose (hot at the tip → cool up-track)
       lt.trail.forEach(function (s, i) {
         var kk = Math.max(0, e - i * 0.012);
