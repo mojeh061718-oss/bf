@@ -1,0 +1,506 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>APOGEE — strike</title>
+<style>
+  :root { --sat: env(safe-area-inset-top,0px); --sab: env(safe-area-inset-bottom,0px); }
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { height:100%; background:#030407; overflow:hidden; }
+  #gl { position:fixed; inset:0; width:100%; height:100%; display:block; touch-action:none; }
+  .hud { position:fixed; inset:0; pointer-events:none; font-family:"SF Mono",ui-monospace,Menlo,monospace; color:#eceff4; }
+  .kick { position:absolute; top:calc(22px + var(--sat)); left:24px; font-size:11px; letter-spacing:.42em; font-weight:700; color:#e9ecf2; opacity:.9; }
+  .sub  { position:absolute; top:calc(40px + var(--sat)); left:24px; font-size:8.5px; letter-spacing:.28em; color:#8b93a3; }
+  .yield { position:absolute; top:calc(22px + var(--sat)); right:24px; text-align:right; }
+  .yield .lbl { font-size:8px; letter-spacing:.24em; color:#7f8798; }
+  .yield .val { font-size:15px; font-weight:700; letter-spacing:.02em; color:#ffd9a6; margin-top:4px; font-variant-numeric:tabular-nums; }
+  .cta { position:absolute; left:0; right:0; bottom:calc(46px + var(--sab)); text-align:center; font-size:9px; letter-spacing:.34em; color:#8b93a3; transition:opacity .4s; }
+  #err { position:fixed; left:12px; right:12px; bottom:12px; font:11px monospace; color:#ff8d7e; white-space:pre-wrap; z-index:9; }
+</style>
+</head>
+<body>
+  <canvas id="gl"></canvas>
+  <div class="hud">
+    <div class="kick">A P O G E E</div>
+    <div class="sub">STRIKE · TITAN-IX ARTICLE</div>
+    <div class="yield"><div class="lbl">YIELD</div><div class="val">1.4 <span style="font-size:8px;color:#7f8798">MT</span></div></div>
+    <div class="cta" id="cta">TAP TO STRIKE</div>
+    <a href="./index.html" style="position:absolute; bottom:calc(40px + var(--sab)); left:24px; pointer-events:auto; text-decoration:none; font-size:9px; letter-spacing:.28em; color:#8b93a3; border:1px solid #2a3140; padding:7px 11px; border-radius:6px;">←&nbsp;BENCH</a>
+  </div>
+  <div id="err"></div>
+  <script src="./vendor/three.bundle.js"></script>
+  <script>
+  (function () {
+    var showErr = function (m) { document.getElementById('err').textContent = String(m); };
+    window.addEventListener('error', function (e) { showErr(e.message + '\n' + (e.error && e.error.stack || '')); });
+    try {
+      var T = window.THREE, X = window.TX;
+      var canvas = document.getElementById('gl');
+      var renderer = new T.WebGLRenderer({ canvas: canvas, antialias: true, powerPreference: 'high-performance' });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 3));
+      renderer.toneMapping = T.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 1.0;
+      var isP3 = false; try { isP3 = !!(window.matchMedia && window.matchMedia('(color-gamut: p3)').matches); } catch (e) {}
+      try { if (isP3 && T.DisplayP3ColorSpace) renderer.outputColorSpace = T.DisplayP3ColorSpace; } catch (e) {}
+      renderer.shadowMap.enabled = true; renderer.shadowMap.type = T.PCFSoftShadowMap;
+
+      var scene = new T.Scene();
+      // night-strike backdrop — deep blue void that lifts to a faint horizon glow
+      (function () {
+        var c = document.createElement('canvas'); c.width = 8; c.height = 512;
+        var g = c.getContext('2d'); var grd = g.createLinearGradient(0, 0, 0, 512);
+        grd.addColorStop(0.0, '#04060c'); grd.addColorStop(0.62, '#070a13'); grd.addColorStop(0.9, '#0c1220'); grd.addColorStop(1.0, '#141b2c');
+        g.fillStyle = grd; g.fillRect(0, 0, 8, 512);
+        var tex = new T.CanvasTexture(c); tex.colorSpace = T.SRGBColorSpace; scene.background = tex;
+      })();
+      scene.fog = new T.Fog(0x0a0e18, 28, 72);
+
+      var pmrem = new T.PMREMGenerator(renderer);
+      var envRT = pmrem.fromScene(new X.RoomEnvironment(), 0.06);
+      scene.environment = envRT.texture;
+
+      var W = window.innerWidth, H = window.innerHeight;
+      var camera = new T.PerspectiveCamera(38, W / H, 0.1, 200);
+      var camBase = new T.Vector3(), lookBase = new T.Vector3(0, 1.2, 0);
+
+      // ---- ambient night lighting (kept low so the blast reads as the light source) ----
+      var moon = new T.DirectionalLight(0x9fb6e0, 0.5); moon.position.set(-7, 9, -4);
+      moon.castShadow = true; moon.shadow.mapSize.set(2048, 2048);
+      moon.shadow.camera.near = 1; moon.shadow.camera.far = 40;
+      moon.shadow.camera.left = -10; moon.shadow.camera.right = 10; moon.shadow.camera.top = 10; moon.shadow.camera.bottom = -10;
+      moon.shadow.bias = -0.0005; moon.shadow.radius = 5; scene.add(moon);
+      scene.add(new T.HemisphereLight(0x28324a, 0x05070c, 0.35));
+
+      // ---- ground: dark scorched hardpan with a soft pool of moonlight ----
+      var groundTex = (function () {
+        var c = document.createElement('canvas'); c.width = c.height = 512; var g = c.getContext('2d');
+        g.fillStyle = '#0b0e15'; g.fillRect(0, 0, 512, 512);
+        var rg = g.createRadialGradient(256, 256, 30, 256, 256, 260);
+        rg.addColorStop(0, '#1a2030'); rg.addColorStop(0.5, '#0f1420'); rg.addColorStop(1, '#070a10');
+        g.fillStyle = rg; g.fillRect(0, 0, 512, 512);
+        for (var i = 0; i < 900; i++) { var x = Math.random() * 512, y = Math.random() * 512, a = Math.random() * 0.05; g.fillStyle = 'rgba(90,100,120,' + a + ')'; g.fillRect(x, y, 2, 2); }
+        var tx = new T.CanvasTexture(c); tx.colorSpace = T.SRGBColorSpace; return tx;
+      })();
+      var ground = new T.Mesh(new T.CircleGeometry(60, 96),
+        new T.MeshStandardMaterial({ map: groundTex, metalness: 0.1, roughness: 0.92, envMapIntensity: 0.3 }));
+      ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
+
+      // ---- the target: a concrete bunker on the pad ----
+      var target = new T.Group(); scene.add(target);
+      var conc = new T.MeshStandardMaterial({ color: 0x3a3d42, metalness: 0.0, roughness: 0.85, envMapIntensity: 0.4 });
+      var bunker = new T.Mesh(new T.BoxGeometry(2.0, 1.15, 2.0), conc); bunker.position.y = 0.575; bunker.castShadow = true; bunker.receiveShadow = true; target.add(bunker);
+      var roof = new T.Mesh(new T.BoxGeometry(2.2, 0.18, 2.2), new T.MeshStandardMaterial({ color: 0x2c2f34, metalness: 0.1, roughness: 0.8 })); roof.position.y = 1.24; roof.castShadow = true; target.add(roof);
+      // a slim mast so there is a vertical read + a warm marker light
+      var mast = new T.Mesh(new T.CylinderGeometry(0.03, 0.03, 1.1, 12), new T.MeshStandardMaterial({ color: 0x54585f, metalness: 1, roughness: 0.5 })); mast.position.set(0.7, 1.85, 0.7); target.add(mast);
+      var marker = new T.Mesh(new T.SphereGeometry(0.05, 12, 12), new T.MeshStandardMaterial({ color: 0xff5a3c, emissive: 0xff3a1e, emissiveIntensity: 3 })); marker.position.set(0.7, 2.42, 0.7); target.add(marker);
+
+      // =====================================================================
+      //  TEMPERATURE RAMP  (hot core -> smoke)  baked to a 256x1 LUT
+      // =====================================================================
+      var rampTex = (function () {
+        var c = document.createElement('canvas'); c.width = 256; c.height = 1; var g = c.getContext('2d');
+        var grd = g.createLinearGradient(0, 0, 256, 0);
+        grd.addColorStop(0.00, '#1a1008'); grd.addColorStop(0.15, '#7a1500'); grd.addColorStop(0.30, '#e23b08');
+        grd.addColorStop(0.45, '#ff7a18'); grd.addColorStop(0.65, '#ffc24b'); grd.addColorStop(0.85, '#fff3b0'); grd.addColorStop(1.00, '#ffffff');
+        g.fillStyle = grd; g.fillRect(0, 0, 256, 1);
+        var tx = new T.CanvasTexture(c); tx.colorSpace = T.SRGBColorSpace; tx.minFilter = T.LinearFilter; tx.magFilter = T.LinearFilter; tx.generateMipmaps = false; return tx;
+      })();
+
+      // shared 3D simplex noise for the fireball
+      var SNOISE = [
+        'vec3 mod289(vec3 x){return x-floor(x*(1.0/289.0))*289.0;}',
+        'vec4 mod289(vec4 x){return x-floor(x*(1.0/289.0))*289.0;}',
+        'vec4 permute(vec4 x){return mod289(((x*34.0)+1.0)*x);}',
+        'vec4 taylorInvSqrt(vec4 r){return 1.79284291400159-0.85373472095314*r;}',
+        'float snoise(vec3 v){const vec2 C=vec2(1.0/6.0,1.0/3.0);const vec4 D=vec4(0.0,0.5,1.0,2.0);',
+        'vec3 i=floor(v+dot(v,C.yyy));vec3 x0=v-i+dot(i,C.xxx);',
+        'vec3 g=step(x0.yzx,x0.xyz);vec3 l=1.0-g;vec3 i1=min(g.xyz,l.zxy);vec3 i2=max(g.xyz,l.zxy);',
+        'vec3 x1=x0-i1+C.xxx;vec3 x2=x0-i2+C.yyy;vec3 x3=x0-D.yyy;',
+        'i=mod289(i);vec4 p=permute(permute(permute(i.z+vec4(0.0,i1.z,i2.z,1.0))+i.y+vec4(0.0,i1.y,i2.y,1.0))+i.x+vec4(0.0,i1.x,i2.x,1.0));',
+        'float n_=0.142857142857;vec3 ns=n_*D.wyz-D.xzx;vec4 j=p-49.0*floor(p*ns.z*ns.z);',
+        'vec4 x_=floor(j*ns.z);vec4 y_=floor(j-7.0*x_);vec4 x=x_*ns.x+ns.yyyy;vec4 y=y_*ns.x+ns.yyyy;vec4 h=1.0-abs(x)-abs(y);',
+        'vec4 b0=vec4(x.xy,y.xy);vec4 b1=vec4(x.zw,y.zw);vec4 s0=floor(b0)*2.0+1.0;vec4 s1=floor(b1)*2.0+1.0;vec4 sh=-step(h,vec4(0.0));',
+        'vec4 a0=b0.xzyw+s0.xzyw*sh.xxyy;vec4 a1=b1.xzyw+s1.xzyw*sh.zzww;',
+        'vec3 p0=vec3(a0.xy,h.x);vec3 p1=vec3(a0.zw,h.y);vec3 p2=vec3(a1.xy,h.z);vec3 p3=vec3(a1.zw,h.w);',
+        'vec4 norm=taylorInvSqrt(vec4(dot(p0,p0),dot(p1,p1),dot(p2,p2),dot(p3,p3)));p0*=norm.x;p1*=norm.y;p2*=norm.z;p3*=norm.w;',
+        'vec4 m=max(0.6-vec4(dot(x0,x0),dot(x1,x1),dot(x2,x2),dot(x3,x3)),0.0);m=m*m;',
+        'return 42.0*dot(m*m,vec4(dot(p0,x0),dot(p1,x1),dot(p2,x2),dot(p3,x3)));}',
+        'float fbm(vec3 p){float f=0.0;float a=0.5;for(int i=0;i<5;i++){f+=a*snoise(p);p*=2.02;a*=0.5;}return f;}'
+      ].join('\n');
+
+      // =====================================================================
+      //  FIREBALL  — noise-displaced sphere, fresnel rim, temperature ramp
+      // =====================================================================
+      var fireMat = new T.ShaderMaterial({
+        transparent: false, depthWrite: true, depthTest: true,
+        uniforms: {
+          uTime: { value: 0 }, uTemp: { value: 1 }, uGrow: { value: 0 }, uEmissive: { value: 6.0 },
+          uOpacity: { value: 1 }, uRamp: { value: rampTex }
+        },
+        vertexShader: SNOISE + '\n' +
+          'uniform float uTime; uniform float uGrow;' +
+          'varying vec3 vN; varying vec3 vView; varying float vNoise;' +
+          'void main(){' +
+          ' float n = fbm(normalize(position)*2.3 + vec3(0.0,-uTime*0.7,0.0));' +
+          ' float n2 = fbm(normalize(position)*5.0 + vec3(uTime*0.4,uTime*0.5,0.0));' +
+          ' vNoise = clamp(n*0.5+0.5 + n2*0.12, 0.0, 1.0);' +
+          ' float disp = (0.25 + 0.55*uGrow) * (0.5 + 0.7*vNoise);' +
+          ' vec3 pos = position * (0.9 + disp);' +
+          ' vec4 wp = modelMatrix * vec4(pos,1.0);' +
+          ' vN = normalize(mat3(modelMatrix)*normal);' +
+          ' vView = normalize(cameraPosition - wp.xyz);' +
+          ' gl_Position = projectionMatrix * viewMatrix * wp; }',
+        fragmentShader:
+          'uniform sampler2D uRamp; uniform float uTemp; uniform float uEmissive;' +
+          'varying vec3 vN; varying vec3 vView; varying float vNoise;' +
+          'void main(){' +
+          ' float fres = pow(1.0 - max(dot(normalize(vN), normalize(vView)),0.0), 1.6);' +
+          // hot where noise is high AND facing us; cooler/darker at the rolling rim
+          ' float temp = clamp(uTemp*(0.55 + 0.75*vNoise) - fres*0.20, 0.0, 1.0);' +
+          ' vec3 col = texture2D(uRamp, vec2(temp,0.5)).rgb;' +
+          // ember floor keeps it glowing as it cools; hot core pushes >1 so only it blooms
+          ' vec3 outc = col * (0.42 + uEmissive * temp * temp);' +
+          ' gl_FragColor = vec4(outc, 1.0); }'
+      });
+      var fireball = new T.Mesh(new T.IcosahedronGeometry(1, 6), fireMat);
+      fireball.visible = false; scene.add(fireball);
+
+      // a second, cooler smoke-shell that takes over as the fire dies (alpha, lit-ish dark)
+      var smokeShellMat = new T.ShaderMaterial({
+        transparent: true, depthWrite: false, blending: T.NormalBlending,
+        uniforms: { uTime: { value: 0 }, uGrow: { value: 0 }, uOpacity: { value: 0 } },
+        vertexShader: SNOISE + '\n' +
+          'uniform float uTime; uniform float uGrow;' +
+          'varying float vNoise; varying vec3 vN; varying vec3 vView;' +
+          'void main(){ float n=fbm(normalize(position)*1.8+vec3(0.0,-uTime*0.25,0.0)); vNoise=n*0.5+0.5;' +
+          ' float disp=(0.5+1.1*uGrow)*(0.5+0.8*vNoise); vec3 pos=position*(0.9+disp);' +
+          ' vec4 wp=modelMatrix*vec4(pos,1.0); vN=normalize(mat3(modelMatrix)*normal); vView=normalize(cameraPosition-wp.xyz);' +
+          ' gl_Position=projectionMatrix*viewMatrix*wp; }',
+        fragmentShader:
+          'uniform float uOpacity; varying float vNoise; varying vec3 vN; varying vec3 vView;' +
+          'void main(){ float fres=pow(1.0-max(dot(normalize(vN),normalize(vView)),0.0),1.5);' +
+          ' float lum=0.10+0.16*vNoise + 0.06*fres; vec3 col=vec3(lum*1.05,lum*1.0,lum*0.98);' +
+          ' float a=smoothstep(0.15,0.6,vNoise)*uOpacity; gl_FragColor=vec4(col,a); }'
+      });
+      var smokeShell = new T.Mesh(new T.IcosahedronGeometry(1, 4), smokeShellMat);
+      smokeShell.visible = false; scene.add(smokeShell);
+
+      // =====================================================================
+      //  FLASH  — additive billboard + a real point light
+      // =====================================================================
+      var flashTex = (function () {
+        var c = document.createElement('canvas'); c.width = c.height = 128; var g = c.getContext('2d');
+        var rg = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+        rg.addColorStop(0, 'rgba(255,255,255,1)'); rg.addColorStop(0.25, 'rgba(255,240,210,0.9)');
+        rg.addColorStop(0.55, 'rgba(255,150,60,0.35)'); rg.addColorStop(1, 'rgba(255,120,40,0)');
+        g.fillStyle = rg; g.fillRect(0, 0, 128, 128);
+        var tx = new T.CanvasTexture(c); tx.colorSpace = T.SRGBColorSpace; return tx;
+      })();
+      var flash = new T.Sprite(new T.SpriteMaterial({ map: flashTex, blending: T.AdditiveBlending, transparent: true, depthWrite: false, opacity: 0 }));
+      flash.scale.setScalar(0.1); flash.visible = false; scene.add(flash);
+      var blastLight = new T.PointLight(0xffb060, 0, 20, 2.0); blastLight.position.set(0, 1.4, 0); scene.add(blastLight);
+
+      // =====================================================================
+      //  EMBERS / SPARKS  — additive Points, ballistic + gravity + flicker
+      // =====================================================================
+      var sparkTex = (function () {
+        var c = document.createElement('canvas'); c.width = c.height = 64; var g = c.getContext('2d');
+        var rg = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+        rg.addColorStop(0, 'rgba(255,255,255,1)'); rg.addColorStop(0.4, 'rgba(255,200,120,0.8)'); rg.addColorStop(1, 'rgba(255,140,60,0)');
+        g.fillStyle = rg; g.fillRect(0, 0, 64, 64);
+        var tx = new T.CanvasTexture(c); tx.colorSpace = T.SRGBColorSpace; return tx;
+      })();
+      var NSPARK = 150;
+      var sparkGeo = new T.BufferGeometry();
+      var sparkPos = new Float32Array(NSPARK * 3), sparkCol = new Float32Array(NSPARK * 3), sparkVel = new Float32Array(NSPARK * 3), sparkLife = new Float32Array(NSPARK), sparkTtl = new Float32Array(NSPARK);
+      sparkGeo.setAttribute('position', new T.BufferAttribute(sparkPos, 3));
+      sparkGeo.setAttribute('color', new T.BufferAttribute(sparkCol, 3));
+      var sparkMat = new T.PointsMaterial({ size: 0.14, map: sparkTex, vertexColors: true, transparent: true, depthWrite: false, blending: T.AdditiveBlending, sizeAttenuation: true });
+      var sparks = new T.Points(sparkGeo, sparkMat); sparks.visible = false; scene.add(sparks);
+
+      // =====================================================================
+      //  SMOKE + DUST  — soft billboards, color-over-life, buoyant
+      // =====================================================================
+      var puffTex = (function () {
+        var c = document.createElement('canvas'); c.width = c.height = 128; var g = c.getContext('2d');
+        for (var k = 0; k < 5; k++) { var px = 40 + Math.random() * 48, py = 40 + Math.random() * 48, pr = 26 + Math.random() * 26;
+          var rg = g.createRadialGradient(px, py, 0, px, py, pr); rg.addColorStop(0, 'rgba(255,255,255,0.5)'); rg.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = rg; g.fillRect(0, 0, 128, 128); }
+        var tx = new T.CanvasTexture(c); tx.colorSpace = T.SRGBColorSpace; return tx;
+      })();
+      function makePuffPool(n, sizeBase) {
+        var group = new T.Group(); group.visible = false; scene.add(group);
+        var items = [];
+        for (var i = 0; i < n; i++) {
+          var m = new T.Sprite(new T.SpriteMaterial({ map: puffTex, transparent: true, depthWrite: false, opacity: 0, color: 0xffffff, rotation: Math.random() * 6.28 }));
+          m.scale.setScalar(sizeBase); group.add(m); items.push(m);
+        }
+        return { group: group, items: items };
+      }
+      var smoke = makePuffPool(16, 1.5);
+      var dust = makePuffPool(14, 1.4);
+      var smokeState = [], dustState = [];
+
+      // =====================================================================
+      //  SHOCKWAVE RING  — flat ground ring, distance-field mask, expands
+      // =====================================================================
+      var ringMat = new T.ShaderMaterial({
+        transparent: true, depthWrite: false, blending: T.AdditiveBlending, side: T.DoubleSide,
+        uniforms: { uRadius: { value: 0 }, uThick: { value: 0.10 }, uOpacity: { value: 0 } },
+        vertexShader: 'varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }',
+        fragmentShader:
+          'varying vec2 vUv; uniform float uRadius; uniform float uThick; uniform float uOpacity;' +
+          'void main(){ float d=length(vUv-0.5)*2.0; float ring=1.0-clamp(abs(d-uRadius)/uThick,0.0,1.0); ring=pow(ring,2.2);' +
+          ' float inner=smoothstep(uRadius+0.05,uRadius-0.15,d);' +
+          ' vec3 col=mix(vec3(1.0,0.55,0.25), vec3(1.0,0.9,0.7), ring);' +
+          ' gl_FragColor=vec4(col, ring*uOpacity + inner*0.04*uOpacity); }'
+      });
+      var ring = new T.Mesh(new T.PlaneGeometry(24, 24), ringMat);
+      ring.rotation.x = -Math.PI / 2; ring.position.y = 0.03; ring.visible = false; scene.add(ring);
+
+      // =====================================================================
+      //  DEBRIS  — instanced chunks, ballistic + spin
+      // =====================================================================
+      var NDEB = 18;
+      var debGeo = new T.BoxGeometry(0.18, 0.18, 0.18);
+      var debMat = new T.MeshStandardMaterial({ color: 0x33363c, metalness: 0.1, roughness: 0.8, emissive: 0x180a04, emissiveIntensity: 1.0 });
+      var debris = new T.InstancedMesh(debGeo, debMat, NDEB); debris.visible = false; scene.add(debris);
+      var debState = [];
+      var _m = new T.Matrix4(), _q = new T.Quaternion(), _e = new T.Euler(), _s = new T.Vector3(1, 1, 1), _p = new T.Vector3();
+
+      // =====================================================================
+      //  INCOMING MISSILE  — a bright tracer that descends before impact
+      // =====================================================================
+      var missile = new T.Group(); scene.add(missile);
+      var mBody = new T.Mesh(new T.CylinderGeometry(0.07, 0.07, 0.8, 16), new T.MeshStandardMaterial({ color: 0x9aa0a8, metalness: 1, roughness: 0.35 }));
+      var mNose = new T.Mesh(new T.ConeGeometry(0.07, 0.28, 16), new T.MeshStandardMaterial({ color: 0x2a2c30, metalness: 0.3, roughness: 0.6 })); mNose.position.y = 0.54;
+      missile.add(mBody); missile.add(mNose);
+      var mGlow = new T.Sprite(new T.SpriteMaterial({ map: sparkTex, blending: T.AdditiveBlending, transparent: true, depthWrite: false, color: 0xffcaa0 })); mGlow.scale.setScalar(1.0); mGlow.position.y = -0.5; missile.add(mGlow);
+      missile.visible = false;
+
+      // =====================================================================
+      //  SEQUENCER
+      // =====================================================================
+      var rnd = function (a, b) { return a + Math.random() * (b - a); };
+      var CENTER = new T.Vector3(0, 1.35, 0);
+      var mode = 'idle', tSeq = 0, eBlast = 0, blastActive = false, shakeTrauma = 0;
+
+      function trigger() {
+        if (mode !== 'idle') return;
+        mode = 'incoming'; tSeq = 0;
+        missile.visible = true; missile.position.set(rnd(-2, 2), 16, rnd(-2, 2));
+        document.getElementById('cta').style.opacity = '0';
+      }
+
+      function detonate() {
+        eBlast = 0; blastActive = true; shakeTrauma = 1.0;
+        // fireball
+        fireball.visible = true; fireball.position.copy(CENTER); fireMat.uniforms.uOpacity.value = 1;
+        smokeShell.visible = true; smokeShell.position.copy(CENTER); smokeShellMat.uniforms.uOpacity.value = 0;
+        // flash
+        flash.visible = true; flash.position.copy(CENTER); flash.material.opacity = 1; flash.scale.setScalar(1.2);
+        blastLight.position.copy(CENTER); blastLight.intensity = 16;
+        // sparks
+        sparks.visible = true;
+        for (var i = 0; i < NSPARK; i++) {
+          var dir = new T.Vector3(rnd(-1, 1), rnd(-0.1, 1.2), rnd(-1, 1)).normalize();
+          var spd = rnd(4, 13);
+          sparkVel[i * 3] = dir.x * spd; sparkVel[i * 3 + 1] = dir.y * spd + rnd(1, 4); sparkVel[i * 3 + 2] = dir.z * spd;
+          sparkPos[i * 3] = CENTER.x; sparkPos[i * 3 + 1] = CENTER.y; sparkPos[i * 3 + 2] = CENTER.z;
+          sparkTtl[i] = rnd(0.6, 1.5); sparkLife[i] = sparkTtl[i];
+        }
+        // smoke
+        smoke.group.visible = true; smokeState.length = 0;
+        for (var s = 0; s < smoke.items.length; s++) {
+          smokeState.push({ pos: new T.Vector3(CENTER.x + rnd(-0.4, 0.4), CENTER.y + rnd(-0.2, 0.6), CENTER.z + rnd(-0.4, 0.4)),
+            vel: new T.Vector3(rnd(-0.3, 0.3), rnd(0.9, 2.1), rnd(-0.3, 0.3)), delay: rnd(0.2, 0.7), ttl: rnd(2.0, 3.2), age: 0, size0: rnd(1.1, 1.8), spin: rnd(-0.4, 0.4) });
+        }
+        // dust
+        dust.group.visible = true; dustState.length = 0;
+        for (var d = 0; d < dust.items.length; d++) {
+          var ang = Math.random() * 6.28, rad = rnd(0.5, 2.5);
+          dustState.push({ pos: new T.Vector3(Math.cos(ang) * rad, rnd(0.1, 0.5), Math.sin(ang) * rad),
+            vel: new T.Vector3(Math.cos(ang) * rnd(2, 5), rnd(0.3, 1.0), Math.sin(ang) * rnd(2, 5)), delay: rnd(0.03, 0.2), ttl: rnd(1.6, 2.8), age: 0, size0: rnd(1.3, 2.0), spin: rnd(-0.3, 0.3) });
+        }
+        // ring
+        ring.visible = true; ringMat.uniforms.uRadius.value = 0; ringMat.uniforms.uOpacity.value = 1; ring.position.set(CENTER.x, 0.03, CENTER.z);
+        // debris
+        debris.visible = true; debState.length = 0;
+        for (var k = 0; k < NDEB; k++) {
+          var dd = new T.Vector3(rnd(-1, 1), rnd(0.3, 1.4), rnd(-1, 1)).normalize(), sp = rnd(5, 11);
+          debState.push({ pos: new T.Vector3(CENTER.x, CENTER.y, CENTER.z), vel: new T.Vector3(dd.x * sp, dd.y * sp + rnd(2, 5), dd.z * sp),
+            rot: new T.Euler(rnd(0, 6), rnd(0, 6), rnd(0, 6)), spin: new T.Vector3(rnd(-8, 8), rnd(-8, 8), rnd(-8, 8)), ttl: rnd(0.9, 1.6), age: 0, scl: rnd(0.5, 1.4) });
+        }
+      }
+
+      function updateBlast(dt) {
+        if (!blastActive) return;
+        eBlast += dt;
+        var e = eBlast;
+        // ---- flash: sharp brief pop then reveal the fireball ----
+        var fl = Math.exp(-e / 0.045);
+        flash.material.opacity = fl; flash.scale.setScalar(1.2 + (1 - fl) * 1.4);
+        blastLight.intensity = 16 * Math.exp(-e / 0.09) + 3.5 * Math.exp(-e / 0.4);
+        if (e > 0.28) { flash.visible = false; }
+        // ---- fireball: grow ease-out, cool over 0.7s, then hand to smoke shell ----
+        var grow = 1 - Math.pow(1 - Math.min(e / 0.18, 1), 3);
+        var fscale = (0.45 + grow * 0.62) * (1.0 + Math.max(0, e - 0.5) * 0.25);
+        fireball.scale.setScalar(fscale);
+        fireMat.uniforms.uGrow.value = grow;
+        var temp = Math.max(0, 1 - e / 1.05);
+        fireMat.uniforms.uTemp.value = temp;
+        if (e > 1.35) fireball.visible = false;
+        // smoke shell rises from the fireball as it dies
+        smokeShell.scale.setScalar(fscale * (1.0 + Math.max(0, e - 0.2) * 0.5));
+        smokeShell.position.y = CENTER.y + Math.max(0, e - 0.2) * 0.8;
+        smokeShellMat.uniforms.uGrow.value = Math.min(1, grow + e * 0.3);
+        var ssO = Math.min(1, Math.max(0, (e - 0.5) / 0.45)) * Math.max(0, 1 - Math.max(0, (e - 1.5) / 1.5));
+        smokeShellMat.uniforms.uOpacity.value = ssO * 0.8;
+        if (e > 2.9) smokeShell.visible = false;
+        // ---- sparks ----
+        var anyS = false;
+        for (var i = 0; i < NSPARK; i++) {
+          if (sparkLife[i] <= 0) { sparkCol[i * 3] = sparkCol[i * 3 + 1] = sparkCol[i * 3 + 2] = 0; continue; }
+          anyS = true; sparkLife[i] -= dt;
+          sparkVel[i * 3 + 1] -= 9.0 * dt;                         // gravity
+          var drag = Math.exp(-1.6 * dt);
+          sparkVel[i * 3] *= drag; sparkVel[i * 3 + 1] *= drag; sparkVel[i * 3 + 2] *= drag;
+          sparkPos[i * 3] += sparkVel[i * 3] * dt; sparkPos[i * 3 + 1] += sparkVel[i * 3 + 1] * dt; sparkPos[i * 3 + 2] += sparkVel[i * 3 + 2] * dt;
+          if (sparkPos[i * 3 + 1] < 0.02) { sparkPos[i * 3 + 1] = 0.02; sparkVel[i * 3 + 1] *= -0.3; sparkVel[i * 3] *= 0.5; sparkVel[i * 3 + 2] *= 0.5; }
+          var lf = sparkLife[i] / sparkTtl[i];
+          var flick = 0.7 + 0.3 * Math.sin(e * 40 + i);
+          // color over life: white-hot -> orange -> red ember, scaled >1 for bloom
+          var r = (1.6) * (0.5 + 0.5 * lf) * flick, gg = (0.7 * lf + 0.15) * flick, bb = (0.2 * lf) * flick;
+          sparkCol[i * 3] = r; sparkCol[i * 3 + 1] = gg; sparkCol[i * 3 + 2] = bb;
+        }
+        sparkGeo.attributes.position.needsUpdate = true; sparkGeo.attributes.color.needsUpdate = true;
+        if (!anyS && e > 1) sparks.visible = false;
+        // ---- smoke ----
+        for (var s = 0; s < smokeState.length; s++) {
+          var st = smokeState[s], sp = smoke.items[s];
+          if (e < st.delay) { sp.material.opacity = 0; continue; }
+          st.age += dt;
+          st.vel.y += 0.4 * dt; st.vel.multiplyScalar(Math.exp(-0.7 * dt));
+          st.pos.addScaledVector(st.vel, dt);
+          sp.position.copy(st.pos);
+          var lf2 = st.age / st.ttl;
+          var grow2 = 1 + lf2 * 1.7;
+          sp.scale.setScalar(st.size0 * grow2);
+          sp.material.rotation += st.spin * dt;
+          var op = Math.min(1, st.age / 0.3) * Math.max(0, 1 - lf2) * 0.5;
+          sp.material.opacity = op;
+          // warm at birth, cool to grey
+          var warm = Math.max(0, 1 - lf2 * 3);
+          sp.material.color.setRGB(0.32 + 0.5 * warm, 0.30 + 0.22 * warm, 0.30 + 0.06 * warm);
+        }
+        // ---- dust ----
+        for (var d = 0; d < dustState.length; d++) {
+          var dt2 = dustState[d], dp = dust.items[d];
+          if (e < dt2.delay) { dp.material.opacity = 0; continue; }
+          dt2.age += dt; dt2.vel.multiplyScalar(Math.exp(-1.4 * dt)); dt2.vel.y += 0.2 * dt; dt2.pos.addScaledVector(dt2.vel, dt);
+          dp.position.copy(dt2.pos);
+          var lf3 = dt2.age / dt2.ttl; dp.scale.setScalar(dt2.size0 * (1 + lf3 * 2.0));
+          dp.material.rotation += dt2.spin * dt;
+          dp.material.opacity = Math.min(1, dt2.age / 0.2) * Math.max(0, 1 - lf3) * 0.4;
+          dp.material.color.setRGB(0.30, 0.27, 0.24);
+        }
+        // ---- shockwave ring ----
+        if (e < 0.5) { var rr = e / 0.44; ringMat.uniforms.uRadius.value = rr * (2 - rr); ringMat.uniforms.uOpacity.value = Math.max(0, 1 - e / 0.44); var rs = 1 + e * 22; ring.scale.set(rs / 24 * 24, rs / 24 * 24, 1); ring.scale.set(1 + e * 26, 1 + e * 26, 1); }
+        else ring.visible = false;
+        // ---- debris ----
+        var anyD = false;
+        for (var k = 0; k < NDEB; k++) {
+          var db = debState[k];
+          if (db.age >= db.ttl) { _m.makeScale(0, 0, 0); debris.setMatrixAt(k, _m); continue; }
+          anyD = true; db.age += dt; db.vel.y -= 9.5 * dt; db.pos.addScaledVector(db.vel, dt);
+          if (db.pos.y < 0.09) { db.pos.y = 0.09; db.vel.y *= -0.35; db.vel.x *= 0.6; db.vel.z *= 0.6; }
+          db.rot.x += db.spin.x * dt; db.rot.y += db.spin.y * dt; db.rot.z += db.spin.z * dt;
+          _e.copy(db.rot); _q.setFromEuler(_e); _p.copy(db.pos); _s.setScalar(db.scl);
+          _m.compose(_p, _q, _s); debris.setMatrixAt(k, _m);
+        }
+        debris.instanceMatrix.needsUpdate = true;
+        if (!anyD) debris.visible = false;
+        // ---- end of blast ----
+        if (e > 3.8) { blastActive = false; smoke.group.visible = false; dust.group.visible = false; mode = 'idle';
+          document.getElementById('cta').style.opacity = '1'; }
+      }
+
+      // ---- camera ----
+      var camR = 12.5, theta = -0.62, phi = 0.20, autoT = 0;
+      function place(dt) {
+        autoT += dt;
+        var th = theta + Math.sin(autoT * 0.08) * 0.06;
+        camBase.set(Math.sin(th) * camR * Math.cos(phi), 1.2 + Math.sin(phi) * camR, Math.cos(th) * camR * Math.cos(phi));
+        // camera shake from trauma (squared for punch)
+        var sh = shakeTrauma * shakeTrauma;
+        var ox = (Math.sin(autoT * 57.3) + Math.sin(autoT * 31.1)) * 0.5 * sh * 0.5;
+        var oy = (Math.sin(autoT * 43.7) + Math.sin(autoT * 67.9)) * 0.5 * sh * 0.4;
+        camera.position.copy(camBase); camera.position.x += ox; camera.position.y += oy;
+        camera.lookAt(lookBase.x, lookBase.y + oy * 0.3, lookBase.z);
+        shakeTrauma = Math.max(0, shakeTrauma - dt * 1.6);
+      }
+
+      // ---- post ----
+      var composer = new X.EffectComposer(renderer);
+      composer.addPass(new X.RenderPass(scene, camera));
+      var bloom = new X.UnrealBloomPass(new T.Vector2(W, H), 0.55, 0.5, 1.0);
+      composer.addPass(bloom);
+      var grade = new X.ShaderPass({
+        uniforms: { tDiffuse: { value: null }, uTime: { value: 0 }, uRes: { value: new T.Vector2(W, H) } },
+        vertexShader: 'varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }',
+        fragmentShader:
+          'varying vec2 vUv; uniform sampler2D tDiffuse; uniform float uTime; uniform vec2 uRes;' +
+          'float rnd(vec2 p){ return fract(sin(dot(p,vec2(12.9898,78.233)))*43758.5453); }' +
+          'void main(){ vec3 c=texture2D(tDiffuse,vUv).rgb; vec2 q=vUv-0.5;' +
+          ' float vig=smoothstep(1.1,0.32,length(q)*1.32); c*=mix(0.68,1.0,vig);' +
+          ' c=(c-0.5)*1.05+0.5; float g=rnd(vUv*uRes+uTime)-0.5; c+=g*0.025;' +
+          ' gl_FragColor=vec4(c,1.0); }'
+      });
+      composer.addPass(grade);
+      composer.addPass(new X.OutputPass());
+      try { composer.addPass(new X.SMAAPass(W, H)); } catch (e) {}
+
+      function size() {
+        W = window.innerWidth; H = window.innerHeight;
+        renderer.setSize(W, H); composer.setSize(W, H);
+        camera.aspect = W / H; camera.updateProjectionMatrix();
+        grade.uniforms.uRes.value.set(W, H);
+      }
+      window.addEventListener('resize', size); size();
+
+      canvas.addEventListener('pointerdown', function () { trigger(); });
+
+      var last = performance.now(), autoDelay = 1.0, autoTimer = 0;
+      function loop(now) {
+        requestAnimationFrame(loop);
+        var dt = Math.min((now - last) / 1000, 0.05); last = now;
+        // sequencer
+        if (mode === 'idle') { autoTimer += dt; if (autoTimer > (autoDelay)) { autoTimer = 0; autoDelay = 5.0; trigger(); } }
+        else if (mode === 'incoming') {
+          tSeq += dt;
+          var p = Math.min(tSeq / 0.5, 1);
+          missile.position.lerpVectors(missile.position, CENTER, 1 - Math.pow(1 - p, 2) * 0 + 0); // keep x/z, drop y below
+          var sx = missile.position.x, sz = missile.position.z;
+          missile.position.set(sx + (CENTER.x - sx) * p, 16 + (CENTER.y - 16) * (p * p), sz + (CENTER.z - sz) * p);
+          missile.lookAt(CENTER); missile.rotateX(Math.PI / 2);
+          mGlow.scale.setScalar(0.8 + Math.sin(now * 0.05) * 0.2);
+          if (tSeq >= 0.5) { mode = 'detonation'; missile.visible = false; detonate(); }
+        }
+        updateBlast(dt);
+        smokeShellMat.uniforms.uTime.value = now * 0.001;
+        fireMat.uniforms.uTime.value = now * 0.001;
+        place(dt);
+        grade.uniforms.uTime.value = now * 0.001;
+        // pulse the marker
+        marker.material.emissiveIntensity = 2.5 + Math.sin(now * 0.006) * 1.2;
+        composer.render();
+      }
+      requestAnimationFrame(loop);
+      window.__ready = true;
+    } catch (e) { showErr(e.message + '\n' + (e.stack || '')); }
+  })();
+  </script>
+</body>
+</html>

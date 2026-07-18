@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>APOGEE — bench</title>
+<style>
+  :root { --sat: env(safe-area-inset-top,0px); --sab: env(safe-area-inset-bottom,0px); }
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { height:100%; background:#05060a; overflow:hidden; }
+  #gl { position:fixed; inset:0; width:100%; height:100%; display:block; touch-action:none; }
+  .hud { position:fixed; inset:0; pointer-events:none; font-family:"SF Mono",ui-monospace,Menlo,monospace; color:#eceff4; }
+  .kick { position:absolute; top:calc(22px + var(--sat)); left:24px; font-size:11px; letter-spacing:.42em; font-weight:700; color:#e9ecf2; opacity:.9; }
+  .sub  { position:absolute; top:calc(40px + var(--sat)); left:24px; font-size:8.5px; letter-spacing:.28em; color:#8b93a3; }
+  .spec { position:absolute; left:24px; right:24px; bottom:calc(26px + var(--sab)); display:flex; gap:22px; justify-content:center; }
+  .spec .cell { text-align:center; }
+  .spec .lbl { font-size:8px; letter-spacing:.24em; color:#7f8798; }
+  .spec .lbl { font-size:8px; letter-spacing:.24em; color:#7f8798; }
+  .spec .val { font-size:15px; font-weight:700; letter-spacing:.02em; color:#dfe4ec; margin-top:5px; font-variant-numeric:tabular-nums; }
+  .spec .val small { font-size:8px; color:#7f8798; letter-spacing:.14em; }
+  .hint { position:absolute; left:0; right:0; bottom:calc(72px + var(--sab)); text-align:center; font-size:8px; letter-spacing:.3em; color:#4a5262; }
+  #err { position:fixed; left:12px; right:12px; bottom:12px; font:11px monospace; color:#ff8d7e; white-space:pre-wrap; z-index:9; }
+</style>
+</head>
+<body>
+  <canvas id="gl"></canvas>
+  <div class="hud">
+    <div class="kick">A P O G E E</div>
+    <div class="sub">BENCH · TITAN-IX ARTICLE</div>
+    <div class="spec">
+      <div class="cell"><div class="lbl">REACH</div><div class="val">2,480 <small>MI</small></div></div>
+      <div class="cell"><div class="lbl">PRECISION</div><div class="val">AA</div></div>
+      <div class="cell"><div class="lbl">YIELD</div><div class="val">1.4 <small>MT</small></div></div>
+    </div>
+    <div class="hint">DRAG TO ROTATE</div>
+    <a href="./strike.html" style="position:absolute; top:calc(22px + var(--sat)); right:24px; pointer-events:auto; text-decoration:none; font-size:9px; letter-spacing:.28em; color:#8b93a3; border:1px solid #2a3140; padding:7px 11px; border-radius:6px;">STRIKE&nbsp;→</a>
+  </div>
+  <div id="err"></div>
+  <script src="./vendor/three.bundle.js"></script>
+  <script>
+  (function () {
+    var showErr = function (m) { document.getElementById('err').textContent = String(m); };
+    window.addEventListener('error', function (e) { showErr(e.message + '\n' + (e.error && e.error.stack || '')); });
+    try {
+      var T = window.THREE, X = window.TX;
+      var canvas = document.getElementById('gl');
+      var renderer = new T.WebGLRenderer({ canvas: canvas, antialias: true, powerPreference: 'high-performance' });
+      // iPhone 16 Pro: A18 Pro GPU + 460ppi ProMotion display — render at full device density
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 3));
+      renderer.toneMapping = T.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 0.90;
+      // wide-gamut P3 output — the anodized cyan + warm highlights use colours sRGB can't show.
+      // Only on a real P3 display (the device); sRGB panels keep the accurate sRGB pipeline.
+      var isP3 = false; try { isP3 = !!(window.matchMedia && window.matchMedia('(color-gamut: p3)').matches); } catch (e) {}
+      try { if (isP3 && T.DisplayP3ColorSpace) renderer.outputColorSpace = T.DisplayP3ColorSpace; } catch (e) {}
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = T.PCFSoftShadowMap;
+      if (X.RectAreaLightUniformsLib) X.RectAreaLightUniformsLib.init();
+
+      var scene = new T.Scene();
+      // studio image-based lighting — real reflections on the metal
+      var pmrem = new T.PMREMGenerator(renderer);
+      var envRT = pmrem.fromScene(new X.RoomEnvironment(), 0.04);
+      scene.environment = envRT.texture;
+
+      // a soft, dark studio backdrop — a vertical gradient instead of a flat void
+      (function () {
+        var c = document.createElement('canvas'); c.width = 8; c.height = 512;
+        var g = c.getContext('2d'); var grd = g.createLinearGradient(0, 0, 0, 512);
+        grd.addColorStop(0.0, '#04050a'); grd.addColorStop(0.55, '#080a12'); grd.addColorStop(1.0, '#10131c');
+        g.fillStyle = grd; g.fillRect(0, 0, 8, 512);
+        var tex = new T.CanvasTexture(c); tex.colorSpace = T.SRGBColorSpace; scene.background = tex;
+      })();
+
+      var W = window.innerWidth, H = window.innerHeight;
+      var camera = new T.PerspectiveCamera(32, W / H, 0.1, 100);
+
+      // ---- lighting: soft studio key (area light) + cool rim + a warm kicker ----
+      var key = new T.RectAreaLight(0xfff2e6, 5.0, 7, 11);
+      key.position.set(-5.5, 6.5, 6); key.lookAt(0, 2.0, 0); scene.add(key);
+      var rim = new T.DirectionalLight(0xbcd4ff, 1.6); rim.position.set(6, 4, -6); scene.add(rim);
+      var kick = new T.DirectionalLight(0xffcaa0, 0.5); kick.position.set(4, 1.2, 5); scene.add(kick);
+      scene.add(new T.HemisphereLight(0x2a3446, 0x05070c, 0.28));
+      // a soft shadow caster
+      var sh = new T.DirectionalLight(0xffffff, 0.0); sh.position.set(-3, 9, 4); sh.castShadow = true;
+      sh.shadow.mapSize.set(2048, 2048); sh.shadow.camera.near = 1; sh.shadow.camera.far = 24;
+      sh.shadow.camera.left = -4; sh.shadow.camera.right = 4; sh.shadow.camera.top = 6; sh.shadow.camera.bottom = -3;
+      sh.shadow.bias = -0.0004; sh.shadow.radius = 6; scene.add(sh);
+
+      // ---- the bench floor: a dark stage with a soft pool of light under the article,
+      //      fading to the backdrop colour at the rim so there is no hard horizon line ----
+      var floorTex = (function () {
+        var c = document.createElement('canvas'); c.width = c.height = 512;
+        var g = c.getContext('2d');
+        g.fillStyle = '#10131c'; g.fillRect(0, 0, 512, 512);
+        var rg = g.createRadialGradient(256, 256, 20, 256, 256, 250);
+        rg.addColorStop(0.0, '#252a36'); rg.addColorStop(0.45, '#161a24'); rg.addColorStop(1.0, '#0a0c12');
+        g.fillStyle = rg; g.fillRect(0, 0, 512, 512);
+        var tx = new T.CanvasTexture(c); tx.colorSpace = T.SRGBColorSpace; return tx;
+      })();
+      var floor = new T.Mesh(new T.CircleGeometry(40, 96),
+        new T.MeshStandardMaterial({ map: floorTex, color: 0xffffff, metalness: 0.55, roughness: 0.42, envMapIntensity: 0.35 }));
+      floor.rotation.x = -Math.PI / 2; floor.position.y = -0.02; floor.receiveShadow = true; scene.add(floor);
+      scene.fog = new T.Fog(0x0a0c12, 14, 34);
+
+      // ---- materials ----
+      function titanium() { return new T.MeshPhysicalMaterial({ color: 0x83898f, metalness: 1.0, roughness: 0.42, anisotropy: 0.6, anisotropyRotation: Math.PI / 2, clearcoat: 0.25, clearcoatRoughness: 0.5, envMapIntensity: 0.85 }); }
+      function carbon() { return new T.MeshPhysicalMaterial({ color: 0x121418, metalness: 0.25, roughness: 0.4, clearcoat: 0.8, clearcoatRoughness: 0.18, envMapIntensity: 1.0 }); }
+      function brass() { return new T.MeshStandardMaterial({ color: 0xbf9d63, metalness: 1.0, roughness: 0.28, envMapIntensity: 1.1 }); }
+      function ceramic() { return new T.MeshPhysicalMaterial({ color: 0x322e2b, metalness: 0.0, roughness: 0.74, clearcoat: 0.12, clearcoatRoughness: 0.6, envMapIntensity: 0.6 }); }
+      function darkMetal() { return new T.MeshStandardMaterial({ color: 0x2e3238, metalness: 1.0, roughness: 0.5, envMapIntensity: 0.9 }); }
+      function anodized() { return new T.MeshPhysicalMaterial({ color: 0x1f6f7e, metalness: 0.7, roughness: 0.28, clearcoat: 0.5, emissive: 0x0a3540, emissiveIntensity: 0.28, envMapIntensity: 1.0 }); }
+
+      var rocket = new T.Group(); scene.add(rocket);
+      function addMesh(geo, mat, y) { var m = new T.Mesh(geo, mat); if (y != null) m.position.y = y; m.castShadow = true; m.receiveShadow = true; rocket.add(m); return m; }
+
+      // airframe: one continuous lathe profile — chamfered base, slender body, tangent-ogive nose,
+      // and a small ceramic tip formed IN THE SAME PROFILE so there is no coincident surface / pinch seam.
+      var R = 0.34, bodyTop = 3.35, noseLen = 1.25;
+      var rho = (R * R + noseLen * noseLen) / (2 * R);
+      function ogiveR(x) { return Math.sqrt(rho * rho - (noseLen - x) * (noseLen - x)) - (rho - R); } // x in [0,noseLen]
+      var prof = [];
+      prof.push(new T.Vector2(0.001, 0.0));
+      prof.push(new T.Vector2(R * 0.72, 0.0));
+      prof.push(new T.Vector2(R, 0.22));
+      prof.push(new T.Vector2(R, bodyTop));
+      var capStart = noseLen * 0.80;           // ceramic tip covers the top 20% of the ogive
+      for (var i = 1; i <= 40; i++) { var xx = i / 40 * noseLen; prof.push(new T.Vector2(Math.max(ogiveR(xx), 0.0009), bodyTop + xx)); }
+      var body = addMesh(new T.LatheGeometry(prof, 128), titanium());
+
+      // ceramic tip — same ogive curve, drawn as its own short lathe that shares the exact silhouette
+      var capProf = [];
+      for (var j = 0; j <= 16; j++) { var xc = capStart + j / 16 * (noseLen - capStart); capProf.push(new T.Vector2(Math.max(ogiveR(xc), 0.0009), bodyTop + xc)); }
+      var cap = addMesh(new T.LatheGeometry(capProf, 128), ceramic());
+      cap.scale.set(1.02, 1.0, 1.02);          // sit the ceramic a hair proud so it reads as a bonded cap, not z-fight
+
+      // machined service bands (thin, flush)
+      addMesh(new T.CylinderGeometry(R * 1.012, R * 1.012, 0.07, 128), brass(), 2.30);
+      addMesh(new T.CylinderGeometry(R * 1.010, R * 1.010, 0.04, 128), darkMetal(), 1.35);
+      // one cyan anodized signal ring — the only accent colour on the article
+      addMesh(new T.CylinderGeometry(R * 1.02, R * 1.02, 0.11, 128), anodized(), 2.85);
+
+      // motor section + flared nozzle at the base
+      addMesh(new T.CylinderGeometry(R * 0.98, R * 1.03, 0.26, 128), darkMetal(), 0.13);
+      var bellProf = [];
+      for (var b = 0; b <= 18; b++) { var t = b / 18; bellProf.push(new T.Vector2(0.12 + Math.pow(t, 1.7) * 0.28, -t * 0.42)); }
+      addMesh(new T.LatheGeometry(bellProf, 128), darkMetal(), 0.02);
+
+      // four swept fins (beveled, tucked to the motor section)
+      for (var f = 0; f < 4; f++) {
+        var shape = new T.Shape();
+        shape.moveTo(0, 0); shape.lineTo(0.5, -0.06); shape.lineTo(0.5, 0.26); shape.lineTo(0, 0.6); shape.lineTo(0, 0);
+        var fin = new T.Mesh(new T.ExtrudeGeometry(shape, { depth: 0.04, bevelEnabled: true, bevelThickness: 0.015, bevelSize: 0.018, bevelSegments: 2 }), carbon());
+        fin.position.set(0, 0.06, 0); fin.rotation.y = f * Math.PI / 2;
+        fin.translateOnAxis(new T.Vector3(0, 0, 1), R * 0.9); fin.translateOnAxis(new T.Vector3(1, 0, 0), -0.02);
+        fin.castShadow = true; rocket.add(fin);
+      }
+
+      // frame the article — full rocket with headroom, centred in portrait
+      var lookY = 2.35, camR = 10.4, theta = -0.7, phi = 0.11, vel = 0, spin = true, lastTouch = 0;
+      function place() {
+        camera.position.set(Math.sin(theta) * camR * Math.cos(phi), lookY + Math.sin(phi) * camR, Math.cos(theta) * camR * Math.cos(phi));
+        camera.lookAt(0, lookY, 0);
+      }
+      place();
+
+      // ---- post: GTAO + subtle bloom + filmic grade ----
+      var composer = new X.EffectComposer(renderer);
+      composer.addPass(new X.RenderPass(scene, camera));
+      try {
+        var gtao = new X.GTAOPass(scene, camera, W, H);
+        if (gtao.updateGtaoMaterial) { gtao.output = X.GTAOPass.OUTPUT ? X.GTAOPass.OUTPUT.Default : 0; }
+        composer.addPass(gtao);
+      } catch (e) {}
+      var bloom = new X.UnrealBloomPass(new T.Vector2(W, H), 0.13, 0.45, 1.0);
+      composer.addPass(bloom);
+      // filmic grade: vignette + fine grain + gentle contrast
+      var grade = new X.ShaderPass({
+        uniforms: { tDiffuse: { value: null }, uTime: { value: 0 }, uRes: { value: new T.Vector2(W, H) } },
+        vertexShader: 'varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }',
+        fragmentShader:
+          'varying vec2 vUv; uniform sampler2D tDiffuse; uniform float uTime; uniform vec2 uRes;' +
+          'float rnd(vec2 p){ return fract(sin(dot(p, vec2(12.9898,78.233)))*43758.5453); }' +
+          'void main(){ vec3 c = texture2D(tDiffuse, vUv).rgb;' +
+          ' vec2 q = vUv - 0.5; float vig = smoothstep(1.05, 0.35, length(q)*1.35); c *= mix(0.72, 1.0, vig);' +
+          ' c = (c - 0.5) * 1.06 + 0.5;' +           // gentle contrast
+          ' float g = rnd(vUv * uRes + uTime) - 0.5; c += g * 0.028;' +   // fine grain
+          ' gl_FragColor = vec4(c, 1.0); }'
+      });
+      composer.addPass(grade);
+      composer.addPass(new X.OutputPass());
+      try { composer.addPass(new X.SMAAPass(W, H)); } catch (e) {}
+
+      function size() {
+        W = window.innerWidth; H = window.innerHeight;
+        renderer.setSize(W, H); composer.setSize(W, H);
+        camera.aspect = W / H; camera.updateProjectionMatrix();
+        grade.uniforms.uRes.value.set(W, H);
+      }
+      window.addEventListener('resize', size); size();
+
+      // drag to rotate
+      var drag = false, lx = 0, ly = 0;
+      canvas.addEventListener('pointerdown', function (e) { drag = true; lx = e.clientX; ly = e.clientY; lastTouch = performance.now(); canvas.setPointerCapture(e.pointerId); });
+      canvas.addEventListener('pointermove', function (e) { if (!drag) return; var dx = e.clientX - lx, dy = e.clientY - ly; lx = e.clientX; ly = e.clientY; theta -= dx * 0.008; phi = Math.max(-0.05, Math.min(0.85, phi + dy * 0.005)); vel = -dx * 0.008 / 0.016; lastTouch = performance.now(); });
+      canvas.addEventListener('pointerup', function () { drag = false; });
+
+      var last = performance.now();
+      function loop(now) {
+        requestAnimationFrame(loop);
+        var dt = Math.min((now - last) / 1000, 0.05); last = now;
+        if (spin && now - lastTouch > 2600) theta += dt * 0.16;
+        else if (Math.abs(vel) > 0.001) { theta += vel * dt; vel *= Math.exp(-4 * dt); }
+        place();
+        grade.uniforms.uTime.value = now * 0.001;
+        composer.render();
+      }
+      requestAnimationFrame(loop);
+      window.__ready = true;
+    } catch (e) { showErr(e.message + '\n' + (e.stack || '')); }
+  })();
+  </script>
+</body>
+</html>
