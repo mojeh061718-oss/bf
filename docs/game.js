@@ -10183,17 +10183,39 @@
     TEXCACHE['lsgroundN'] = tex;
     return tex;
   }
+  /* a dark tactical grid for the strike-camera ground — near-black with thin
+     glowing scan lines, a brighter major grid, and a soft radial falloff. */
+  function lsGridTex() {
+    return canvasTex('lsgrid', 1024, 1024, function (x, w, h) {
+      x.fillStyle = '#04070c'; x.fillRect(0, 0, w, h);
+      for (var i = 0; i <= 32; i++) {                       // minor grid
+        var p = i / 32 * w, major = (i % 8 === 0);
+        x.strokeStyle = major ? 'rgba(90,150,190,0.55)' : 'rgba(56,96,124,0.22)';
+        x.lineWidth = major ? 2 : 1;
+        x.beginPath(); x.moveTo(p, 0); x.lineTo(p, h); x.moveTo(0, p); x.lineTo(w, p); x.stroke();
+      }
+      var g = x.createRadialGradient(w / 2, h / 2, w * 0.1, w / 2, h / 2, w * 0.62);
+      g.addColorStop(0, 'rgba(4,7,12,0)'); g.addColorStop(1, 'rgba(4,7,12,0.85)');   // fade the grid out toward the edges
+      x.fillStyle = g; x.fillRect(0, 0, w, h);
+    });
+  }
   /* ---- destructible targets: a real installation / bunker / convoy that
      comes apart on the hit. Each piece carries its own physics for the break. */
   function lsTargetMat(kind) {
-    var m = { concrete: [0x8f897b, 0.05, 0.93], concrete2: [0x6f6a5e, 0.05, 0.96], steel: [0x59636f, 0.8, 0.4],
-      rust: [0x7c4c36, 0.5, 0.72], tire: [0x1b1b1f, 0.1, 0.9], glass: [0x2a3f4a, 0.3, 0.2] }[kind] || [0x888888, 0.1, 0.9];
-    return new THREE.MeshStandardMaterial({ color: m[0], metalness: m[1], roughness: m[2], envMapIntensity: 0.7 });
+    // dark fills so the neon edges carry the read — a sensor-lock look
+    var m = { concrete: [0x10161c, 0.1, 0.85], concrete2: [0x0b1015, 0.1, 0.9], steel: [0x161d26, 0.7, 0.4],
+      rust: [0x1a130e, 0.4, 0.7], tire: [0x07080a, 0.1, 0.9], glass: [0x081820, 0.4, 0.3] }[kind] || [0x111820, 0.2, 0.8];
+    return new THREE.MeshStandardMaterial({ color: m[0], metalness: m[1], roughness: m[2] });
   }
   function lsAddPiece(g, geo, kind, x, y, z, ry) {
     var mesh = new THREE.Mesh(geo, lsTargetMat(kind));
     mesh.position.set(x, y, z); if (ry) mesh.rotation.y = ry;
     mesh.castShadow = true; mesh.receiveShadow = true;
+    try {   // crisp neon outline — the structure reads as a locked target
+      var edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo, 22),
+        new THREE.LineBasicMaterial({ color: 0x39d6ff, transparent: true, opacity: 0.8 }));
+      mesh.add(edges); mesh.userData.edges = edges;
+    } catch (e) {}
     g.add(mesh); return mesh;
   }
   function lsBuildTarget(g, type) {
@@ -10238,73 +10260,79 @@
   function lsTermInit() {
     if (lsTerm) return lsTerm;
     try {
+      // STRIKE CAMERA — a stylized night fire-control feed. Deep black, bold
+      // accents, hard contrast: a look that survives the phone's bloom instead
+      // of washing to mud.
       var scene = new THREE.Scene();
-      scene.background = gradientTexture([[0, '#0b1220'], [0.4, '#26344d'], [0.72, '#7a5838'], [1, '#c2914f']], true);   // dusk sky → warm horizon
-      scene.fog = new THREE.Fog(0x9a6b44, 130, 440);        // warm haze that matches the horizon (aerial depth)
-      scene.environment = envMap('#25334c', '#7a5838', '#2a2018', 200, 'rgba(255,222,170,0.95)');   // IBL: real reflections on the metal
+      scene.background = gradientTexture([[0, '#02040a'], [0.55, '#050a14'], [0.85, '#081420'], [1, '#0b1a26']], true);
+      scene.fog = new THREE.Fog(0x03060c, 55, 240);         // the world falls to black — contains the frame
       var camera = new THREE.PerspectiveCamera(46, W / H, 0.1, 1400);
-      scene.add(new THREE.HemisphereLight(0xbcd0e6, 0x4a3826, 0.72));
-      // low warm dusk sun — long raking shadows, and it casts for real
-      var sun = new THREE.DirectionalLight(0xffdca6, 1.7); sun.position.set(-52, 40, 34);
+      scene.add(new THREE.HemisphereLight(0x2a4258, 0x05080e, 0.5));
+      // strong cool key — hard rim on the article; low ambient keeps blacks deep
+      var sun = new THREE.DirectionalLight(0xcfe6ff, 1.5); sun.position.set(-40, 46, 30);
       sun.castShadow = true; sun.shadow.mapSize.set(1024, 1024);
       sun.shadow.camera.near = 1; sun.shadow.camera.far = 160;
       sun.shadow.camera.left = -34; sun.shadow.camera.right = 34; sun.shadow.camera.top = 34; sun.shadow.camera.bottom = -34;
-      sun.shadow.bias = -0.0006; sun.shadow.radius = 3; scene.add(sun);
-      var rim = new THREE.DirectionalLight(0x9ab6d6, 0.5); rim.position.set(50, 22, -34); scene.add(rim);   // cool back-rim separates the airframe from the dusk
-      // a real sun in the sky — bright enough that the bloom gives it a corona
-      var sunSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: fxTextures().flash, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.95 }));
-      sunSprite.material.color.setRGB(1, 0.9, 0.72); sunSprite.scale.set(90, 90, 1);
-      sunSprite.position.set(-150, 70, 150); scene.add(sunSprite);
-      // textured desert floor — PBR with a baked normal map, tiled to the fog line
-      var gt = lsGroundTex(); gt.wrapS = gt.wrapT = THREE.RepeatWrapping; gt.repeat.set(10, 10);
+      sun.shadow.bias = -0.0006; sun.shadow.radius = 2.5; scene.add(sun);
+      var rim = new THREE.DirectionalLight(0xff8a3c, 1.1); rim.position.set(46, 16, -30); scene.add(rim);   // hot amber back-rim — the accent
+      // dark tactical grid ground with a neon target ring baked in
+      var gt = lsGridTex(); gt.wrapS = gt.wrapT = THREE.RepeatWrapping; gt.repeat.set(6, 6);
       try { gt.anisotropy = renderer.capabilities.getMaxAnisotropy(); } catch (e) {}
-      var ground = new THREE.Mesh(new THREE.PlaneGeometry(1800, 1800),
-        new THREE.MeshStandardMaterial({ map: gt, normalMap: lsGroundNormalTex(), normalScale: new THREE.Vector2(1.25, 1.25), roughness: 0.96, metalness: 0.0 }));
+      var ground = new THREE.Mesh(new THREE.PlaneGeometry(900, 900),
+        new THREE.MeshStandardMaterial({ map: gt, roughness: 0.85, metalness: 0.1, emissive: 0x0a1a26, emissiveMap: gt, emissiveIntensity: 0.9 }));
       ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
       // scorch scar, revealed at impact
       var scorch = new THREE.Mesh(new THREE.CircleGeometry(6, 40),
         new THREE.MeshBasicMaterial({ color: 0x120a06, transparent: true, opacity: 0, depthWrite: false }));
       scorch.rotation.x = -Math.PI / 2; scorch.position.y = 0.03; scene.add(scorch);
-      // glowing concentric target rings + bull (additive → they bloom)
+      // neon target-lock reticle on the deck — crisp bright rings + a hot bull
       var ringG = new THREE.Group();
-      [{ r: 5, w: 0.55, o: 0.95 }, { r: 9, w: 0.3, o: 0.5 }, { r: 13, w: 0.2, o: 0.28 }].forEach(function (rc) {
-        var rr = new THREE.Mesh(new THREE.RingGeometry(rc.r - rc.w, rc.r, 64),
-          new THREE.MeshBasicMaterial({ color: 0x8effb0, transparent: true, opacity: rc.o, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending }));
-        rr.rotation.x = -Math.PI / 2; rr.position.y = 0.05; ringG.add(rr);
+      [{ r: 5.5, w: 0.16, o: 0.95, c: 0x35e0ff }, { r: 9, w: 0.1, o: 0.55, c: 0x35e0ff }, { r: 13, w: 0.08, o: 0.3, c: 0x2aa8c8 }].forEach(function (rc) {
+        var rr = new THREE.Mesh(new THREE.RingGeometry(rc.r - rc.w, rc.r, 72),
+          new THREE.MeshBasicMaterial({ color: rc.c, transparent: true, opacity: rc.o, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending }));
+        rr.rotation.x = -Math.PI / 2; rr.position.y = 0.06; ringG.add(rr);
       });
-      var bull = new THREE.Mesh(new THREE.CircleGeometry(0.7, 24), new THREE.MeshBasicMaterial({ color: 0xff6a52, transparent: true, opacity: 0.9, depthWrite: false }));
-      bull.rotation.x = -Math.PI / 2; bull.position.y = 0.07; ringG.add(bull);
+      // tick marks at the cardinal points of the inner ring
+      [0, 1, 2, 3].forEach(function (i) {
+        var a = i * Math.PI / 2, tk = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.02, 1.1),
+          new THREE.MeshBasicMaterial({ color: 0x35e0ff, transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending }));
+        tk.position.set(Math.sin(a) * 5.5, 0.07, Math.cos(a) * 5.5); tk.rotation.y = a; ringG.add(tk);
+      });
+      var bull = new THREE.Mesh(new THREE.CircleGeometry(0.55, 24), new THREE.MeshBasicMaterial({ color: 0xff5533, transparent: true, opacity: 0.95, depthWrite: false, blending: THREE.AdditiveBlending }));
+      bull.rotation.x = -Math.PI / 2; bull.position.y = 0.08; ringG.add(bull);
       scene.add(ringG);
       var targetG = new THREE.Group(); scene.add(targetG);   // the real installation/bunker/convoy, built per shot
-      // the missile: smooth machined-metal airframe (PBR, reflects the env),
-      // a reentry-hot nose, swept fins — casts a real shadow on the sand
+      // the article — a slim, dark, hard-edged airframe. Near-black body so the
+      // amber rim carves a bright edge; a white-hot glowing nose + a crisp streak.
       var m = new THREE.Group();
-      var body = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.22, 2.3, 40),
-        new THREE.MeshStandardMaterial({ color: 0xb9c2cb, metalness: 0.92, roughness: 0.3, envMapIntensity: 0.95 }));
+      var body = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.15, 2.9, 24),
+        new THREE.MeshStandardMaterial({ color: 0x141a22, metalness: 0.85, roughness: 0.32 }));
       body.castShadow = true; m.add(body);
-      var nose = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.7, 40),
-        new THREE.MeshStandardMaterial({ color: 0x6a2a1e, metalness: 0.5, roughness: 0.5, emissive: 0xff4e1e, emissiveIntensity: 0.6 }));
-      nose.position.y = 1.5; nose.castShadow = true; m.add(nose);
-      [0, 1, 2].forEach(function (i) {
-        var f = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.04),
-          new THREE.MeshStandardMaterial({ color: 0x9aa4ad, metalness: 0.85, roughness: 0.4, envMapIntensity: 0.9 }));
-        f.position.y = -1.0; f.rotation.y = i * 2.09; f.castShadow = true; m.add(f);
+      var stripe = new THREE.Mesh(new THREE.CylinderGeometry(0.153, 0.153, 0.16, 24),
+        new THREE.MeshBasicMaterial({ color: 0xff7a2a })); stripe.position.y = 0.5; m.add(stripe);
+      var nose = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.82, 24),
+        new THREE.MeshStandardMaterial({ color: 0xff5a28, emissive: 0xff5a1e, emissiveIntensity: 1.2, metalness: 0.3, roughness: 0.5 }));
+      nose.position.y = 1.72; nose.castShadow = true; m.add(nose);
+      [0, 1, 2, 3].forEach(function (i) {
+        var f = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.42, 0.03),
+          new THREE.MeshStandardMaterial({ color: 0x1c242e, metalness: 0.8, roughness: 0.4 }));
+        f.position.y = -1.28; f.rotation.y = i * 1.5708; f.castShadow = true; m.add(f);
       });
       var sheath = new THREE.Sprite(new THREE.SpriteMaterial({ map: fxTextures().fire, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0 }));
-      sheath.material.color.setRGB(1, 0.8, 0.5); sheath.scale.set(1.6, 3.2, 1); sheath.position.y = -0.4; m.add(sheath);
+      sheath.material.color.setRGB(1, 0.85, 0.5); sheath.scale.set(0.9, 2.6, 1); sheath.position.y = -0.7; m.add(sheath);
       scene.add(m);
-      // reentry plasma trail (additive) + a smoke contrail that lingers
+      // a crisp plasma streak — fewer, tighter, brighter sprites than a fuzzy trail
       var trail = [];
-      for (var i = 0; i < 22; i++) {
+      for (var i = 0; i < 14; i++) {
         var sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: fxTextures().fire, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0 }));
         scene.add(sp); trail.push(sp);
       }
       var contrail = [];
-      for (var q = 0; q < 12; q++) {
+      for (var q = 0; q < 8; q++) {
         var cs = new THREE.Sprite(new THREE.SpriteMaterial({ map: fxTextures().smoke, transparent: true, depthWrite: false, opacity: 0 }));
         scene.add(cs); contrail.push(cs);
       }
-      var flare = new THREE.PointLight(0xffd9a6, 0, 170, 1.7); scene.add(flare);   // the detonation lights the desert
+      var flare = new THREE.PointLight(0xffd9a6, 0, 170, 1.7); scene.add(flare);   // the detonation lights the deck
       lsTerm = { scene: scene, camera: camera, ring: ringG, bull: bull, targetG: targetG, missile: m, nose: nose, sheath: sheath, trail: trail, contrail: contrail, scorch: scorch, flare: flare, fx: null };
     } catch (e) { lsTerm = null; }
     return lsTerm;
@@ -10456,6 +10484,17 @@
     if (lt.mush && lt.blown) lookY = 0.4 + clamp(lt.postT / 1.6, 0, 1) * 6;   // tilt up to follow the rising cloud
     var lookP = lt.missile.position.clone().lerp(lt.impact.clone().add(V3(0, lookY, 0)), settle);
     c.lookAt(lookP);
+    // ---- fire-control HUD: live telemetry + a target-lock box on the deck ----
+    var lock = $('lth-lock');
+    if (!lt.blown) {
+      $('lth-range').textContent = Math.max(0, Math.round(lt.missile.position.distanceTo(lt.impact) * 44)).toLocaleString() + ' M';
+      $('lth-alt').textContent = Math.max(0, Math.round(lt.missile.position.y * 480)).toLocaleString() + ' FT';
+      $('lth-vel').textContent = 'MACH ' + (2.6 + k * 5.2).toFixed(1);
+      c.updateMatrixWorld();
+      var sp = worldToScreen(lt.impact.clone().add(V3(0, 1.1, 0)), c);
+      if (sp.z < 1) { lock.style.display = 'block'; lock.style.left = (sp.x / W * 100).toFixed(2) + '%'; lock.style.top = (sp.y / H * 100).toFixed(2) + '%'; var lsz = clamp(58 + k * 96, 58, 154); lock.style.width = lsz + 'px'; lock.style.height = lsz + 'px'; }
+      else lock.style.display = 'none';
+    } else { lock.style.display = 'none'; $('lth-vel').textContent = '—'; }
     renderScene(lt.scene, lt.camera);
   }
   function lsTermBurst() {
@@ -10474,11 +10513,11 @@
     flash.position.y = 1.6 + y * 2; flash.userData = { kind: 'flash', g0: 12 + y * 42 }; fx.add(flash);
     var ring = new THREE.Mesh(new THREE.RingGeometry(0.5, 1.3, 44), new THREE.MeshBasicMaterial({ color: 0xffe0a8, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending }));
     ring.rotation.x = -Math.PI / 2; ring.position.y = 0.14; ring.userData.kind = 'ring'; fx.add(ring);
-    // ground shockwave — a dust ring, plus a faster inner ring for big yields
-    [{ c: 0xcaa06a, g: 22 + y * 82, o: 0.7 }, { c: 0xe8d3a8, g: 14 + y * 52, o: 0.5 }].forEach(function (rc, ri) {
+    // ground shockwave — crisp neon rings racing outward (matches the HUD)
+    [{ c: 0x9fe8ff, g: 22 + y * 82, o: 0.9 }, { c: 0xffffff, g: 14 + y * 52, o: 0.7 }].forEach(function (rc, ri) {
       if (ri === 1 && y < 0.4) return;
-      var gr = new THREE.Mesh(new THREE.RingGeometry(0.8, 1.5, 48), new THREE.MeshBasicMaterial({ color: rc.c, transparent: true, opacity: rc.o, side: THREE.DoubleSide, depthWrite: false }));
-      gr.rotation.x = -Math.PI / 2; gr.position.y = 0.09 + ri * 0.02; gr.userData = { kind: 'gring', gscale: rc.g }; fx.add(gr);
+      var gr = new THREE.Mesh(new THREE.RingGeometry(1.05, 1.4, 64), new THREE.MeshBasicMaterial({ color: rc.c, transparent: true, opacity: rc.o, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending }));
+      gr.rotation.x = -Math.PI / 2; gr.position.y = 0.1 + ri * 0.02; gr.userData = { kind: 'gring', gscale: rc.g }; fx.add(gr);
     });
     var rand = PG2.stream(S.ls.seed || 'x', 'lsterm');
     // fireball — count + size scale with yield

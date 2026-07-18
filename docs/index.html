@@ -180,7 +180,17 @@
 
   <!-- Long Shot: the 3D terminal-descent HUD (shown over the #gl canvas) -->
   <div id="ls-term-hud" class="hidden">
-    <div class="lth-top"><span class="rec-dot"></span><span id="lth-clock">TERMINAL</span></div>
+    <div class="lth-scan"></div>
+    <div class="lth-vig"></div>
+    <div class="lth-corners"><span></span><span></span><span></span><span></span></div>
+    <div class="lth-top"><span class="rec-dot"></span><span class="lth-src">TRK&#8209;7 · OPTICAL FEED</span><span id="lth-clock">TERMINAL</span></div>
+    <div class="lth-tele">
+      <div><label>RNG</label><b id="lth-range">—</b></div>
+      <div><label>ALT</label><b id="lth-alt">—</b></div>
+      <div><label>VEL</label><b id="lth-vel">—</b></div>
+    </div>
+    <svg class="lth-reticle" viewBox="0 0 100 100" aria-hidden="true"><path class="ltr-cross" d="M50 32V44M50 56V68M32 50H44M56 50H68"/><circle class="ltr-ring" cx="50" cy="50" r="18"/></svg>
+    <div class="lth-lock" id="lth-lock"><span></span><span></span><span></span><span></span></div>
     <div class="lth-caption" id="lth-caption"></div>
   </div>
   <!-- Long Shot: the program record board -->
