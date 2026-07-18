@@ -1869,7 +1869,7 @@ body.lefty .bay-cta.gyro { left: auto; right: 12px; }
 /* DIAL-IN — the firing solution */
 .ls-dials { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; display: flex; flex-direction: column; gap: 12px; }
 /* ---- the FLIGHT-PLAN console ---- */
-.ls-dials { gap: 9px; }
+.ls-dials { gap: 9px; justify-content: safe center; }
 .fp-eng { font-family: var(--mono); font-size: 9px; font-weight: 800; letter-spacing: .14em; color: var(--amber-hot); text-align: center; padding: 7px 10px; border: 1px solid rgba(229,161,61,.4); border-radius: 8px; background: rgba(229,161,61,.07); }
 .fp-eng-sub { display: block; margin-top: 3px; font-weight: 400; letter-spacing: .06em; color: rgba(243,237,224,.62); line-height: 1.5; }
 .fp-inst-h { font-family: var(--mono); font-size: 7.5px; letter-spacing: .16em; color: var(--bp-dim); display: flex; justify-content: space-between; }

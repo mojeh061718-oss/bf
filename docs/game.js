@@ -8118,10 +8118,8 @@
 
   $('btn-start').addEventListener('click', function () {
     PGAudio.init(); PGAudio.tap();
-    S.world = 'career';
-    // first contact goes straight to the teaching ladder; veterans get the compound
-    if (wonCountAll() === 0) startContract();
-    else showHQ();
+    S.world = 'sandbox';   // pure sandbox: no contracts, no money — just build the rocket and fire it
+    showHQ();
   });
   $('btn-sandbox').addEventListener('click', function () {
     PGAudio.init(); PGAudio.tap();
@@ -8137,18 +8135,8 @@
     showMuseum('scr-title');
   });
   function refreshTitle() {
-    var won = 0;
-    PG2.CONTRACTS.forEach(function (c, i) { if (contractRec(i).won) won++; });
-    var cur = PG2.CONTRACTS[S.contract];
-    $('btn-start').innerHTML = won === 0 ? 'TAP TO START'
-      : 'THE COMPOUND<span class="start-sub">ACCOUNT ' + fmt$(SAVE.cash) + ' · NEXT: ' + cur.id + '</span>';
-    var tp = $('title-progress');
-    if (won > 0) {
-      tp.classList.remove('hidden');
-      tp.textContent = 'ACT I — THE SHED · ' + won + '/' + PG2.CONTRACTS.length + ' CONTRACTS AWARDED';
-    } else {
-      tp.classList.add('hidden');
-    }
+    $('btn-start').innerHTML = 'BUILD A ROCKET<span class="start-sub">THE LONG SHOT PROGRAM · SANDBOX · NO LIMITS</span>';
+    $('title-progress').classList.add('hidden');
   }
 
   /* settings drawer */
@@ -8512,34 +8500,33 @@
     }
     var waLocked = !sandbox && wins === 0;   // the sandbox lot never checks your paperwork
     var waBooked = !!WS().run;
-    doors.innerHTML =
-      (sandbox ? '' :
-        door('hq-office', 'THE FRONT DOOR', 'CONTRACT OFFICE',
-          wins >= PG2.CONTRACTS.length ? 'Act I complete. The corkboard is a trophy wall.'
-            : nextC ? 'Next up: ' + nextC.id + ' “' + nextC.title + '”. The corkboard awaits.'
-            : 'The corkboard awaits.',
-          wins === 0 ? 'primary' : '', '')) +
-      door('hq-assembly', 'THE BIG SHED', 'WEAPONS ASSEMBLY',
-        waLocked ? 'Free R&D — build anything on your own dime. The Authority wants one won contract on file first.'
-          : waBooked ? 'The floor is tooled up and running an order. R&D resumes on delivery.'
-          : (sandbox ? 'The whole catalog, no invoices. ' : 'Free R&D on the company dime. No spec sheet over your shoulder. ') +
-            (WS().bench ? 'Your bench is as you left it.' : 'The bench is clean.'),
-        waLocked || waBooked ? 'locked' : (sandbox || wins > 0 ? 'primary' : ''),
-        waBooked ? '<span class="hd-badge warn">BOOKED</span>'
-          : waLocked ? '<span class="hd-badge warn">CLEARANCE</span>' : '') +
-      door('hq-bids', 'THE BACK OFFICE', 'PRODUCTION BID BOARD',
+    var longshotDoor = door('hq-longshot', 'THE PROGRAM', 'THE LONG SHOT PROGRAM',
+      'Build the rocket on the 3D bench, plan the flight by hand, then ride it down and watch it level a real target — from a grenade pop to a thermonuclear mushroom. 1 to 5,000 miles.',
+      'primary', '<span class="hd-badge">1–5000 MI</span>');
+    var assemblyDoor = door('hq-assembly', 'THE BIG SHED', 'SHELL TEST BAY',
+      waLocked ? 'Free R&D — build anything on your own dime. The Authority wants one won contract on file first.'
+        : waBooked ? 'The floor is tooled up and running an order. R&D resumes on delivery.'
+        : (sandbox ? 'The old workshop — hand-build a shell and drop-test it on the range. A sandbox toy. ' : 'Free R&D on the company dime. No spec sheet over your shoulder. ') +
+          (WS().bench ? 'Your bench is as you left it.' : 'The bench is clean.'),
+      waLocked || waBooked ? 'locked' : '',
+      waBooked ? '<span class="hd-badge warn">BOOKED</span>' : waLocked ? '<span class="hd-badge warn">CLEARANCE</span>' : '');
+    var list = [];
+    if (sandbox) {
+      list.push(longshotDoor, assemblyDoor);          // pure sandbox: the rocket program, and the shell bay as a toy
+    } else {
+      list.push(door('hq-office', 'THE FRONT DOOR', 'CONTRACT OFFICE',
+        wins >= PG2.CONTRACTS.length ? 'Act I complete. The corkboard is a trophy wall.'
+          : nextC ? 'Next up: ' + nextC.id + ' “' + nextC.title + '”. The corkboard awaits.'
+          : 'The corkboard awaits.', wins === 0 ? 'primary' : '', ''));
+      list.push(assemblyDoor);
+      list.push(door('hq-bids', 'THE BACK OFFICE', 'PRODUCTION BID BOARD',
         WS().types.length ? WS().types.length + ' certified type' + (WS().types.length > 1 ? 's' : '') + ' on file. Buyers post weekly.'
-          : 'Certified types only. Prototype in Weapons Assembly, pass the standards series, then sell it.' +
-            (sandbox ? ' Yes, even here — the buyers have standards.' : ''),
-        WS().types.length ? '' : 'locked',
-        WS().types.length ? '' : '<span class="hd-badge warn">NO TYPES</span>') +
-      door('hq-longshot', 'THE FAR GATE', 'THE LONG SHOT PROGRAM',
-        'Pick a target anywhere from 1 to 5,000 miles. Build the article, dial the firing solution by hand, then ride it down and watch it hit. Precision is everything.',
-        (sandbox || wins === 0) ? 'primary' : '',
-        '<span class="hd-badge">1–5000 MI</span>') +
-      door('hq-museum', 'THE LONG HALL', 'THE MUSEUM',
-        'Framed disasters, brass firsts, best-crater plaques.', '', '') +
-      '<button id="hq-gate" type="button">← THE GATE · CHANGE MODE</button>';
+          : 'Certified types only. Prototype in the shed, pass the standards series, then sell it.',
+        WS().types.length ? '' : 'locked', WS().types.length ? '' : '<span class="hd-badge warn">NO TYPES</span>'));
+      list.push(longshotDoor);
+      list.push(door('hq-museum', 'THE LONG HALL', 'THE MUSEUM', 'Framed disasters, brass firsts, best-crater plaques.', '', ''));
+    }
+    doors.innerHTML = list.join('') + '<button id="hq-gate" type="button">' + (sandbox ? '← MAIN MENU' : '← THE GATE · CHANGE MODE') + '</button>';
     $('hq-longshot').addEventListener('click', function () {
       PGAudio.init();
       if (waLocked) { PGAudio.buzz(); toast('Win one contract first — the Program vets its contractors.'); return; }
@@ -8558,12 +8545,12 @@
       if (WS().run) { PGAudio.buzz(); toast('The workshop is booked — ' + WS().run.plate + ' for ' + WS().run.buyer + '. R&D resumes on delivery.'); return; }
       PGAudio.tap(); stopHqTimer(); enterRnd();
     });
-    $('hq-bids').addEventListener('click', function () {
+    if ($('hq-bids')) $('hq-bids').addEventListener('click', function () {
       PGAudio.init();
       if (!WS().types.length) { PGAudio.buzz(); toast('No certified types on file. The bid board only trades in stamped plates.'); return; }
       PGAudio.tap(); stopHqTimer(); showBids();
     });
-    $('hq-museum').addEventListener('click', function () { PGAudio.init(); PGAudio.tap(); stopHqTimer(); showMuseum('scr-hq'); });
+    if ($('hq-museum')) $('hq-museum').addEventListener('click', function () { PGAudio.init(); PGAudio.tap(); stopHqTimer(); showMuseum('scr-hq'); });
     refreshRunTicker();
     showScreen('scr-hq');
     hqTimer = setInterval(refreshRunTicker, 1000);
