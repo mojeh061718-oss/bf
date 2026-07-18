@@ -1429,15 +1429,15 @@
   function initBay() {
     var scene = new THREE.Scene();
     scene.background = gradientTexture([[0, '#0d1a29'], [0.6, '#0a1420'], [1, '#070e17']], true);
-    scene.fog = new THREE.Fog(0x0a1420, 10, 24);
-    scene.environment = envMap('#22384f', '#16283b', '#0a141f', 60, 'rgba(255,224,170,0.9)');  // cool room, warm lamp glint
+    scene.fog = new THREE.Fog(0x0e1a28, 12, 30);
+    scene.environment = envMap('#2a445f', '#1b3048', '#0e1826', 60, 'rgba(255,224,170,0.95)');  // cool room, warm lamp glint
 
     var camera = new THREE.PerspectiveCamera(42, W / H, 0.05, 60);
 
-    /* ---- lights: cool moonlit shell, warm tungsten heart ---- */
-    var hemi = new THREE.HemisphereLight(0x9db8d6, 0x2c231a, 0.44);
+    /* ---- lights: cool shell, warm tungsten heart — lit so the hero part reads ---- */
+    var hemi = new THREE.HemisphereLight(0xaec6e0, 0x3a2c1e, 0.66);
     scene.add(hemi);
-    var key = new THREE.DirectionalLight(0xfff1dc, 0.82);
+    var key = new THREE.DirectionalLight(0xfff1dc, 1.06);
     key.position.set(4, 7, 5);
     key.castShadow = true;
     key.shadow.mapSize.set(2048, 2048);
@@ -1446,12 +1446,15 @@
     key.shadow.camera.far = 22;
     key.shadow.radius = 4;
     scene.add(key);
-    var rim = new THREE.DirectionalLight(0x9cc8ea, 0.22);
+    var rim = new THREE.DirectionalLight(0x9cc8ea, 0.3);
     rim.position.set(-5, 3, -4);
     scene.add(rim);
-    var fill = new THREE.DirectionalLight(0x7d9cc4, 0.14);   // the night leaking in under the door
+    var fill = new THREE.DirectionalLight(0x8fb0d6, 0.3);   // open the shadows so the room isn't a void
     fill.position.set(-3, 2, 6);
     scene.add(fill);
+    var stand = new THREE.PointLight(0xffe1b0, 0.5, 8, 1.7);   // a soft warm key over the work stand
+    stand.position.set(0, 2.4, 0.4);
+    scene.add(stand);
 
     /* ---- the set plan: one set of prop marks shared by floor AO + meshes ---- */
     var ROOM_R = 9.6, WALL_H = 6.2;
@@ -2237,11 +2240,11 @@
       halo.scale.set(0.38, 0.38, 0.38);
       halo.position.y = -drop - 0.16;
       g.add(halo);
-      var pt = new THREE.PointLight(0xffb066, 0.4, 7.5, 2);
+      var pt = new THREE.PointLight(0xffb066, 0.66, 9.5, 2);
       pt.position.y = -drop - 0.18;
       g.add(pt);
       scene.add(g);
-      lamps.push({ g: g, light: pt, base: 0.4, p: phase, bulb: bulb });
+      lamps.push({ g: g, light: pt, base: 0.66, p: phase, bulb: bulb });
     }
     cageLamp(1.65, -1.81, 3.3, 0);
     cageLamp(-1.97, 1.62, 3.0, 2.1);
@@ -7852,7 +7855,9 @@
         lp.g.rotation.x = Math.sin(now * 0.00037 + lp.p) * 0.012;
         lp.g.rotation.z = Math.cos(now * 0.00031 + lp.p) * 0.012;
       }
+      renderer.toneMappingExposure = 1.72;    // the bay runs a brighter filmic exposure — lift the room out of the murk
       renderScene(bay.scene, bay.camera);
+      renderer.toneMappingExposure = 1.45;    // restore for the range / terminal
       return;
     }
 
@@ -8528,10 +8533,9 @@
         WS().types.length ? '' : 'locked',
         WS().types.length ? '' : '<span class="hd-badge warn">NO TYPES</span>') +
       door('hq-longshot', 'THE FAR GATE', 'THE LONG SHOT PROGRAM',
-        waLocked ? 'Strategic range: put a target 1 to 5,000 miles out and thread it. Win one contract to open the program.'
-          : 'Pick a target anywhere from 1 to 5,000 miles. Build the article, dial the firing solution by hand, watch it fly. Precision is everything.',
-        waLocked ? 'locked' : (sandbox ? 'primary' : ''),
-        waLocked ? '<span class="hd-badge warn">CLEARANCE</span>' : '<span class="hd-badge">1–5000 MI</span>') +
+        'Pick a target anywhere from 1 to 5,000 miles. Build the article, dial the firing solution by hand, then ride it down and watch it hit. Precision is everything.',
+        (sandbox || wins === 0) ? 'primary' : '',
+        '<span class="hd-badge">1–5000 MI</span>') +
       door('hq-museum', 'THE LONG HALL', 'THE MUSEUM',
         'Framed disasters, brass firsts, best-crater plaques.', '', '') +
       '<button id="hq-gate" type="button">← THE GATE · CHANGE MODE</button>';
@@ -9858,15 +9862,23 @@
         '<text class="mct-lbl" x="' + x + '" y="34" text-anchor="middle">' + st + '</text>';
     });
     $('ls-mc-track').innerHTML = tk;
-    $('ls-warp').classList.remove('on');
-    lsFly = { t0: performance.now(), dur: res.flightT, warp: 1, res: res, W2: W2, H2: H2, tgtX: tgtX, apexY: apexY,
+    $('ls-warp').classList.remove('on'); $('ls-warp').textContent = 'SKIP →';
+    lsFly = { el: 0, lastNow: performance.now(), dur: res.flightT, res: res, W2: W2, H2: H2, tgtX: tgtX, apexY: apexY,
               stations: stations, lastStation: -1, done: false, raf: 0 };
     lsFlyStep();
   }
   function lsFlyStep() {
     if (!lsFly || lsFly.done) return;
     var now = performance.now();
-    var el = (now - lsFly.t0) / 1000 * lsFly.warp;
+    var dtReal = Math.min((now - lsFly.lastNow) / 1000, 0.05); lsFly.lastNow = now;
+    // AUTO-WARP: the descent is the event, not the wait. Short flights play
+    // in real time; long ones fast-forward the mid-course to a bounded montage,
+    // easing back near the hand-off so the 3D terminal doesn't teleport in.
+    var dur = lsFly.dur, kEst = clamp(lsFly.el / dur, 0, 1);
+    var base = Math.max(1, dur / clamp(dur, 4, 8));
+    var warp = kEst < 0.06 ? 1 : (kEst > 0.88 ? Math.max(1, base * 0.3) : base);
+    lsFly.el += dtReal * warp;
+    var el = lsFly.el;
     var k = clamp(el / lsFly.dur, 0, 1);
     var res = lsFly.res, W2 = lsFly.W2, H2 = lsFly.H2, tgtX = lsFly.tgtX;
     // trajectory: parabola; downrange fraction = k, height = arc. Terminal drifts to the ACTUAL impact.
@@ -9913,53 +9925,87 @@
     lsFly.raf = requestAnimationFrame(lsFlyStep);
   }
   $('ls-warp').addEventListener('click', function () {
-    if (!lsFly) return;
+    if (!lsFly || lsFly.done) return;
     PGAudio.tap();
-    lsFly.warp = lsFly.warp === 1 ? 4 : 1;
-    // keep elapsed continuous when changing warp
-    var elapsed = (performance.now() - lsFly.t0) / 1000 * (lsFly.warp === 4 ? 1 : 4);
-    lsFly.t0 = performance.now() - elapsed * 1000 / lsFly.warp;
-    $('ls-warp').classList.toggle('on', lsFly.warp === 4);
-    $('ls-warp').textContent = lsFly.warp === 4 ? '►► 4×' : '► WARP';
+    lsFly.el = Math.max(lsFly.el, lsFly.dur * 0.9);   // cut the montage — jump to the terminal hand-off
+    $('ls-warp').classList.add('on');
   });
   function lsImpact() { lsTerminal(); }   // hand off to the 3D terminal descent
 
   /* ---------- PHASE 4.5: the 3D terminal descent ---------- */
   var lsTerm = null;
+  function lsGroundTex() {
+    return canvasTex('lsground', 1024, 1024, function (x, w, h) {
+      var g = x.createLinearGradient(0, 0, 0, h);
+      g.addColorStop(0, '#5c4630'); g.addColorStop(0.5, '#6a5136'); g.addColorStop(1, '#493725');
+      x.fillStyle = g; x.fillRect(0, 0, w, h);
+      var r = PG2.stream('lsground', 'sand');
+      for (var i = 0; i < 70; i++) {                     // broad dune shading
+        var bx = r() * w, by = r() * h, br = 40 + r() * 170, lite = r() > 0.5;
+        var rg = x.createRadialGradient(bx, by, 0, bx, by, br);
+        rg.addColorStop(0, lite ? 'rgba(158,126,84,0.10)' : 'rgba(26,18,12,0.13)');
+        rg.addColorStop(1, 'rgba(0,0,0,0)');
+        x.fillStyle = rg; x.beginPath(); x.arc(bx, by, br, 0, 7); x.fill();
+      }
+      for (var j = 0; j < 9000; j++) {                   // fine sand tooth
+        var l2 = r() > 0.5;
+        x.fillStyle = 'rgba(' + (l2 ? '214,184,132' : '38,26,16') + ',' + (0.05 + r() * 0.12).toFixed(3) + ')';
+        x.fillRect(r() * w, r() * h, 1 + r() * 1.5, 1 + r());
+      }
+      for (var s = 0; s < 240; s++) {                    // scattered scrub
+        x.fillStyle = 'rgba(58,62,36,' + (0.18 + r() * 0.4).toFixed(2) + ')';
+        x.beginPath(); x.arc(r() * w, r() * h, 1 + r() * 2.4, 0, 7); x.fill();
+      }
+    });
+  }
   function lsTermInit() {
     if (lsTerm) return lsTerm;
     try {
       var scene = new THREE.Scene();
-      scene.background = gradientTexture([[0, '#0a1626'], [0.5, '#22304a'], [1, '#5a4130']], true);
-      scene.fog = new THREE.Fog(0x2a2230, 60, 220);
-      var camera = new THREE.PerspectiveCamera(44, W / H, 0.1, 500);
-      scene.add(new THREE.HemisphereLight(0x9db8d6, 0x2c231a, 0.75));
-      var sun = new THREE.DirectionalLight(0xffe6c0, 1.15); sun.position.set(-40, 60, 30); scene.add(sun);
-      var ground = new THREE.Mesh(new THREE.PlaneGeometry(500, 500), mat(0x33271b, { shin: 2 }));
+      scene.background = gradientTexture([[0, '#0b1220'], [0.4, '#26344d'], [0.72, '#7a5838'], [1, '#bb8c55']], true);   // dusk sky → warm horizon
+      scene.fog = new THREE.Fog(0x3a3040, 95, 360);
+      var camera = new THREE.PerspectiveCamera(46, W / H, 0.1, 1200);
+      scene.add(new THREE.HemisphereLight(0xbcd0e6, 0x3a2c1e, 0.9));
+      var sun = new THREE.DirectionalLight(0xffe0b0, 1.3); sun.position.set(-60, 70, 22); scene.add(sun);
+      // textured desert floor, tiled out to the fog line
+      var gt = lsGroundTex(); gt.wrapS = gt.wrapT = THREE.RepeatWrapping; gt.repeat.set(10, 10);
+      var ground = new THREE.Mesh(new THREE.PlaneGeometry(1800, 1800), skinMat(gt, { shin: 3 }));
       ground.rotation.x = -Math.PI / 2; scene.add(ground);
-      // concentric target rings (the hit zone), a bull, and cross-hair
+      // scorch scar, revealed at impact
+      var scorch = new THREE.Mesh(new THREE.CircleGeometry(6, 40),
+        new THREE.MeshBasicMaterial({ color: 0x120a06, transparent: true, opacity: 0, depthWrite: false }));
+      scorch.rotation.x = -Math.PI / 2; scorch.position.y = 0.03; scene.add(scorch);
+      // glowing concentric target rings + bull (additive → they bloom)
       var ringG = new THREE.Group();
-      [{ r: 5, w: 0.6 }, { r: 9, w: 0.3 }].forEach(function (rc) {
-        var rr = new THREE.Mesh(new THREE.RingGeometry(rc.r - rc.w, rc.r, 56),
-          new THREE.MeshBasicMaterial({ color: 0x7ed49a, transparent: true, opacity: rc.r === 5 ? 0.85 : 0.4, side: THREE.DoubleSide, depthWrite: false }));
+      [{ r: 5, w: 0.55, o: 0.95 }, { r: 9, w: 0.3, o: 0.5 }, { r: 13, w: 0.2, o: 0.28 }].forEach(function (rc) {
+        var rr = new THREE.Mesh(new THREE.RingGeometry(rc.r - rc.w, rc.r, 64),
+          new THREE.MeshBasicMaterial({ color: 0x8effb0, transparent: true, opacity: rc.o, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending }));
         rr.rotation.x = -Math.PI / 2; rr.position.y = 0.05; ringG.add(rr);
       });
-      var bull = new THREE.Mesh(new THREE.CircleGeometry(0.7, 24), new THREE.MeshBasicMaterial({ color: 0xff5b47 }));
-      bull.rotation.x = -Math.PI / 2; bull.position.y = 0.06; ringG.add(bull);
+      var bull = new THREE.Mesh(new THREE.CircleGeometry(0.7, 24), new THREE.MeshBasicMaterial({ color: 0xff6a52, transparent: true, opacity: 0.9, depthWrite: false }));
+      bull.rotation.x = -Math.PI / 2; bull.position.y = 0.07; ringG.add(bull);
       scene.add(ringG);
-      // the missile: slim body + red nose + fins, glowing tip
+      // the missile: slim body + hot glowing nose + fins + a plasma sheath
       var m = new THREE.Group();
       m.add(new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.2, 2.3, 12), mat(0xd0d7de, { shin: 70 })));
-      var nose = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.66, 12), mat(0xb0392b)); nose.position.y = 1.48; m.add(nose);
+      var nose = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.66, 12), mat(0xc24a34, { emissive: 0xff5522, ei: 1.5 })); nose.position.y = 1.48; m.add(nose);
       [0, 1, 2].forEach(function (i) { var f = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.04), mat(0x9aa4ad, { shin: 40 })); f.position.y = -1.0; f.rotation.y = i * 2.09; m.add(f); });
+      var sheath = new THREE.Sprite(new THREE.SpriteMaterial({ map: fxTextures().fire, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0 }));
+      sheath.material.color.setRGB(1, 0.8, 0.5); sheath.scale.set(1.6, 3.2, 1); sheath.position.y = -0.4; m.add(sheath);
       scene.add(m);
-      // reentry trail
+      // reentry plasma trail (additive) + a smoke contrail that lingers
       var trail = [];
-      for (var i = 0; i < 12; i++) {
+      for (var i = 0; i < 22; i++) {
         var sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: fxTextures().fire, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0 }));
-        sp.material.color.setRGB(1, 0.7, 0.35); scene.add(sp); trail.push(sp);
+        scene.add(sp); trail.push(sp);
       }
-      lsTerm = { scene: scene, camera: camera, ring: ringG, bull: bull, missile: m, trail: trail, fx: null };
+      var contrail = [];
+      for (var q = 0; q < 12; q++) {
+        var cs = new THREE.Sprite(new THREE.SpriteMaterial({ map: fxTextures().smoke, transparent: true, depthWrite: false, opacity: 0 }));
+        scene.add(cs); contrail.push(cs);
+      }
+      var flare = new THREE.PointLight(0xffd9a6, 0, 170, 1.7); scene.add(flare);   // the detonation lights the desert
+      lsTerm = { scene: scene, camera: camera, ring: ringG, bull: bull, missile: m, sheath: sheath, trail: trail, contrail: contrail, scorch: scorch, flare: flare, fx: null };
     } catch (e) { lsTerm = null; }
     return lsTerm;
   }
@@ -9967,16 +10013,30 @@
     if (!lsTermInit()) { lsResult(); return; }
     var res = S.ls.result, lt = lsTerm;
     var hitMi = Math.max(0.5, res.targetMi * 0.006), scale = 5 / hitMi;
-    var ix = clamp(res.crossMi * scale, -20, 20), iz = clamp(-res.downMi * scale, -20, 20);
+    var ix = clamp(res.crossMi * scale, -22, 22), iz = clamp(-res.downMi * scale, -22, 22);
     lt.impact = V3(ix, 0, iz);
-    lt.start = V3(ix * 0.2 - 5, 60, iz * 0.2 - 46);
+    lt.start = V3(ix * 0.2 - 5, 62, iz * 0.2 - 48);
     var dir = lt.impact.clone().sub(lt.start).normalize();
     lt.missile.quaternion.setFromUnitVectors(V3(0, 1, 0), dir);   // nose leads the descent
+    lt.missile.position.copy(lt.start);
     lt.missile.visible = true;
-    lt.t0 = null; lt.t = 0; lt.dur = 2.4; lt.postT = 0; lt.blownAt = 0; lt.blown = false; lt.done = false; lt.shake = 0;
-    lt.ring.children.forEach(function (c) { if (c.geometry && c.geometry.type === 'RingGeometry') c.material.color.setHex(res.hit ? 0x7ed49a : 0xff5b47); });
-    lt.bull.material.color.setHex(res.hit ? 0x7ed49a : 0xff5b47);
+    // camera keyframes: sit downrange of the target and look back up the
+    // trajectory, so the article visibly grows as it screams toward you.
+    var flat = V3(lt.impact.x - lt.start.x, 0, lt.impact.z - lt.start.z);
+    if (flat.length() < 0.001) flat.set(0, 0, 1);
+    flat.normalize();
+    var sdv = V3(flat.z, 0, -flat.x);
+    lt.camFar = lt.impact.clone().add(flat.clone().multiplyScalar(16)).add(sdv.clone().multiplyScalar(5)).add(V3(0, 11, 0));
+    lt.camNear = lt.impact.clone().add(flat.clone().multiplyScalar(6.5)).add(sdv.clone().multiplyScalar(1.4)).add(V3(0, 3, 0));
+    lt.t0 = null; lt.t = 0; lt.dur = 2.6; lt.postT = 0; lt.blownAt = 0; lt.holdAt = 0; lt.blown = false; lt.done = false; lt.shake = 0;
+    var col = res.hit ? 0x8effb0 : 0xff6a52;
+    lt.ring.children.forEach(function (c) { if (c.geometry && c.geometry.type === 'RingGeometry') c.material.color.setHex(col); });
+    lt.bull.material.color.setHex(col); lt.bull.material.opacity = 0.9;
     lt.trail.forEach(function (s) { s.material.opacity = 0; });
+    lt.contrail.forEach(function (s) { s.material.opacity = 0; });
+    lt.sheath.material.opacity = 0;
+    lt.scorch.material.opacity = 0; lt.flare.intensity = 0;
+    lt.camera.fov = 46; lt.camera.updateProjectionMatrix();
     if (lt.fx) { lt.scene.remove(lt.fx); lt.fx = null; }
     S.phase = 'lsterm';
     $('lth-clock').textContent = 'TERMINAL';
@@ -9985,63 +10045,119 @@
     showScreen(null);
   }
   function lsTermStep(dt, now) {
-    var lt = lsTerm, res = S.ls.result, c = lt.camera;
+    var lt = lsTerm, res = S.ls.result, c = lt.camera, k;
     if (lt.t0 == null) lt.t0 = now;
     if (!lt.blown) {
       lt.t = (now - lt.t0) / 1000;   // wall-clock: the cinematic plays in real seconds at any framerate
-      var k = clamp(lt.t / lt.dur, 0, 1), e = k * k;   // accelerate in
+      k = clamp(lt.t / lt.dur, 0, 1);
+      // dramatic time-map: accelerating fall to ~82%, then a slow-mo crawl on the final approach
+      var e;
+      if (k < 0.7) { var a = k / 0.7; e = 0.82 * a * a; }
+      else { var b = (k - 0.7) / 0.3; e = 0.82 + 0.18 * (1 - (1 - b) * (1 - b)); }
+      lt.missile.visible = true;
       lt.missile.position.lerpVectors(lt.start, lt.impact, e);
-      // trail: sample recent positions
+      // plasma sheath bites harder deeper in, and blooms in the slow-mo
+      lt.sheath.material.opacity = clamp(0.35 + k * 0.65, 0, 1) * (k > 0.03 ? 1 : 0);
+      var shs = 2.6 + k * 2.2; lt.sheath.scale.set(shs * 0.55, shs, 1);
+      // hot plasma trail sampled behind the nose (hot at the tip → cool up-track)
       lt.trail.forEach(function (s, i) {
-        var kk = Math.max(0, e - i * 0.02);
+        var kk = Math.max(0, e - i * 0.012);
         s.position.lerpVectors(lt.start, lt.impact, kk);
-        var sc = 1.1 - i * 0.06; s.scale.set(sc, sc, 1);
-        s.material.opacity = (0.5 - i * 0.035) * (k > 0.02 ? 1 : 0);
+        var f = i / lt.trail.length;
+        s.material.color.setRGB(1, 0.75 - f * 0.45, 0.45 - f * 0.4);
+        var sc = 1.5 - i * 0.045; s.scale.set(sc, sc, 1);
+        s.material.opacity = (0.7 - i * 0.028) * (k > 0.02 ? 1 : 0);
+      });
+      // smoke contrail up the track — lags, lingers
+      lt.contrail.forEach(function (s, i) {
+        var kk2 = Math.max(0, e - 0.08 - i * 0.05);
+        s.position.lerpVectors(lt.start, lt.impact, kk2); s.position.y += 0.3;
+        var sc2 = 2.2 + i * 0.5; s.scale.set(sc2, sc2, 1);
+        s.material.opacity = Math.min(s.material.opacity + dt * 1.5, 0.32 - i * 0.02) * (kk2 > 0 ? 1 : 0);
       });
       $('lth-clock').textContent = 'T−' + Math.max(0, lt.dur - lt.t).toFixed(1);
-      if (k >= 1) lsTermBurst();
+      if (k >= 1) {
+        lt.missile.position.copy(lt.impact);
+        if (!lt.holdAt) lt.holdAt = now;                 // hitstop: freeze on contact
+        if (now - lt.holdAt >= 110) lsTermBurst();
+      }
     } else {
-      lt.postT = (now - lt.blownAt) / 1000;
+      lt.postT = (now - lt.blownAt) / 1000; k = 1;
+      var p = lt.postT;
+      lt.flare.intensity = Math.max(0, 8.5 * (1 - p * 1.1));   // the flash lights the desert, then fades
+      lt.scorch.material.opacity = Math.min(0.85, p * 1.6);
       if (lt.fx) {
-        var p = lt.postT;
         lt.fx.children.forEach(function (ch) {
-          if (ch.userData.kind === 'flash') { ch.material.opacity = Math.max(0, 0.95 - p * 2.2); var fs = 12 + p * 20; ch.scale.set(fs, fs, 1); }
-          else if (ch.userData.kind === 'ring') { var rs = 1 + p * 26; ch.scale.set(rs, rs, rs); ch.material.opacity = Math.max(0, 0.9 - p * 0.9); }
-          else if (ch.userData.kind === 'fire') { ch.position.y += ch.userData.rise * dt; var gs = ch.userData.grow * (0.4 + p * 1.6); ch.scale.set(gs, gs, 1); ch.material.opacity = Math.max(0, 1 - p * 1.1); }
+          if (ch.userData.kind === 'flash') { ch.material.opacity = Math.max(0, 0.98 - p * 2.0); var fs = 14 + p * 26; ch.scale.set(fs, fs, 1); }
+          else if (ch.userData.kind === 'ring') { var rs = 1 + p * 30; ch.scale.set(rs, rs, rs); ch.material.opacity = Math.max(0, 0.9 - p * 0.85); }
+          else if (ch.userData.kind === 'gring') { var gs2 = 1 + p * 46; ch.scale.set(gs2, gs2, gs2); ch.material.opacity = Math.max(0, 0.7 - p * 0.6); }
+          else if (ch.userData.kind === 'fire') { ch.position.y += ch.userData.rise * dt; var gs = ch.userData.grow * (0.4 + p * 1.7); ch.scale.set(gs, gs, 1); ch.material.opacity = Math.max(0, 1 - p * 1.05); }
+          else if (ch.userData.kind === 'smoke') { ch.position.y += ch.userData.rise * dt; var ss = ch.userData.grow * (0.6 + p * 1.4); ch.scale.set(ss, ss, 1); ch.material.opacity = Math.max(0, ch.userData.o * (1 - p * 0.5)); }
         });
       }
-      lt.trail.forEach(function (s) { s.material.opacity = Math.max(0, s.material.opacity - dt * 3); });
-      if (lt.postT > 1.5 && !lt.done) {
+      lt.sheath.material.opacity = 0;
+      lt.trail.forEach(function (s) { s.material.opacity = Math.max(0, s.material.opacity - dt * 3.5); });
+      lt.contrail.forEach(function (s) { s.material.opacity = Math.max(0, s.material.opacity - dt * 0.5); });
+      if (lt.postT > 2.0 && !lt.done) {
         lt.done = true;
         $('ls-term-hud').classList.add('hidden');
         S.phase = 'longshot'; showScreen('scr-longshot'); lsResult();
         return;
       }
     }
-    c.position.set(17, 13.5, 27);
-    if (lt.shake > 0.02) { c.position.x += (Math.random() - 0.5) * lt.shake; c.position.y += (Math.random() - 0.5) * lt.shake; lt.shake = Math.max(0, lt.shake - dt * 6); }
-    c.lookAt(lt.impact.x * 0.4, 0.5, lt.impact.z * 0.4);
+    // ---- camera choreography: ride it down, punch in on the bull at impact ----
+    var ce = k < 1 ? (k * k * (3 - 2 * k)) : 1;           // smoothstep dolly
+    c.position.copy(lt.camFar).lerp(lt.camNear, ce);
+    var fov = 46 - (k > 0.8 ? (k - 0.8) / 0.2 * 7 : 0);
+    if (lt.blown) fov = 39 + Math.min(7, lt.postT * 10);
+    if (Math.abs(c.fov - fov) > 0.01) { c.fov = fov; c.updateProjectionMatrix(); }
+    if (lt.shake > 0.02) {
+      c.position.x += (Math.random() - 0.5) * lt.shake;
+      c.position.y += (Math.random() - 0.5) * lt.shake;
+      c.position.z += (Math.random() - 0.5) * lt.shake;
+      lt.shake = Math.max(0, lt.shake - dt * 5);
+    }
+    var settle = clamp((k - 0.5) / 0.5, 0, 1); settle = settle * settle * (3 - 2 * settle);
+    var lookP = lt.missile.position.clone().lerp(lt.impact.clone().add(V3(0, 0.4, 0)), settle);
+    c.lookAt(lookP);
     renderScene(lt.scene, lt.camera);
   }
   function lsTermBurst() {
     var lt = lsTerm, res = S.ls.result, tx = fxTextures();
-    lt.blown = true; lt.blownAt = performance.now(); lt.missile.visible = false; lt.shake = 2.4;
+    lt.blown = true; lt.blownAt = performance.now(); lt.missile.visible = false; lt.shake = 2.8;
+    var bang = clamp(res.cap.bang, 0.4, 1.6);
+    lt.flare.position.copy(lt.impact); lt.flare.position.y = 2; lt.flare.intensity = 8.5;
     var fx = new THREE.Group(); fx.position.copy(lt.impact);
+    // white flash
     var flash = new THREE.Sprite(new THREE.SpriteMaterial({ map: tx.flash, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
-    flash.position.y = 1.5; flash.userData.kind = 'flash'; fx.add(flash);
-    var ring = new THREE.Mesh(new THREE.RingGeometry(0.5, 1.3, 44), new THREE.MeshBasicMaterial({ color: 0xffe0a8, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false }));
-    ring.rotation.x = -Math.PI / 2; ring.position.y = 0.12; ring.userData.kind = 'ring'; fx.add(ring);
+    flash.position.y = 1.6; flash.userData.kind = 'flash'; fx.add(flash);
+    // vertical fire ring
+    var ring = new THREE.Mesh(new THREE.RingGeometry(0.5, 1.3, 44), new THREE.MeshBasicMaterial({ color: 0xffe0a8, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending }));
+    ring.rotation.x = -Math.PI / 2; ring.position.y = 0.14; ring.userData.kind = 'ring'; fx.add(ring);
+    // ground shockwave dust ring, racing outward across the deck
+    var gring = new THREE.Mesh(new THREE.RingGeometry(0.8, 1.6, 48), new THREE.MeshBasicMaterial({ color: 0xcaa06a, transparent: true, opacity: 0.7, side: THREE.DoubleSide, depthWrite: false }));
+    gring.rotation.x = -Math.PI / 2; gring.position.y = 0.09; gring.userData.kind = 'gring'; fx.add(gring);
     var rand = PG2.stream(S.ls.seed, 'lsterm');
-    for (var i = 0; i < 7; i++) {
+    // fireball
+    for (var i = 0; i < 10; i++) {
       var sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tx.fire, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
-      sp.material.color.setRGB(1, 0.55, 0.2);
-      sp.position.set((rand() - 0.5) * 3, 1 + rand() * 2, (rand() - 0.5) * 3);
-      sp.userData = { kind: 'fire', grow: 5 + rand() * 6 * clamp(res.cap.bang, 0.5, 1.5), rise: 3 + rand() * 4 };
+      sp.material.color.setRGB(1, 0.5 + rand() * 0.2, 0.15);
+      sp.position.set((rand() - 0.5) * 3.2, 1 + rand() * 2.4, (rand() - 0.5) * 3.2);
+      sp.userData = { kind: 'fire', grow: (5 + rand() * 7) * bang, rise: 3 + rand() * 4 };
       fx.add(sp);
     }
+    // rising smoke column, lingers after the fire dies
+    for (var j = 0; j < 8; j++) {
+      var sm = new THREE.Sprite(new THREE.SpriteMaterial({ map: tx.smoke, transparent: true, depthWrite: false, opacity: 0 }));
+      sm.position.set((rand() - 0.5) * 2.4, 1 + j * 0.7, (rand() - 0.5) * 2.4);
+      sm.userData = { kind: 'smoke', grow: (5 + rand() * 5) * bang, rise: 2 + rand() * 2.5, o: 0.5 - j * 0.03 };
+      fx.add(sm);
+    }
     lt.scene.add(fx); lt.fx = fx;
-    PGAudio.detonation(clamp(res.cap.bang, 0.3, 1.4), false);
+    PGAudio.detonation(bang, false);
     if (res.hit) PGAudio.fanfare(); else PGAudio.sadDrone();
+    // screen punch — the compositor kick that stands in for a rumble on iOS
+    try { var app = $('app'); if (app && app.animate) app.animate([{ transform: 'scale(1.032) translateY(5px)' }, { transform: 'none' }], { duration: 220, easing: 'cubic-bezier(.2,.9,.3,1)' }); } catch (e) {}
     $('lth-clock').textContent = 'IMPACT';
     $('lth-caption').textContent = res.hit ? res.grade + '.'
       : res.reachable ? 'Impact — ' + res.missMi.toFixed(res.missMi < 10 ? 2 : 1) + ' mi off. ' + res.grade + '.'
