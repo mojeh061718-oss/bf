@@ -21,7 +21,7 @@
   var renderer = new T.WebGLRenderer({ canvas: canvas, antialias: true, powerPreference: 'high-performance' });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.toneMapping = T.NeutralToneMapping || T.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.0;
+  renderer.toneMappingExposure = 0.78; // device over-exposes; keep tone in the metal instead of clipping to white
   renderer.shadowMap.enabled = true; renderer.shadowMap.type = T.PCFSoftShadowMap;
   var isP3 = false; try { isP3 = !!(window.matchMedia && window.matchMedia('(color-gamut: p3)').matches); } catch (e) {}
   try { if (isP3 && T.DisplayP3ColorSpace) renderer.outputColorSpace = T.DisplayP3ColorSpace; } catch (e) {}
@@ -49,8 +49,8 @@
   camera.position.set(6, 4, 10);
 
   // ============================================================ lighting
-  var key = new T.RectAreaLight(0xfff2e6, 5.0, 7, 11); key.position.set(-5.5, 6.5, 6); key.lookAt(0, 2, 0); scene.add(key);
-  var rim = new T.DirectionalLight(0xbcd4ff, 1.6); rim.position.set(6, 4, -6); scene.add(rim);
+  var key = new T.RectAreaLight(0xfff2e6, 3.2, 7, 11); key.position.set(-5.5, 6.5, 6); key.lookAt(0, 2, 0); scene.add(key);
+  var rim = new T.DirectionalLight(0xbcd4ff, 0.85); rim.position.set(6, 4, -6); scene.add(rim);
   scene.add(new T.HemisphereLight(0x2a3446, 0x05070c, 0.3));
   var sh = new T.DirectionalLight(0xffffff, 0.0); sh.position.set(-3, 12, 4); sh.castShadow = true;
   sh.shadow.mapSize.set(2048, 2048); sh.shadow.camera.near = 1; sh.shadow.camera.far = 40;
@@ -78,7 +78,7 @@
   contact.rotation.x = -Math.PI / 2; contact.position.y = 0.005; scene.add(contact);
 
   // ============================================================ materials
-  function titanium() { return new T.MeshPhysicalMaterial({ color: 0x83898f, metalness: 1, roughness: 0.47, anisotropy: 0.5, anisotropyRotation: Math.PI / 2, clearcoat: 0.2, clearcoatRoughness: 0.55, envMapIntensity: 0.8, dithering: true }); }
+  function titanium() { return new T.MeshPhysicalMaterial({ color: 0x6d7480, metalness: 1, roughness: 0.52, anisotropy: 0.5, anisotropyRotation: Math.PI / 2, clearcoat: 0.2, clearcoatRoughness: 0.6, envMapIntensity: 0.7, dithering: true }); }
   function carbon() { return new T.MeshPhysicalMaterial({ color: 0x121418, metalness: 0.25, roughness: 0.4, clearcoat: 0.8, clearcoatRoughness: 0.18, envMapIntensity: 1, dithering: true }); }
   function brass() { return new T.MeshStandardMaterial({ color: 0xbf9d63, metalness: 1, roughness: 0.28, envMapIntensity: 1.1, dithering: true }); }
   function ceramic() { return new T.MeshPhysicalMaterial({ color: 0x322e2b, metalness: 0, roughness: 0.74, clearcoat: 0.12, clearcoatRoughness: 0.6, envMapIntensity: 0.6, dithering: true }); }
@@ -113,7 +113,7 @@
     function noseRad(frac) {
       if (noseK.key === 'BLUNT') return Math.max(R * (1 - frac * frac * 0.82), 0.055);
       if (noseK.key === 'SPIKE') return Math.max(R * Math.pow(1 - frac, 1.4), 0.02);
-      return Math.max(ogiveR(frac * noseLen, R, noseLen), 0.02);
+      return Math.max(ogiveR((1 - frac) * noseLen, R, noseLen), 0.02); // full radius at base -> point at tip
     }
     // ONE-PIECE titanium airframe: base chamfer -> body -> ogive up to 80% of the nose. No overlapping caps.
     var capFrac = 0.80;
