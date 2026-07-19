@@ -190,10 +190,10 @@
 
   function Explosion() {
     var self = this; var grp = new T.Group(); scene.add(grp); this.group = grp; this.active = false; this.e = 0; this.scale = 1;
-    var fireMat = new T.ShaderMaterial({ transparent: false, depthWrite: true,
-      uniforms: { uTime: { value: 0 }, uTemp: { value: 1 }, uGrow: { value: 0 }, uEmissive: { value: 6 }, uRamp: { value: rampTex } },
+    var fireMat = new T.ShaderMaterial({ transparent: true, depthWrite: true,
+      uniforms: { uTime: { value: 0 }, uTemp: { value: 1 }, uGrow: { value: 0 }, uEmissive: { value: 6 }, uOpacity: { value: 1 }, uRamp: { value: rampTex } },
       vertexShader: SNOISE + '\nuniform float uTime;uniform float uGrow;varying vec3 vN;varying vec3 vView;varying float vNoise;void main(){float n=fbm(normalize(position)*2.3+vec3(0.0,-uTime*0.7,0.0));float n2=fbm(normalize(position)*5.0+vec3(uTime*0.4,uTime*0.5,0.0));vNoise=clamp(n*0.5+0.5+n2*0.12,0.0,1.0);float disp=(0.25+0.55*uGrow)*(0.5+0.7*vNoise);vec3 pos=position*(0.9+disp);vec4 wp=modelMatrix*vec4(pos,1.0);vN=normalize(mat3(modelMatrix)*normal);vView=normalize(cameraPosition-wp.xyz);gl_Position=projectionMatrix*viewMatrix*wp;}',
-      fragmentShader: 'uniform sampler2D uRamp;uniform float uTemp;uniform float uEmissive;varying vec3 vN;varying vec3 vView;varying float vNoise;void main(){float fres=pow(1.0-max(dot(normalize(vN),normalize(vView)),0.0),1.6);float temp=clamp(uTemp*(0.55+0.75*vNoise)-fres*0.2,0.0,1.0);vec3 col=texture2D(uRamp,vec2(temp,0.5)).rgb;vec3 outc=col*(0.42+uEmissive*temp*temp);gl_FragColor=vec4(outc,1.0);}' });
+      fragmentShader: 'uniform sampler2D uRamp;uniform float uTemp;uniform float uEmissive;uniform float uOpacity;varying vec3 vN;varying vec3 vView;varying float vNoise;void main(){float fres=pow(1.0-max(dot(normalize(vN),normalize(vView)),0.0),1.6);float temp=clamp(uTemp*(0.55+0.75*vNoise)-fres*0.2,0.0,1.0);vec3 col=texture2D(uRamp,vec2(temp,0.5)).rgb;vec3 outc=col*(0.42+uEmissive*temp*temp);gl_FragColor=vec4(outc,uOpacity);}' });
     this.fireMat = fireMat;
     var fireball = new T.Mesh(new T.IcosahedronGeometry(1, 5), fireMat); fireball.visible = false; grp.add(fireball); this.fireball = fireball;
     var flash = new T.Sprite(new T.SpriteMaterial({ map: flashTex, blending: T.AdditiveBlending, transparent: true, depthWrite: false, opacity: 0 })); flash.visible = false; grp.add(flash); this.flash = flash;
@@ -204,7 +204,7 @@
     var sparks = new T.Points(sg, new T.PointsMaterial({ size: 0.14, map: sparkTex, vertexColors: true, transparent: true, depthWrite: false, blending: T.AdditiveBlending })); sparks.visible = false; grp.add(sparks); this.sparks = sparks; this.sg = sg;
     // smoke puffs
     function pool(n, base) { var g2 = new T.Group(); g2.visible = false; grp.add(g2); var items = []; for (var i = 0; i < n; i++) { var m = new T.Sprite(new T.SpriteMaterial({ map: puffTex, transparent: true, depthWrite: false, opacity: 0, rotation: Math.random() * 6.28 })); m.scale.setScalar(base); g2.add(m); items.push(m); } return { g: g2, items: items }; }
-    this.smoke = pool(16, 1.5); this.dust = pool(14, 1.4); this.smokeSt = []; this.dustSt = [];
+    this.smoke = pool(22, 1.6); this.dust = pool(14, 1.4); this.smokeSt = []; this.dustSt = [];
     // shockwave ring
     var ringMat = new T.ShaderMaterial({ transparent: true, depthWrite: false, blending: T.AdditiveBlending, side: T.DoubleSide, uniforms: { uRadius: { value: 0 }, uThick: { value: 0.1 }, uOpacity: { value: 0 } }, vertexShader: 'varying vec2 vUv;void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}', fragmentShader: 'varying vec2 vUv;uniform float uRadius;uniform float uThick;uniform float uOpacity;void main(){float d=length(vUv-0.5)*2.0;float ring=1.0-clamp(abs(d-uRadius)/uThick,0.0,1.0);ring=pow(ring,2.2);vec3 col=mix(vec3(1.0,0.55,0.25),vec3(1.0,0.9,0.7),ring);gl_FragColor=vec4(col,ring*uOpacity);}' });
     this.ringMat = ringMat; var ring = new T.Mesh(new T.PlaneGeometry(24, 24), ringMat); ring.rotation.x = -Math.PI / 2; ring.position.y = 0.05; ring.visible = false; grp.add(ring); this.ring = ring;
@@ -221,7 +221,7 @@
     this.sparks.visible = true;
     for (var i = 0; i < this.N; i++) { var d = new T.Vector3(rnd(-1, 1), rnd(-0.1, 1.2), rnd(-1, 1)).normalize(); var sp = rnd(4, 13); this.svel[i * 3] = d.x * sp; this.svel[i * 3 + 1] = d.y * sp + rnd(1, 4); this.svel[i * 3 + 2] = d.z * sp; this.spos[i * 3] = 0; this.spos[i * 3 + 1] = 0; this.spos[i * 3 + 2] = 0; this.sttl[i] = rnd(0.6, 1.5); this.slife[i] = this.sttl[i]; }
     this.smoke.g.visible = true; this.smokeSt.length = 0;
-    for (var s = 0; s < this.smoke.items.length; s++) this.smokeSt.push({ pos: new T.Vector3(rnd(-0.4, 0.4), rnd(-0.2, 0.6), rnd(-0.4, 0.4)), vel: new T.Vector3(rnd(-0.3, 0.3), rnd(0.9, 2.1), rnd(-0.3, 0.3)), delay: rnd(0.2, 0.7), ttl: rnd(2, 3.2), age: 0, size0: rnd(1.1, 1.8), spin: rnd(-0.4, 0.4) });
+    for (var s = 0; s < this.smoke.items.length; s++) this.smokeSt.push({ pos: new T.Vector3(rnd(-0.4, 0.4), rnd(-0.2, 0.7), rnd(-0.4, 0.4)), vel: new T.Vector3(rnd(-0.25, 0.25), rnd(1.5, 3.0), rnd(-0.25, 0.25)), delay: rnd(0.15, 0.7), ttl: rnd(2.2, 3.4), age: 0, size0: rnd(1.2, 2.0), spin: rnd(-0.4, 0.4) });
     this.dust.g.visible = true; this.dustSt.length = 0;
     for (var dd = 0; dd < this.dust.items.length; dd++) { var ang = Math.random() * 6.28, rad = rnd(0.5, 2.5); this.dustSt.push({ pos: new T.Vector3(Math.cos(ang) * rad, rnd(0.1, 0.5), Math.sin(ang) * rad), vel: new T.Vector3(Math.cos(ang) * rnd(2, 5), rnd(0.3, 1), Math.sin(ang) * rnd(2, 5)), delay: rnd(0.03, 0.2), ttl: rnd(1.6, 2.8), age: 0, size0: rnd(1.3, 2), spin: rnd(-0.3, 0.3) }); }
     this.ring.visible = true; this.ringMat.uniforms.uRadius.value = 0; this.ringMat.uniforms.uOpacity.value = 1; this.ring.scale.set(1, 1, 1);
@@ -233,19 +233,21 @@
     this.e += dt; var e = this.e; this.fireMat.uniforms.uTime.value = now * 0.001;
     var fl = Math.exp(-e / 0.045); this.flash.material.opacity = fl; this.flash.scale.setScalar(1.2 + (1 - fl) * 1.4);
     this.light.intensity = (16 * Math.exp(-e / 0.09) + 3.5 * Math.exp(-e / 0.4)) * this.scale; if (e > 0.28) this.flash.visible = false;
-    var grow = 1 - Math.pow(1 - Math.min(e / 0.18, 1), 3); this.fireball.scale.setScalar((0.45 + grow * 0.62) * (1 + Math.max(0, e - 0.5) * 0.25)); this.fireMat.uniforms.uGrow.value = grow;
-    this.fireMat.uniforms.uTemp.value = Math.max(0, 1 - e / 1.05); if (e > 1.35) this.fireball.visible = false;
+    var grow = 1 - Math.pow(1 - Math.min(e / 0.18, 1), 3); this.fireball.scale.setScalar((0.45 + grow * 0.62) * (1 + Math.max(0, e - 0.5) * 0.35)); this.fireMat.uniforms.uGrow.value = grow;
+    this.fireMat.uniforms.uTemp.value = Math.max(0, 1 - e / 1.0); this.fireMat.uniforms.uOpacity.value = e < 0.85 ? 1 : Math.max(0, 1 - (e - 0.85) / 0.75); if (e > 1.62) this.fireball.visible = false;
     var anyS = false;
     for (var i = 0; i < this.N; i++) { if (this.slife[i] <= 0) { this.scol[i * 3] = this.scol[i * 3 + 1] = this.scol[i * 3 + 2] = 0; continue; } anyS = true; this.slife[i] -= dt; this.svel[i * 3 + 1] -= 9 * dt; var dr = Math.exp(-1.6 * dt); this.svel[i * 3] *= dr; this.svel[i * 3 + 1] *= dr; this.svel[i * 3 + 2] *= dr; this.spos[i * 3] += this.svel[i * 3] * dt; this.spos[i * 3 + 1] += this.svel[i * 3 + 1] * dt; this.spos[i * 3 + 2] += this.svel[i * 3 + 2] * dt; if (this.spos[i * 3 + 1] < 0.02) { this.spos[i * 3 + 1] = 0.02; this.svel[i * 3 + 1] *= -0.3; } var lf = this.slife[i] / this.sttl[i], fk = 0.7 + 0.3 * Math.sin(e * 40 + i); this.scol[i * 3] = 1.6 * (0.5 + 0.5 * lf) * fk; this.scol[i * 3 + 1] = (0.7 * lf + 0.15) * fk; this.scol[i * 3 + 2] = 0.2 * lf * fk; }
     this.sg.attributes.position.needsUpdate = true; this.sg.attributes.color.needsUpdate = true; if (!anyS && e > 1) this.sparks.visible = false;
-    for (var s = 0; s < this.smokeSt.length; s++) { var st = this.smokeSt[s], sp = this.smoke.items[s]; if (e < st.delay) { sp.material.opacity = 0; continue; } st.age += dt; st.vel.y += 0.4 * dt; st.vel.multiplyScalar(Math.exp(-0.7 * dt)); st.pos.addScaledVector(st.vel, dt); sp.position.copy(st.pos); var lf2 = st.age / st.ttl; sp.scale.setScalar(st.size0 * (1 + lf2 * 1.7)); sp.material.rotation += st.spin * dt; sp.material.opacity = Math.min(1, st.age / 0.3) * Math.max(0, 1 - lf2) * 0.5; var wm = Math.max(0, 1 - lf2 * 3); sp.material.color.setRGB(0.32 + 0.5 * wm, 0.3 + 0.22 * wm, 0.3 + 0.06 * wm); }
+    for (var s = 0; s < this.smokeSt.length; s++) { var st = this.smokeSt[s], sp = this.smoke.items[s]; if (e < st.delay) { sp.material.opacity = 0; continue; } st.age += dt; st.vel.y += 0.5 * dt; st.vel.multiplyScalar(Math.exp(-0.55 * dt)); st.pos.addScaledVector(st.vel, dt); sp.position.copy(st.pos); var lf2 = st.age / st.ttl; sp.scale.setScalar(st.size0 * (1 + lf2 * 1.9)); sp.material.rotation += st.spin * dt; sp.material.opacity = Math.min(1, st.age / 0.3) * Math.max(0, 1 - lf2) * 0.58; var wm = Math.max(0, 1 - lf2 * 3); sp.material.color.setRGB(0.32 + 0.55 * wm, 0.3 + 0.24 * wm, 0.3 + 0.06 * wm); }
     for (var d = 0; d < this.dustSt.length; d++) { var dt2 = this.dustSt[d], dp = this.dust.items[d]; if (e < dt2.delay) { dp.material.opacity = 0; continue; } dt2.age += dt; dt2.vel.multiplyScalar(Math.exp(-1.4 * dt)); dt2.pos.addScaledVector(dt2.vel, dt); dp.position.copy(dt2.pos); var lf3 = dt2.age / dt2.ttl; dp.scale.setScalar(dt2.size0 * (1 + lf3 * 2)); dp.material.rotation += dt2.spin * dt; dp.material.opacity = Math.min(1, dt2.age / 0.2) * Math.max(0, 1 - lf3) * 0.4; dp.material.color.setRGB(0.3, 0.27, 0.24); }
     if (e < 0.5) { var rr = e / 0.44; this.ringMat.uniforms.uRadius.value = rr * (2 - rr); this.ringMat.uniforms.uOpacity.value = Math.max(0, 1 - e / 0.44); this.ring.scale.set(1 + e * 26, 1 + e * 26, 1); } else this.ring.visible = false;
     var anyD = false;
     for (var k = 0; k < this.ND; k++) { var db = this.debSt[k]; if (db.age >= db.ttl) { this._m.makeScale(0, 0, 0); this.debris.setMatrixAt(k, this._m); continue; } anyD = true; db.age += dt; db.vel.y -= 9.5 * dt; db.pos.addScaledVector(db.vel, dt); if (db.pos.y < 0.09) { db.pos.y = 0.09; db.vel.y *= -0.35; } db.rot.x += db.spin.x * dt; db.rot.y += db.spin.y * dt; db.rot.z += db.spin.z * dt; this._e.copy(db.rot); this._q.setFromEuler(this._e); this._p.copy(db.pos); this._s.setScalar(db.scl); this._m.compose(this._p, this._q, this._s); this.debris.setMatrixAt(k, this._m); }
     this.debris.instanceMatrix.needsUpdate = true; if (!anyD) this.debris.visible = false;
-    if (e > 3.8) { this.active = false; this.smoke.g.visible = false; this.dust.g.visible = false; if (this.onDone) this.onDone(); }
+    if (e > 2.4 && this.onDone) { var cb = this.onDone; this.onDone = null; cb(); }
+    if (e > 3.8) { this.active = false; this.smoke.g.visible = false; this.dust.g.visible = false; }
   };
+  Explosion.prototype.reset = function () { this.active = false; this.onDone = null; this.fireball.visible = false; this.flash.visible = false; this.sparks.visible = false; this.ring.visible = false; this.debris.visible = false; this.smoke.g.visible = false; this.dust.g.visible = false; this.light.intensity = 0; };
   var explosion = new Explosion();
 
   // ============================================================ target / world for strike
@@ -376,7 +378,7 @@
       $('hud-sub').textContent = 'TERMINAL · TRACKING'; hideEl(ui.hud); document.body.classList.add('cine');
       // build flight path from origin to target apex
       var tp = target.position.clone(); var apexY = apexFor(TARGET_DIST) + 4;
-      flight = { t: 0, dur: 3.4, from: new T.Vector3(0, 0.2, 0), to: tp.clone().setY(1.35), apexY: apexY, launched: false, detonated: false };
+      flight = { t: 0, dur: 2.6, from: new T.Vector3(0, 0.2, 0), to: tp.clone().setY(1.35), apexY: apexY, launched: false, detonated: false };
       // detach the article to fly (reparent to world space via scene) — scale to projectile size vs. the target
       turntable.remove(article); scene.add(article); article.position.set(0, 0, 0); article.scale.setScalar(0.4); article.rotation.set(0, 0, 0);
       Audio2.ignite(); addTrauma(0.6);
@@ -395,9 +397,9 @@
       var camWide = new T.Vector3(target.position.x * 0.5 + 7, 6 + f.apexY * 0.25, target.position.z * 0.5 + 13);
       var camClose = new T.Vector3(target.position.x + 8, 5, target.position.z + 13);
       var cb = easeInOut(p); camTarget.pos.lerpVectors(camWide, camClose, cb); camTarget.look.copy(pos);
-      // terminal bullet-time
-      if (p > 0.82 && !f.slow) { f.slow = true; }
-      timeScale = f.slow && !f.detonated ? damp(timeScale, 0.28, 6, dt) : timeScale;
+      // terminal bullet-time (brief, so wall-clock stays ~3s)
+      if (p > 0.9 && !f.slow) { f.slow = true; }
+      timeScale = f.slow && !f.detonated ? damp(timeScale, 0.42, 8, dt) : timeScale;
       // detonation
       if (p >= 1 && !f.detonated) {
         f.detonated = true; timeScale = 1; hitStop(160); addTrauma(1.0); Audio2.boom(stats().blast);
@@ -445,7 +447,7 @@
   $('arm-switch').addEventListener('click', function () { setTimeout(function () { var on = $('arm-input').checked; setArm(on); Audio2.tick(); if (on) Audio2.thunk(); }, 0); });
   $('launch').addEventListener('click', function () { if (!armed) return; Audio2.tick(); setState('strike'); });
   $('replay').addEventListener('click', function () { Audio2.tick(); // reset world
-    article.visible = true; scene.remove(article); turntable.add(article); article.position.set(0, 0, 0); article.rotation.set(0, 0, 0); scorch.visible = false; roof.position.set(0, 1.24, 0); roof.rotation.set(0, 0, 0); roofFall = null; setState('bench'); });
+    explosion.reset(); article.visible = true; scene.remove(article); turntable.add(article); article.position.set(0, 0, 0); article.rotation.set(0, 0, 0); article.scale.setScalar(1); scorch.visible = false; scorch.scale.setScalar(1); roof.position.set(0, 1.24, 0); roof.rotation.set(0, 0, 0); roofFall = null; setState('bench'); });
 
   // ============================================================ MAIN LOOP (fixed sim + interpolated render)
   buildArticle(); refreshStats(true);
