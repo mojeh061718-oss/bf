@@ -157,13 +157,16 @@
     return article;
   }
 
-  // ---- stats derived from spec ----
+  // ---- stats derived from spec: these GATE the firing solution ----
   function stats() {
-    var reach = BODY[spec.body].reach + (spec.nose === 0 ? 120 : 0);
-    var precScore = NOSES[spec.nose].prec + FINSET[spec.fins].prec;   // 2..6
+    var reach = BODY[spec.body].reach + (spec.nose === 0 ? 120 : 0);           // max range (mi)
+    var precScore = NOSES[spec.nose].prec + FINSET[spec.fins].prec;            // 2..6
     var grade = precScore >= 6 ? 'AAA' : precScore >= 5 ? 'AA' : precScore >= 4 ? 'A' : precScore >= 3 ? 'B' : 'C';
+    var scatter = { AAA: 8, AA: 18, A: 34, B: 58, C: 95 }[grade];              // random dispersion (mi)
+    var killWin = 60 + { AAA: 120, AA: 80, A: 50, B: 25, C: 8 }[grade];        // lethal radius incl. precision (mi)
     var wh = WARHEADS[spec.warhead];
-    return { reach: reach, grade: grade, yield: wh.yield, unit: wh.unit, blast: wh.blast };
+    var yieldKt = wh.unit === 'MT' ? wh.yield * 1000 : wh.yield;               // yield normalised to kt
+    return { reach: reach, maxRange: reach, grade: grade, scatter: scatter, killWin: killWin, yield: wh.yield, yieldKt: yieldKt, unit: wh.unit, blast: wh.blast };
   }
 
   // ============================================================ EXPLOSION system (from strike proof, yield-scaled)
@@ -252,14 +255,42 @@
   var tled = new T.Mesh(new T.SphereGeometry(0.05, 12, 12), new T.MeshStandardMaterial({ color: 0xff5a3c, emissive: 0xff3a1e, emissiveIntensity: 3 })); tled.position.set(0.7, 2.42, 0.7); target.add(tled);
   // scorch decal (permanence)
   var scorch = new T.Mesh(new T.CircleGeometry(3, 48), new T.MeshBasicMaterial({ map: radialTex([[0, 'rgba(0,0,0,0.85)'], [0.5, 'rgba(10,6,4,0.6)'], [1, 'rgba(0,0,0,0)']]), transparent: true, depthWrite: false })); scorch.rotation.x = -Math.PI / 2; scorch.position.y = 0.02; scorch.visible = false; world.add(scorch);
-  var TARGET_DIST = 26;
+  // ---- world mapping: miles -> world units (same scale downrange & lateral so misses read true) ----
+  var LSCALE = 0.012, TARGET_DIST = 26;
+  function mapRange(r) { return 10 + r * LSCALE; }
   function apexFor(d) { return 5 + d * 0.13; }
-  function placeTarget(range, bearing) { var d = 14 + (range - 12) * 0.5; var a = (bearing - 90) * Math.PI / 180; world.position.set(0, 0, 0); target.position.set(Math.sin(a) * d, 0, -Math.cos(a) * d); scorch.position.set(target.position.x, 0.02, target.position.z); TARGET_DIST = d; }
+  function placeTargetRange(r) { var d = mapRange(r); target.position.set(0, 0, -d); scorch.position.set(0, 0.02, -d); TARGET_DIST = d; }
 
-  // trajectory arc line
+  // ---- ballistics: elevation + charge set downrange range; charge capped by article max range ----
+  var WINDK = 8, DRIFTK = 14;                      // aim mi per windage step; drift mi per (kt·flight)
+  var firing = { elev: 45, power: 60, windage: 0 };
+  function elevRad() { return firing.elev * Math.PI / 180; }
+  function achievedRange() { return stats().maxRange * (firing.power / 100) * Math.sin(2 * elevRad()); }
+  function flightTau() { return (firing.power / 100) * Math.sin(elevRad()); }   // ~0..1, longer lob = more drift
+  function windDrift() { return contract ? contract.wind.spd * flightTau() * DRIFTK * contract.wind.dir : 0; }
+
+  // ---- run state + contracts ----
+  var game = { shots: 0, hits: 0, streak: 0 };
+  var contract = null, lastResult = null, impactPoint = new T.Vector3();
+  function newContract() {
+    var r = 500 + Math.floor(Math.random() * 21) * 100;                        // 500..2500 mi
+    var roll = Math.random();
+    // SOFT: any warhead · FORTIFIED: HEAVY+ (>=10kt) · BUNKER: THERMONUCLEAR (>=100kt)
+    var h = roll < 0.5 ? { n: 'SOFT', req: 0.4 } : roll < 0.8 ? { n: 'FORTIFIED', req: 10 } : { n: 'BUNKER', req: 100 };
+    var wind = { spd: Math.floor(Math.random() * 23), dir: Math.random() < 0.5 ? -1 : 1 };
+    contract = { range: r, wind: wind, hardness: h.n, hardReq: h.req };
+  }
+  function gauss() { return (Math.random() + Math.random() + Math.random() - 1.5) / 1.5; }
+
+  // trajectory arc — drawn to where the player is AIMING (downrange = solution range, lateral = windage lead)
   var arcGeo = new T.BufferGeometry(); var arcPts = new Float32Array(60 * 3); arcGeo.setAttribute('position', new T.BufferAttribute(arcPts, 3));
   var arc = new T.Line(arcGeo, new T.LineBasicMaterial({ color: 0x38e6f0, transparent: true, opacity: 0.55 })); arc.visible = false; scene.add(arc);
-  function updateArc() { var a = target.position.clone(); var apexY = apexFor(TARGET_DIST); for (var i = 0; i < 60; i++) { var t = i / 59; var x = lerp(0, a.x, t), z = lerp(0, a.z, t); var y = Math.sin(t * Math.PI) * apexY; arcPts[i * 3] = x; arcPts[i * 3 + 1] = y; arcPts[i * 3 + 2] = z; } arcGeo.attributes.position.needsUpdate = true; }
+  function updateArc() {
+    var achR = Math.min(achievedRange(), stats().maxRange);
+    var ax = firing.windage * WINDK * LSCALE, az = -mapRange(achR), apexY = apexFor(mapRange(achR));
+    for (var i = 0; i < 60; i++) { var t = i / 59; var x = lerp(0, ax, t), z = lerp(0, az, t); var y = Math.sin(t * Math.PI) * apexY; arcPts[i * 3] = x; arcPts[i * 3 + 1] = y; arcPts[i * 3 + 2] = z; }
+    arcGeo.attributes.position.needsUpdate = true;
+  }
 
   // launch plume (for the article on ascent)
   var plume = new T.Sprite(new T.SpriteMaterial({ map: flashTex, blending: T.AdditiveBlending, transparent: true, depthWrite: false, color: 0xffcaa0, opacity: 0 })); plume.scale.setScalar(1.4); scene.add(plume);
@@ -324,7 +355,7 @@
   function setState(s) { if (States[state] && States[state].exit) States[state].exit(); state = s; tState = 0; if (States[s] && States[s].enter) States[s].enter(); }
 
   // ---- UI refs
-  var ui = { hud: $('hud'), bench: $('bench'), aim: $('aim'), armbox: $('armbox'), ctaBench: $('cta-bench'), ctaLaunch: $('cta-launch'), ctaBack: $('cta-back'), results: $('results'), ctaReplay: $('cta-replay'), hint: $('hint'), boot: $('boot') };
+  var ui = { hud: $('hud'), bench: $('bench'), aim: $('aim'), ctaBench: $('cta-bench'), ctaFire: $('cta-fire'), ctaBack: $('cta-back'), results: $('results'), ctaReplay: $('cta-replay'), ctaRebuild: $('cta-rebuild'), hint: $('hint'), boot: $('boot') };
   function show(el) { el.classList.remove('gone'); requestAnimationFrame(function () { el.classList.remove('hide'); }); }
   function hideEl(el) { el.classList.add('hide'); setTimeout(function () { el.classList.add('gone'); }, 320); }
 
@@ -354,23 +385,70 @@
     }
   };
 
-  // ---- AIM state ----
-  var aimRange = 37, aimBearing = 90, armed = false;
+  // ---- FIRE CONTROL state (the skill) ----
   States.aim = {
-    enter: function () { $('hud-sub').textContent = 'FIRE CONTROL · SOLUTION'; world.visible = true; turntable.visible = true; contact.visible = true; armed = false; setArm(false); placeTarget(aimRange, aimBearing); updateArc(); arc.visible = true; $('aim-range').textContent = aimRange; $('aim-bearing').textContent = ('00' + aimBearing).slice(-3); setAimCam(); show(ui.aim); show(ui.armbox); show(ui.ctaBack); $('launch').setAttribute('disabled', ''); },
-    exit: function () { hideEl(ui.aim); hideEl(ui.armbox); hideEl(ui.ctaBack); hideEl(ui.ctaLaunch); arc.visible = false; },
+    enter: function () {
+      $('hud-sub').textContent = 'FIRE CONTROL';
+      world.visible = true; turntable.visible = true; contact.visible = true; scorch.visible = false; roof.position.set(0, 1.18, 0); roof.rotation.set(0, 0, 0); roofFall = null; target.visible = true;
+      if (!contract) newContract();
+      firing.elev = 45; firing.power = 60; firing.windage = 0;
+      placeTargetRange(contract.range); updateFC(); arc.visible = true; setAimCam();
+      show(ui.aim); show(ui.ctaFire); show(ui.ctaBack);
+    },
+    exit: function () { hideEl(ui.aim); hideEl(ui.ctaFire); hideEl(ui.ctaBack); arc.visible = false; },
     update: function (dt, now) { if (tled) tled.material.emissiveIntensity = 2.5 + Math.sin(now * 0.006) * 1.2; setAimCam(); }
   };
-  function setArm(on) { armed = on; var sw = $('arm-switch'); if (on) sw.classList.add('on'); else sw.classList.remove('on'); var l = $('launch'); if (on) { l.removeAttribute('disabled'); l.classList.add('armed'); show(ui.ctaLaunch); } else { l.setAttribute('disabled', ''); l.classList.remove('armed'); hideEl(ui.ctaLaunch); } }
+  function updateFC() {
+    var st = stats(); var w = contract.wind;
+    $('fc-elev').textContent = firing.elev;
+    $('fc-power').textContent = firing.power;
+    $('fc-windage').textContent = (firing.windage > 0 ? '+' : '') + firing.windage;
+    $('fc-target').textContent = contract.range.toLocaleString() + ' · ' + contract.hardness;
+    $('fc-wind').textContent = w.spd === 0 ? 'CALM' : (w.dir < 0 ? '◄ ' : '') + w.spd + ' kt' + (w.dir > 0 ? ' ►' : '');
+    var achR = Math.round(achievedRange());
+    var solEl = $('fc-sol'); solEl.textContent = achR.toLocaleString();
+    solEl.className = 'fv' + (Math.abs(achR - contract.range) < st.killWin * 0.5 ? ' good' : '');
+    var fire = $('fire'); var canKill = st.yieldKt >= contract.hardReq; var inRange = contract.range <= st.maxRange + 1;
+    if (!inRange) { fire.textContent = 'OUT OF RANGE'; fire.setAttribute('disabled', ''); }
+    else if (!canKill) { fire.textContent = 'YIELD TOO LOW'; fire.setAttribute('disabled', ''); }
+    else { fire.textContent = 'FIRE'; fire.removeAttribute('disabled'); }
+    updateArc();
+  }
+  function stepFC(which, d) {
+    if (which === 'elev') firing.elev = clamp(firing.elev + d, 15, 80);
+    else if (which === 'power') firing.power = clamp(firing.power + d * 2, 10, 100);
+    else if (which === 'wind') firing.windage = clamp(firing.windage + d, -40, 40);
+    Audio2.tick(); updateFC();
+  }
+  function doFire() {
+    var st = stats();
+    if (contract.range > st.maxRange + 1 || st.yieldKt < contract.hardReq) return;
+    var impactRange = Math.min(achievedRange(), st.maxRange);
+    var aimLat = firing.windage * WINDK;
+    var lat = aimLat + windDrift() + gauss() * st.scatter;
+    var miss = Math.sqrt(Math.pow(impactRange - contract.range, 2) + lat * lat);
+    var lethal = st.yieldKt >= contract.hardReq;
+    var hit = miss < st.killWin && lethal;
+    impactPoint.set(lat * LSCALE, 0, -mapRange(impactRange));
+    // note describing the error
+    var dr = impactRange - contract.range;
+    var note = hit ? 'TARGET DESTROYED' :
+      (!lethal ? 'STRUCK — YIELD INSUFFICIENT, TARGET HELD' :
+        (Math.abs(dr) > Math.abs(lat) ? (dr > 0 ? 'LONG BY ' + Math.round(dr) + ' mi' : 'SHORT BY ' + Math.round(-dr) + ' mi')
+          : (lat > 0 ? 'DRIFTED ' + Math.round(lat) + ' mi RIGHT' : 'DRIFTED ' + Math.round(-lat) + ' mi LEFT')));
+    lastResult = { hit: hit, miss: Math.round(miss), note: note, lethal: lethal };
+    game.shots++; if (hit) { game.hits++; game.streak++; } else game.streak = 0;
+    Audio2.tick(); setState('strike');
+  }
 
   // ---- STRIKE state ----
   var flight = null;
   States.strike = {
     enter: function () {
       $('hud-sub').textContent = 'TERMINAL · TRACKING'; hideEl(ui.hud); document.body.classList.add('cine');
-      // build flight path from origin to target apex
-      var tp = target.position.clone(); var apexY = apexFor(TARGET_DIST) + 4;
-      flight = { t: 0, dur: 2.6, from: new T.Vector3(0, 0.2, 0), to: tp.clone().setY(1.35), apexY: apexY, launched: false, detonated: false };
+      // fly to the ACTUAL computed impact point (a miss lands off the target)
+      var tp = impactPoint.clone(); var apexY = apexFor(impactPoint.length()) + 4;
+      flight = { t: 0, dur: 2.6, from: new T.Vector3(0, 0.2, 0), to: tp.clone().setY(1.2), apexY: apexY, launched: false, detonated: false };
       // detach the article to fly (reparent to world space via scene) — scale to projectile size vs. the target
       turntable.remove(article); scene.add(article); article.position.set(0, 0, 0); article.scale.setScalar(0.4); article.rotation.set(0, 0, 0);
       Audio2.ignite(); addTrauma(0.6);
@@ -385,9 +463,10 @@
       var ahead = p + 0.02; var pos2 = new T.Vector3(lerp(f.from.x, f.to.x, ahead), lerp(f.from.y, f.to.y, ahead) + Math.sin(ahead * Math.PI) * f.apexY, lerp(f.from.z, f.to.z, ahead));
       article.position.copy(pos); article.lookAt(pos2); article.rotateX(Math.PI / 2);
       plume.position.copy(pos).addScaledVector(new T.Vector3().subVectors(pos, pos2).normalize(), 0.5); plume.material.opacity = p < 0.55 ? 0.9 : Math.max(0, 0.9 - (p - 0.55) * 4); plume.scale.setScalar(1.2 + Math.sin(now * 0.05) * 0.2);
-      // camera: hero low angle tracking, easing toward target on terminal
-      var camWide = new T.Vector3(target.position.x * 0.5 + 7, 6 + f.apexY * 0.25, target.position.z * 0.5 + 13);
-      var camClose = new T.Vector3(target.position.x + 8, 5, target.position.z + 13);
+      // camera: hero low angle tracking, framing the impact + target
+      var mid = target.position.clone().lerp(impactPoint, 0.5);
+      var camWide = new T.Vector3(mid.x * 0.5 + 7, 6 + f.apexY * 0.25, mid.z * 0.5 + 13);
+      var camClose = new T.Vector3(mid.x + 8, 5, mid.z + 13);
       var cb = easeInOut(p); camTarget.pos.lerpVectors(camWide, camClose, cb); camTarget.look.copy(pos);
       // terminal bullet-time (brief, so wall-clock stays ~3s)
       if (p > 0.9 && !f.slow) { f.slow = true; }
@@ -395,14 +474,15 @@
       // detonation
       if (p >= 1 && !f.detonated) {
         f.detonated = true; timeScale = 1; hitStop(160); addTrauma(1.0); Audio2.boom(stats().blast);
-        article.visible = false; plume.material.opacity = 0; scorch.visible = true; scorch.material.opacity = 0;
-        var scl = 0.6 + stats().blast * 0.35; explosion.fire(target.position.clone().setY(1.2), scl);
+        article.visible = false; plume.material.opacity = 0;
+        scorch.position.set(impactPoint.x, 0.02, impactPoint.z); scorch.visible = true; scorch.material.opacity = 0;
+        var scl = 0.6 + stats().blast * 0.35; explosion.fire(impactPoint.clone().setY(1.2), scl);
         // dolly the camera back to FRAME the blast (bigger yield -> further back)
-        var bc = target.position.clone().setY(1.2);
+        var bc = impactPoint.clone().setY(1.2);
         f.detCam = bc.clone().add(new T.Vector3(6 + scl * 5, 5 + scl * 5, 10 + scl * 8)); f.detLook = bc;
         scorch.scale.setScalar(scl * 1.3);
         explosion.onDone = function () { setState('results'); };
-        bombRoof();
+        if (lastResult && lastResult.hit) bombRoof();   // only wreck the target on a hit
       }
       if (f.detonated) { camTarget.pos.copy(f.detCam); camTarget.look.copy(f.detLook); if (scorch.material.opacity < 0.9) scorch.material.opacity += dt * 0.8; }
     }
@@ -413,15 +493,20 @@
   // ---- RESULTS ----
   States.results = {
     enter: function () {
-      show(ui.results); var st = stats(); var crater = Math.round(8 * st.blast + 4); var miss = Math.round(Math.random() * (st.grade === 'AAA' ? 3 : st.grade === 'AA' ? 8 : 18));
-      $('res-yield').textContent = (st.unit === 'MT' ? st.yield.toFixed(1) : Math.round(st.yield)) + ' ' + st.unit;
-      $('res-crater').textContent = crater; $('res-miss').textContent = miss;
-      var big = ui.results.querySelector('.big'), met = ui.results.querySelector('.met');
-      big.style.transition = 'opacity .6s .1s, transform .6s .1s'; big.style.transform = 'translateY(8px)'; big.style.opacity = 0; met.style.transition = 'opacity .6s .35s'; met.style.opacity = 0;
-      requestAnimationFrame(function () { big.style.opacity = 1; big.style.transform = 'none'; met.style.opacity = 1; });
-      show(ui.ctaReplay);
+      show(ui.results); var r = lastResult || { hit: false, miss: 0, note: '' };
+      var big = $('res-title'); big.textContent = r.hit ? 'HIT' : (r.lethal ? 'MISS' : 'INEFFECTIVE'); big.style.color = r.hit ? 'var(--cyan)' : 'var(--amber)';
+      $('res-miss').textContent = r.miss + ' mi';
+      $('res-streak').textContent = game.streak;
+      $('res-acc').textContent = game.shots ? Math.round(game.hits / game.shots * 100) : 0;
+      $('res-note').textContent = r.note;
+      var bg = ui.results.querySelector('.big'), met = ui.results.querySelector('.met'), note = $('res-note');
+      bg.style.transition = 'opacity .5s .1s, transform .5s .1s'; bg.style.transform = 'translateY(8px)'; bg.style.opacity = 0;
+      met.style.transition = 'opacity .5s .3s'; met.style.opacity = 0; note.style.transition = 'opacity .5s .5s'; note.style.opacity = 0;
+      requestAnimationFrame(function () { bg.style.opacity = 1; bg.style.transform = 'none'; met.style.opacity = 1; note.style.opacity = 1; });
+      show(ui.ctaReplay); show(ui.ctaRebuild);
+      if (r.hit) Audio2.thunk();
     },
-    exit: function () { hideEl(ui.results); hideEl(ui.ctaReplay); },
+    exit: function () { hideEl(ui.results); hideEl(ui.ctaReplay); hideEl(ui.ctaRebuild); },
     update: function (dt, now) { }
   };
 
@@ -431,15 +516,20 @@
   canvas.addEventListener('pointermove', function (e) { if (!drag) return; var dx = e.clientX - lx, dy = e.clientY - ly; lx = e.clientX; ly = e.clientY; benchTheta -= dx * 0.008; benchPhi = clamp(benchPhi + dy * 0.005, -0.05, 0.85); lastTouch = performance.now(); });
   window.addEventListener('pointerup', function () { drag = false; });
 
+  // reset the flying article back onto the bench turntable
+  function restoreArticle() { if (article.parent !== turntable) { scene.remove(article); turntable.add(article); } article.visible = true; article.position.set(0, 0, 0); article.rotation.set(0, 0, 0); article.scale.setScalar(1); scorch.visible = false; scorch.scale.setScalar(1); roof.position.set(0, 1.18, 0); roof.rotation.set(0, 0, 0); roofFall = null; }
+
   // button wiring
   $('begin').addEventListener('click', function () { Audio2.unlock(); Audio2.boot(); hideEl(ui.boot); setTimeout(function () { setState('bench'); }, 200); });
   $('to-aim').addEventListener('click', function () { Audio2.thunk(); setState('aim'); });
-  $('back-bench').addEventListener('click', function () { Audio2.tick(); setState('bench'); });
-  hapticize($('arm-switch')); // label already contains #arm-input
-  $('arm-switch').addEventListener('click', function () { setTimeout(function () { var on = $('arm-input').checked; setArm(on); Audio2.tick(); if (on) Audio2.thunk(); }, 0); });
-  $('launch').addEventListener('click', function () { if (!armed) return; Audio2.tick(); setState('strike'); });
-  $('replay').addEventListener('click', function () { Audio2.tick(); // reset world
-    explosion.reset(); article.visible = true; scene.remove(article); turntable.add(article); article.position.set(0, 0, 0); article.rotation.set(0, 0, 0); article.scale.setScalar(1); scorch.visible = false; scorch.scale.setScalar(1); roof.position.set(0, 1.24, 0); roof.rotation.set(0, 0, 0); roofFall = null; setState('bench'); });
+  $('back-bench').addEventListener('click', function () { Audio2.tick(); restoreArticle(); setState('bench'); });
+  $('fire').addEventListener('click', function () { doFire(); });
+  // fire-control steppers (delegated)
+  $('aim').addEventListener('click', function (e) { var b = e.target.closest ? e.target.closest('.b') : null; if (!b) return; stepFC(b.getAttribute('data-step'), parseInt(b.getAttribute('data-d'), 10)); });
+  // NEXT TARGET: keep the article, new contract
+  $('replay').addEventListener('click', function () { Audio2.tick(); restoreArticle(); newContract(); setState('aim'); });
+  // REBUILD: back to the bench to change the article
+  $('rebuild').addEventListener('click', function () { Audio2.tick(); restoreArticle(); setState('bench'); });
 
   // ============================================================ MAIN LOOP (fixed sim + interpolated render)
   buildArticle(); refreshStats(true);
@@ -476,6 +566,13 @@
     composer.render();
   });
 
+  // read-only debug hook (harmless; used to verify the firing-solution logic)
+  window.__fc = {
+    contract: function () { return contract; }, firing: function () { return firing; }, result: function () { return lastResult; }, game: function () { return game; },
+    stats: stats, achievedRange: achievedRange, windDrift: windDrift, K: { WINDK: WINDK, DRIFTK: DRIFTK },
+    set: function (e, p, w) { firing.elev = e; firing.power = p; firing.windage = w; if (state === 'aim') updateFC(); },
+    setContract: function (r, spd, dir, req) { contract = { range: r, wind: { spd: spd, dir: dir }, hardness: req >= 100 ? 'BUNKER' : req >= 10 ? 'FORTIFIED' : 'SOFT', hardReq: req }; if (state === 'aim') { placeTargetRange(r); updateFC(); } }
+  };
   window.__ready = true;
   } catch (e) { showErr(e.message + '\n' + (e.stack || '')); }
 })();

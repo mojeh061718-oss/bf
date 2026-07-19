@@ -68,7 +68,15 @@
   .chip.on { color:#06121a; background:var(--cyan); border-color:var(--cyan); font-weight:700; }
   .chip:active { transform:scale(.93); }
   .chip .sw { position:absolute; inset:0; opacity:0; }
-  .val-row { display:flex; gap:10px; align-items:center; justify-content:center; }
+  .fc-top { display:flex; gap:8px; justify-content:center; margin-bottom:10px; }
+  .fc-cell { background:rgba(10,14,22,.6); border:1px solid var(--line); border-radius:9px; padding:7px 12px; text-align:center; backdrop-filter:blur(8px); min-width:88px; }
+  .fc-cell .fl { display:block; font-size:7px; letter-spacing:.2em; color:var(--dim2); }
+  .fc-cell .fv { display:block; font-size:13px; font-weight:700; margin-top:3px; font-variant-numeric:tabular-nums; }
+  .fc-cell .fv.bad { color:var(--amber); }
+  .fc-cell .fv.good { color:var(--cyan); }
+  .stepper.wide { min-width:200px; }
+  .reshint { margin-top:14px; font-size:8px; letter-spacing:.24em; color:var(--dim); text-align:center; max-width:280px; opacity:0; }
+  .val-row { display:flex; gap:10px; align-items:center; justify-content:center; margin-top:8px; }
   .stepper { display:flex; align-items:center; gap:14px; background:rgba(10,14,22,.6); border:1px solid var(--line); border-radius:12px; padding:8px 12px; backdrop-filter:blur(8px); }
   .stepper .b { width:30px; height:30px; display:flex; align-items:center; justify-content:center; font-size:18px; color:var(--ink); border:1px solid var(--line); border-radius:8px; }
   .stepper .b:active { transform:scale(.9); background:rgba(56,230,240,.1); }
@@ -131,36 +139,40 @@
     </div>
   </div>
 
-  <!-- AIM controls -->
+  <!-- FIRE CONTROL -->
   <div id="aim" class="rail gone">
     <div class="inner">
+      <div class="fc-top">
+        <div class="fc-cell"><span class="fl">TARGET</span><span class="fv" id="fc-target">—</span></div>
+        <div class="fc-cell"><span class="fl">WIND</span><span class="fv" id="fc-wind">—</span></div>
+        <div class="fc-cell"><span class="fl">SOLUTION</span><span class="fv" id="fc-sol">—</span></div>
+      </div>
       <div class="val-row">
-        <div class="stepper"><div class="b" data-step="range" data-d="-1">−</div><div class="rd"><div class="n" id="aim-range">37</div><div class="u">RANGE · MI</div></div><div class="b" data-step="range" data-d="1">+</div></div>
-        <div class="stepper"><div class="b" data-step="bearing" data-d="-1">−</div><div class="rd"><div class="n" id="aim-bearing">090</div><div class="u">BEARING · °</div></div><div class="b" data-step="bearing" data-d="1">+</div></div>
+        <div class="stepper"><div class="b" data-step="elev" data-d="-1">−</div><div class="rd"><div class="n" id="fc-elev">45</div><div class="u">ELEV · °</div></div><div class="b" data-step="elev" data-d="1">+</div></div>
+        <div class="stepper"><div class="b" data-step="power" data-d="-1">−</div><div class="rd"><div class="n" id="fc-power">70</div><div class="u">CHARGE · %</div></div><div class="b" data-step="power" data-d="1">+</div></div>
+      </div>
+      <div class="val-row">
+        <div class="stepper wide"><div class="b" data-step="wind" data-d="-1">◄</div><div class="rd"><div class="n" id="fc-windage">0</div><div class="u">WINDAGE</div></div><div class="b" data-step="wind" data-d="1">►</div></div>
       </div>
     </div>
   </div>
 
-  <!-- ARM + LAUNCH -->
-  <div id="armbox" class="armbox gone">
-    <span class="lbl">SAFE</span>
-    <label class="switch" id="arm-switch"><input type="checkbox" class="sw" id="arm-input"><span class="knob"></span></label>
-    <span class="lbl">ARM</span>
-  </div>
-  <div id="cta-bench" class="cta gone" style="left:50%; transform:translateX(-50%);"><button class="go" id="to-aim">ARM ARTICLE&nbsp;→</button></div>
-  <div id="cta-launch" class="cta gone" style="left:50%; transform:translateX(-50%);"><label class="go" id="launch" disabled><input type="checkbox" class="sw" id="launch-sw">LAUNCH</label></div>
+  <div id="cta-bench" class="cta gone" style="left:50%; transform:translateX(-50%);"><button class="go" id="to-aim">FIRE CONTROL&nbsp;→</button></div>
+  <div id="cta-fire" class="cta gone" style="left:50%; transform:translateX(-50%);"><button class="go" id="fire">FIRE</button></div>
   <div id="cta-back" class="cta gone" style="left:calc(16px + var(--sal));"><button class="go" id="back-bench" style="border-color:var(--line); color:var(--dim); letter-spacing:.2em; padding:15px 18px;">←&nbsp;BENCH</button></div>
 
   <!-- RESULTS -->
   <div id="results" class="fill gone">
-    <div class="big" id="res-title">STRIKE LOGGED</div>
+    <div class="big" id="res-title">HIT</div>
     <div class="met">
-      <div class="c"><div class="l">YIELD</div><div class="v"><span id="res-yield">0</span></div></div>
-      <div class="c"><div class="l">CRATER</div><div class="v"><span id="res-crater">0</span>m</div></div>
-      <div class="c"><div class="l">MISS</div><div class="v"><span id="res-miss">0</span>m</div></div>
+      <div class="c"><div class="l">MISS</div><div class="v"><span id="res-miss">0</span></div></div>
+      <div class="c"><div class="l">STREAK</div><div class="v"><span id="res-streak">0</span></div></div>
+      <div class="c"><div class="l">ACCURACY</div><div class="v"><span id="res-acc">0</span>%</div></div>
     </div>
+    <div class="reshint" id="res-note"></div>
   </div>
-  <div id="cta-replay" class="cta gone" style="left:50%; transform:translateX(-50%);"><button class="go" id="replay">NEW ARTICLE</button></div>
+  <div id="cta-replay" class="cta gone" style="left:50%; transform:translateX(-50%);"><button class="go" id="replay">NEXT TARGET</button></div>
+  <div id="cta-rebuild" class="cta gone" style="left:calc(16px + var(--sal));"><button class="go" id="rebuild" style="border-color:var(--line); color:var(--dim); letter-spacing:.2em; padding:15px 18px;">REBUILD</button></div>
 
   <!-- BOOT -->
   <div id="boot" class="fill">
