@@ -1,0 +1,59 @@
+stage1-hq-compound done
+stage2-weapons-assembly-rnd done
+stage3-target-range-wave1 done
+stage4-type-certification done
+stage5-production-bid-board done
+verification-headless-544-assertions done
+verification-browser-e2e-full-loop done
+verification-contract-regression done
+wave2-career-sandbox-gate done
+wave2-premium-detonation-survey done
+verification-sandbox-e2e-isolation done
+verification-career-regression-2 done
+wave2-guidance-gyro-alignment-bench done
+wave2-interactive-test-cards done
+verification-guidance-e2e done
+wave2-recon2-aerial-rig done
+verification-aerial-e2e done
+wave2-premium-rendering-pass done
+graphics-rework-bay-workshop done
+graphics-rework-desert-range done
+graphics-rework-parts-targets done
+graphics-rework-integration-verified done
+
+longshot-sim-skill-model done
+longshot-mission-map done
+longshot-stepped-builder done
+longshot-dial-in-firing-solution done
+longshot-realtime-mission-control-flight done
+longshot-e2e-verified done
+
+longshot-target-types-static-hardened-moving done
+longshot-3d-terminal-descent done
+longshot-record-board-leaderboard done
+longshot-saved-firing-solutions done
+longshot-expansion-e2e-verified done
+
+longshot-cinematic-terminal-camera done
+longshot-terminal-spectacle-fx done
+longshot-flight-autowarp-montage done
+bay-lighting-lift done
+header-landscape-strip done
+longshot-ungated-frontdoor done
+missile-rework-e2e-verified done
+
+sandbox-pivot-live-3d-build-bench done
+
+sim-throttle-term-additive done
+flight-plan-dial-in-console done
+
+sim-lsyield-high-yield-warhead done
+destructible-targets-building-bunker-convoy done
+nuke-to-grenade-blast-scale-mushroom done
+descent-3d-starts-at-apogee done
+
+pure-sandbox-front-door done
+portrait-console-centering done
+sandbox-pivot-complete done
+
+stylized-cutscene-remake-fire-control done

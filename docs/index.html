@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0a1b2e">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='6.4' fill='none' stroke='%23e5a13d' stroke-width='1.4'/%3E%3Cpath d='M8 0v5M8 11v5M0 8h5M11 8h5' stroke='%239cc8ea' stroke-width='1.4'/%3E%3C/svg%3E">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>REDSKY INC — Build it right. The graph doesn't lie.</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="app">
+
+  <!-- ===== 3D VIEWPORT (assembly bay + range day) ===== -->
+  <canvas id="gl"></canvas>
+
+  <!-- ================= TITLE ================= -->
+  <section id="scr-title" class="screen active">
+    <div class="bp-sheet">
+      <div class="bp-corner tl"></div><div class="bp-corner tr"></div>
+      <div class="bp-corner bl"></div><div class="bp-corner br"></div>
+      <div class="title-stamp">CONFIDENTIAL</div>
+      <svg class="title-reticle" viewBox="0 0 120 120" aria-hidden="true">
+        <circle cx="60" cy="60" r="44" fill="none" stroke="currentColor" stroke-width="1.4"/>
+        <circle cx="60" cy="60" r="28" fill="none" stroke="currentColor" stroke-width="0.8" stroke-dasharray="4 5"/>
+        <path d="M60 2v30M60 88v30M2 60h30M88 60h30" stroke="currentColor" stroke-width="1.4"/>
+        <circle cx="60" cy="60" r="3" fill="currentColor"/>
+      </svg>
+      <div class="title-form">FORM RD-1147-A · REPUBLIC PROVING AUTHORITY</div>
+      <h1>REDSKY<br>INC</h1>
+      <p class="tagline">Build the rocket. Plan the flight. Watch it hit.</p>
+      <ol class="howto">
+        <li><b>Build it</b> — assemble the rocket on a live 3D bench: airframe, motor, guidance, warhead.</li>
+        <li><b>Plan the flight</b> — the engineer gets you close; you dial heading, burn cutoff & throttle and LOCK it.</li>
+        <li><b>Watch it hit</b> — ride the 3D descent down onto a real target, from a grenade pop to a mushroom cloud.</li>
+      </ol>
+      <button id="btn-start" type="button">BUILD A ROCKET</button>
+      <button id="btn-sandbox" type="button" class="hidden">SANDBOX LOT</button>
+      <div id="title-progress" class="hidden"></div>
+      <div class="title-nav hidden">
+        <button id="btn-title-board" type="button">📋 CONTRACT BOARD</button>
+        <button id="btn-title-museum" type="button">🏛 THE MUSEUM</button>
+      </div>
+      <p class="title-foot">REDSKY INC · ALL SCIENCE WITHIN IS INVENTED</p>
+    </div>
+    <button id="btn-settings" type="button" aria-label="Settings">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 8.4A3.6 3.6 0 1 0 12 15.6 3.6 3.6 0 0 0 12 8.4zm8.9 3.6c0-.5-.05-1-.14-1.47l2.06-1.6-2-3.46-2.43.98a7.9 7.9 0 0 0-2.54-1.47L15.5 2.4h-4l-.35 2.58c-.92.32-1.78.82-2.54 1.47l-2.43-.98-2 3.46 2.06 1.6a8.2 8.2 0 0 0 0 2.94l-2.06 1.6 2 3.46 2.43-.98c.76.65 1.62 1.15 2.54 1.47l.35 2.58h4l.35-2.58a7.9 7.9 0 0 0 2.54-1.47l2.43.98 2-3.46-2.06-1.6c.09-.48.14-.97.14-1.47z"/></svg>
+    </button>
+  </section>
+
+  <!-- ================= SETTINGS DRAWER ================= -->
+  <div id="settings-overlay" class="overlay hidden">
+    <div class="set-card">
+      <div class="set-head">FIELD OFFICE · SETTINGS</div>
+      <div class="set-sub">FORM RD-9 (PREFERENCES, PERSONAL, ONE PER CONTRACTOR)</div>
+      <button class="set-row" id="set-sound" type="button">
+        <span class="set-lbl">SOUND<span class="set-note">synthesized on site, no gramophone required</span></span>
+        <span class="set-toggle"></span>
+      </button>
+      <button class="set-row" id="set-skip" type="button">
+        <span class="set-lbl">SKIP CINEMATICS<span class="set-note">straight to Station 7 — the convoy drives itself</span></span>
+        <span class="set-toggle"></span>
+      </button>
+      <button class="set-row" id="set-lefty" type="button">
+        <span class="set-lbl">LEFT-HANDED LAYOUT<span class="set-note">mirrors the bay buttons for the other thumb</span></span>
+        <span class="set-toggle"></span>
+      </button>
+      <button id="set-close" type="button">BACK</button>
+    </div>
+  </div>
+
+  <!-- ================= THE HQ (M3b — the compound is the main menu) ================= -->
+  <section id="scr-hq" class="screen">
+    <div class="hq-frame">
+      <div class="hq-sky" aria-hidden="true">
+        <div class="hq-stars"></div>
+        <div class="hq-sun"></div><div class="hq-sunglow"></div>
+        <div class="hq-mesa far"></div><div class="hq-mesa mid"></div><div class="hq-mesa near"></div>
+        <div class="hq-scape">
+          <div class="hqb tower"><i class="tk"></i><i class="tk"></i><i class="beacon"></i></div>
+          <div class="hqb watertank"></div>
+          <div class="hqb still"><i class="steam"></i></div>
+          <div class="hqb office"><i class="win"></i><i class="win"></i><i class="flag"></i></div>
+          <div class="hqb shed"><i class="roof"></i><i class="bay-door"></i><i class="winband"></i></div>
+          <div class="hqb hut"><i class="win"></i></div>
+          <div class="hq-fence"></div>
+        </div>
+        <div class="hq-haze"></div>
+      </div>
+      <div class="hq-head">
+        <div class="hq-brand">REDSKY INC · THE COMPOUND</div>
+        <div class="hq-cash" id="hq-cash">COMPANY ACCOUNT · $0</div>
+      </div>
+      <div id="hq-run-ticker" class="hidden"></div>
+      <div class="hq-doors" id="hq-doors"></div>
+      <div class="hq-foot">SECTOR 9 · GATE CLOSES AT DUSK · GATE HAS NEVER ONCE CLOSED</div>
+    </div>
+  </section>
+
+  <!-- ================= PRODUCTION BID BOARD (M3b) ================= -->
+  <section id="scr-bids" class="screen">
+    <div class="bids-frame">
+      <div class="board-head">PRODUCTION BID BOARD · CERTIFIED TYPES ONLY</div>
+      <div class="board-sub" id="bids-sub"></div>
+      <div class="bids-scroll" id="bids-wall"></div>
+      <div class="board-btns"><button id="btn-bids-back" type="button">BACK TO THE COMPOUND</button></div>
+    </div>
+  </section>
+
+  <!-- ================= THE LONG SHOT PROGRAM ================= -->
+  <section id="scr-longshot" class="screen">
+    <div class="ls-frame">
+      <!-- PHASE 1: MISSION -->
+      <div id="ls-mission" class="ls-phase">
+        <div class="ls-head"><span class="ls-kick">THE LONG SHOT PROGRAM</span><span class="ls-step-lbl">MISSION · SELECT TARGET</span></div>
+        <div class="ls-map-wrap">
+          <svg id="ls-map" viewBox="0 0 320 320" aria-label="Tactical target map"></svg>
+        </div>
+        <div class="ls-coach">① Drag the crosshair to place your target &nbsp;·&nbsp; ② tap a target <b>TYPE</b> &nbsp;·&nbsp; ③ build it, dial it, and ride it down.</div>
+        <div class="ls-readout" id="ls-mission-read"></div>
+        <div class="ls-btns">
+          <button id="ls-mission-back" type="button" class="ls-ghost">← COMPOUND</button>
+          <button id="ls-mission-go" type="button" class="ls-go">BUILD THE ARTICLE →</button>
+        </div>
+      </div>
+      <!-- PHASE 2: BUILD — a live 3D rocket bench -->
+      <div id="ls-build" class="ls-phase hidden">
+        <div id="ls-build-stage" class="ls-bench-stage">
+          <div class="ls-head over"><span class="ls-kick" id="ls-build-target"></span><span class="ls-step-lbl">BUILD · ASSEMBLE THE ROCKET</span></div>
+          <div class="ls-bench-hint">drag to rotate</div>
+        </div>
+        <div class="ls-bench-sheet">
+          <div class="ls-steps" id="ls-build-steps"></div>
+          <div class="ls-caps" id="ls-build-caps"></div>
+          <div class="ls-btns">
+            <button id="ls-build-back" type="button" class="ls-ghost">← MISSION</button>
+            <button id="ls-build-go" type="button" class="ls-go">TO THE PAD →</button>
+          </div>
+        </div>
+      </div>
+      <!-- PHASE 3: DIAL-IN -->
+      <div id="ls-dial" class="ls-phase hidden">
+        <div class="ls-head"><span class="ls-kick" id="ls-dial-target"></span><span class="ls-step-lbl">DIAL-IN · THE FIRING SOLUTION</span></div>
+        <div class="ls-dials" id="ls-dials"></div>
+        <div class="ls-solution" id="ls-solution"></div>
+        <div class="ls-btns">
+          <button id="ls-dial-back" type="button" class="ls-ghost">← BUILD</button>
+          <button id="ls-dial-launch" type="button" class="ls-go launch">LAUNCH ▲</button>
+        </div>
+      </div>
+      <!-- PHASE 4: FLIGHT (mission control) -->
+      <div id="ls-flight" class="ls-phase hidden">
+        <div class="ls-mc-top">
+          <span id="ls-mc-clock">T+00:00</span>
+          <span id="ls-mc-phase">BOOST</span>
+          <button id="ls-warp" type="button">► WARP</button>
+        </div>
+        <div class="ls-mc-arc-wrap"><svg id="ls-mc-arc" viewBox="0 0 360 200" preserveAspectRatio="none"></svg></div>
+        <div class="ls-mc-tele" id="ls-mc-tele"></div>
+        <div class="ls-mc-track-wrap"><svg id="ls-mc-track" viewBox="0 0 360 40"></svg></div>
+        <div class="ls-mc-caption" id="ls-mc-caption"></div>
+      </div>
+      <!-- PHASE 5: RESULT -->
+      <div id="ls-result" class="ls-phase hidden">
+        <div class="ls-result-card" id="ls-result-card"></div>
+        <div class="ls-btns">
+          <button id="ls-result-tweak" type="button" class="ls-ghost">TWEAK &amp; REFIRE</button>
+          <button id="ls-result-new" type="button" class="ls-go">NEW MISSION</button>
+        </div>
+        <button id="ls-result-hq" type="button" class="ls-exit">THE COMPOUND</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Long Shot: the 3D terminal-descent HUD (shown over the #gl canvas) -->
+  <div id="ls-term-hud" class="hidden">
+    <div class="lth-scan"></div>
+    <div class="lth-vig"></div>
+    <div class="lth-corners"><span></span><span></span><span></span><span></span></div>
+    <div class="lth-top"><span class="rec-dot"></span><span class="lth-src">TRK&#8209;7 · OPTICAL FEED</span><span id="lth-clock">TERMINAL</span></div>
+    <div class="lth-tele">
+      <div><label>RNG</label><b id="lth-range">—</b></div>
+      <div><label>ALT</label><b id="lth-alt">—</b></div>
+      <div><label>VEL</label><b id="lth-vel">—</b></div>
+    </div>
+    <svg class="lth-reticle" viewBox="0 0 100 100" aria-hidden="true"><path class="ltr-cross" d="M50 32V44M50 56V68M32 50H44M56 50H68"/><circle class="ltr-ring" cx="50" cy="50" r="18"/></svg>
+    <div class="lth-lock" id="lth-lock"><span></span><span></span><span></span><span></span></div>
+    <div class="lth-caption" id="lth-caption"></div>
+  </div>
+  <!-- Long Shot: the program record board -->
+  <div id="ls-records-overlay" class="overlay hidden">
+    <div class="ls-records-card">
+      <div class="set-head">THE LONG SHOT PROGRAM · RECORD BOARD</div>
+      <div id="ls-records-list"></div>
+      <button id="ls-records-close" type="button">BACK</button>
+    </div>
+  </div>
+
+  <!-- target picker: which object measures you tonight -->
+  <div id="target-overlay" class="overlay hidden">
+    <div class="tgt-card">
+      <div class="set-head">THE RANGE · PICK YOUR OBJECT</div>
+      <div class="set-sub" id="tgt-cost">THIS SHOT EXPENDS THE ARTICLE</div>
+      <div id="tgt-list"></div>
+      <button id="tgt-close" type="button">BACK TO THE BENCH</button>
+    </div>
+  </div>
+
+  <!-- type certification: the standards series -->
+  <div id="cert-overlay" class="overlay hidden">
+    <div class="paper cert-doc" id="cert-doc"></div>
+    <button id="cert-close" type="button" class="hidden">CONTINUE</button>
+  </div>
+
+  <!-- the type plate: PRODUCTION READY -->
+  <div id="plate-overlay" class="overlay hidden">
+    <div id="plate-doc"></div>
+    <button id="plate-close" type="button">HANG IT IN THE WORKSHOP</button>
+  </div>
+
+  <!-- delivery receipt (+ the occasional QA letter) -->
+  <div id="delivery-overlay" class="overlay hidden">
+    <div class="paper delivery-doc" id="delivery-doc"></div>
+    <button id="delivery-close" type="button">BANK IT</button>
+  </div>
+
+  <!-- gyro alignment: the most instrument-looking minute in the game -->
+  <div id="gyro-overlay" class="overlay hidden">
+    <div class="gyro-card">
+      <div class="set-head">GYRO CORE G-7 · ALIGNMENT BENCH</div>
+      <div class="set-sub" id="gyro-sub">Spin it up. Hold the wander inside the ring for the whole capture.</div>
+      <div id="gyro-scope-wrap">
+        <svg id="gyro-scope" viewBox="0 0 240 240" aria-label="Gyro alignment scope">
+          <circle cx="120" cy="120" r="112" class="gs-bezel"/>
+          <circle cx="120" cy="120" r="100" class="gs-grid"/>
+          <circle cx="120" cy="120" r="66" class="gs-grid"/>
+          <circle cx="120" cy="120" r="30" class="gs-target"/>
+          <line x1="120" y1="12" x2="120" y2="228" class="gs-grid"/>
+          <line x1="12" y1="120" x2="228" y2="120" class="gs-grid"/>
+          <circle id="gs-dot" cx="120" cy="120" r="6" class="gs-dot"/>
+          <g id="gs-trim"><line x1="-10" y1="0" x2="10" y2="0"/><line x1="0" y1="-10" x2="0" y2="10"/></g>
+          <path id="gs-prog" class="gs-prog" d=""/>
+        </svg>
+      </div>
+      <div id="gyro-read">ROTOR CAGED</div>
+      <button id="gyro-run" type="button">SPIN UP &amp; CAPTURE</button>
+      <button id="gyro-close" type="button">BACK TO THE BAY</button>
+    </div>
+  </div>
+
+  <!-- the auction beat -->
+  <div id="auction-overlay" class="overlay hidden">
+    <div class="paper auction-doc" id="auction-doc"></div>
+    <div class="auction-btns">
+      <button id="auction-accept" type="button" class="hidden">ACCEPT THE ORDER</button>
+      <button id="auction-decline" type="button" class="hidden">LET IT GO</button>
+    </div>
+  </div>
+
+  <!-- ================= CONTRACT BOARD (corkboard of folders) ================= -->
+  <section id="scr-board" class="screen">
+    <div class="board-frame">
+      <div class="board-head">REPUBLIC PROVING AUTHORITY · OPEN SOLICITATIONS</div>
+      <div class="board-sub" id="board-sub"></div>
+      <div class="board-wall" id="board-wall"></div>
+      <div class="board-btns">
+        <button id="btn-board-back" type="button">BACK</button>
+        <button id="btn-board-museum" type="button">THE MUSEUM</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= THE INCIDENT REPORT MUSEUM ================= -->
+  <section id="scr-museum" class="screen">
+    <div class="museum-scroll" id="museum-scroll"></div>
+    <div class="museum-btns">
+      <button id="btn-museum-back" type="button">LEAVE THE MUSEUM</button>
+    </div>
+  </section>
+
+  <!-- ================= RFP ================= -->
+  <section id="scr-rfp" class="screen">
+    <div class="rfp-scroll">
+      <div class="paper rfp-doc" id="rfp-doc"></div>
+    </div>
+    <div class="rfp-actions">
+      <button id="btn-accept" type="button" disabled>ACCEPT CONTRACT</button>
+    </div>
+  </section>
+
+  <!-- ================= ASSEMBLY BAY UI ================= -->
+  <div id="ui-bay" class="ui hidden">
+    <header class="bay-head">
+      <div class="bay-brand"><span id="bay-brand-txt">REDSKY INC · BAY 2</span><span class="bay-attempt" id="bay-attempt"></span></div>
+      <div class="bay-meters">
+        <div class="meter" id="m-crater">
+          <div class="m-lbl">PREDICTED CRATER <b id="m-crater-val">—</b></div>
+          <div class="m-track">
+            <div class="m-spec" id="m-crater-spec"></div>
+            <div class="m-band" id="m-crater-band"></div>
+          </div>
+          <div class="m-marks"><span>0</span><span class="m-goal" id="m-goal">20–24 m</span><span id="m-max">30 m</span></div>
+        </div>
+        <div class="meter half">
+          <div class="m-lbl">WEIGHT <b id="m-weight-val">0 kg</b></div>
+          <div class="m-track"><div class="m-fill" id="m-weight-fill"></div><div class="m-capline hidden" id="m-weight-cap"></div></div>
+        </div>
+        <div class="meter half">
+          <div class="m-lbl">COST <b id="m-cost-val">$0</b></div>
+          <div class="m-track"><div class="m-fill" id="m-cost-fill"></div><div class="m-capline"></div></div>
+        </div>
+      </div>
+    </header>
+
+    <!-- BUILD PHASE RAIL (M3a) — navigation, never a lock -->
+    <div id="phase-rail">
+      <button class="pr-step" type="button" data-phase="structure">1 STRUCTURE</button>
+      <button class="pr-step" type="button" data-phase="payload">2 PAYLOAD</button>
+      <button class="pr-step" type="button" data-phase="systems">3 SYSTEMS</button>
+      <button class="pr-step pr-closeout" type="button" data-phase="closeout">4 CLOSE-OUT</button>
+    </div>
+
+    <div id="bay-hint" class="bay-hint"></div>
+
+    <div id="stage-build">
+      <button id="btn-hq" type="button" class="bay-cta hq hidden">← THE COMPOUND</button>
+      <button id="btn-gyro" type="button" class="bay-cta gyro hidden">⟲ GYRO<span class="cta-sub" id="btn-gyro-sub">UNCAGED</span></button>
+      <button id="btn-refinery" type="button" class="bay-cta ref hidden">⚗ THE STILL</button>
+      <button id="btn-refire" type="button" class="bay-cta refire hidden">REFIRE →<span class="cta-sub">BUILD IS READY</span></button>
+      <button id="btn-closeout" type="button" class="bay-cta" disabled>CLOSE-OUT →</button>
+      <div id="undo-bar">
+        <button id="btn-undo" type="button" disabled aria-label="Undo">↶</button>
+        <button id="btn-redo" type="button" disabled aria-label="Redo">↷</button>
+      </div>
+      <!-- THE PARTS DRAWER (M3a) — KSP grammar: slide-out, spine tabs, 2-col grid -->
+      <div id="drawer" class="collapsed">
+        <div id="drawer-panel">
+          <div id="drawer-head"><span id="drawer-title">PARTS · SHELLS</span><span class="drawer-form">RD-CATALOG · STORES ISSUE</span></div>
+          <div id="drawer-grid"></div>
+        </div>
+        <div id="drawer-spine"></div>
+        <button id="drawer-tab" type="button" aria-label="Open parts drawer"><span class="dt-arrow">▸</span><span class="dt-lbl">PARTS</span></button>
+      </div>
+    </div>
+
+    <div id="part-card" class="hidden">
+      <div class="pc-name" id="pc-name"></div>
+      <div class="pc-stats" id="pc-stats"></div>
+      <div class="pc-flavor" id="pc-flavor"></div>
+    </div>
+
+    <!-- close-out stage chrome (steps built per contract) -->
+    <div id="stage-bar" class="hidden"></div>
+
+    <div id="wiring-ui" class="stage-ui hidden">
+      <div class="stage-note" id="wiring-note">Read the schematic. Wire the panel.</div>
+      <div id="wire-station" class="hidden">
+        <div id="wire-board">
+          <div id="wb-lamp"></div>
+        </div>
+        <div id="wire-bench">
+          <div id="spool-rack"></div>
+          <div id="tester-box">
+            <div class="tb-head">CONTINUITY TESTER · RD-77</div>
+            <svg id="meter-svg" viewBox="0 0 120 58" aria-hidden="true"></svg>
+            <div id="meter-read">CLIP BOTH PROBES</div>
+          </div>
+        </div>
+        <svg id="wire-svg" aria-hidden="true"></svg>
+        <div id="probe-red" class="probe"><span class="probe-tip"></span></div>
+        <div id="probe-blk" class="probe blk"><span class="probe-tip"></span></div>
+      </div>
+      <button id="schem-tab" type="button" class="hidden">⚡ SCHEMATIC</button>
+      <div id="schem-card" class="hidden">
+        <div class="schem-paper">
+          <div class="schem-head"><span id="schem-title">WIRING SCHEMATIC</span><button id="schem-pin" type="button">📌 PIN IT</button></div>
+          <svg id="schem-svg"></svg>
+          <div id="schem-runs"></div>
+          <div class="schem-foot">PANEL LAYOUT MAY DIFFER FROM DRAWING. THE NUMBERS DO NOT. · DWG RD-1147/W</div>
+        </div>
+      </div>
+      <div id="torque-ring" class="hidden"><div id="torque-ring-fill"></div></div>
+      <button id="btn-panel-done" type="button" class="bay-cta hidden">PANEL CLOSED →</button>
+    </div>
+
+    <div id="dial-ui" class="stage-ui hidden">
+      <div class="stage-note" id="dial-note">Set the timer by hand.</div>
+      <div class="dial-wrap">
+        <svg id="dial-svg" viewBox="0 0 260 260" aria-label="Timer dial"></svg>
+      </div>
+      <button id="btn-dial-done" type="button" class="bay-cta">SET &amp; CLOSE →</button>
+    </div>
+
+    <div id="det-ui" class="stage-ui hidden">
+      <div class="stage-note">Guide the detonator into the well. <b>Slow is smooth.</b></div>
+      <div class="steady-wrap">
+        <div class="steady-lbl"><span>HANDLING</span><span id="steady-read">STEADY</span></div>
+        <div class="steady-track">
+          <div class="steady-zone"></div>
+          <div class="steady-fill" id="steady-fill"></div>
+        </div>
+      </div>
+      <button id="btn-det-pull" type="button" class="bay-cta pull hidden">PULL &amp; RE-SEAT</button>
+      <button id="btn-det-done" type="button" class="bay-cta hidden">CONTINUE →</button>
+    </div>
+
+    <div id="arm-ui" class="stage-ui hidden">
+      <div class="checklist paper" id="checklist">
+        <div class="ck-head">PRE-FLIGHT CLOSE-OUT</div>
+        <div class="ck-line" id="ck-wiring"><span class="ck-name">WIRING ROUTED</span><span class="ck-stamp"></span></div>
+        <div class="ck-line" id="ck-dial"><span class="ck-name">TIMER DIAL</span><span class="ck-stamp"></span></div>
+        <div class="ck-line" id="ck-torque"><span class="ck-name">TERMINALS TORQUED</span><span class="ck-stamp"></span></div>
+        <div class="ck-line" id="ck-det"><span class="ck-name">DETONATOR SEATED</span><span class="ck-stamp"></span></div>
+        <div class="ck-line" id="ck-gyro"><span class="ck-name">GYRO ALIGNED</span><span class="ck-stamp"></span></div>
+        <div class="ck-foot" id="ck-foot">Flip the guard. Throw the switch.</div>
+      </div>
+      <button id="btn-torange" type="button" class="bay-cta hidden">TRUCK TO RANGE →</button>
+    </div>
+  </div>
+
+  <!-- ================= RANGE DAY UI ================= -->
+  <div id="ui-range" class="ui hidden">
+    <div id="cam-overlay" class="hidden">
+      <div class="cam-bar cam-bar-top"></div>
+      <div class="cam-bar cam-bar-bot"></div>
+      <div class="cam-hud cam-tl"><span class="rec-dot"></span>REC</div>
+      <div class="cam-hud cam-tr" id="cam-station">STATION 7 — 1.6 KM</div>
+      <div class="cam-hud cam-bl" id="cam-clock">T−00:05.0</div>
+      <div class="cam-hud cam-br" id="cam-azel">AZ 214.6° · EL 1.2° · f/64</div>
+      <div class="cam-hud cam-tick hidden" id="cam-tick"></div>
+    </div>
+    <div id="flash"></div>
+    <div id="dustwall"></div>
+    <div id="range-caption"></div>
+    <button id="btn-cam" type="button" class="hidden">✈ RECON 2<span class="bc-sub">OVERHEAD · TOUCH TO FLY</span></button>
+    <button id="btn-survey" type="button" class="hidden">FILE THE SURVEY →</button>
+    <div id="range-controls">
+      <button id="btn-skip-truck" type="button" class="hidden">SKIP ▸</button>
+      <button id="btn-arm" type="button" class="hidden">
+        <span id="arm-ring"></span><span id="arm-lbl">HOLD TO ARM</span>
+      </button>
+      <button id="btn-fire" type="button" class="hidden">FIRE</button>
+    </div>
+    <svg id="measure-svg" class="hidden" viewBox="0 0 390 300" preserveAspectRatio="xMidYMid meet"></svg>
+  </div>
+
+  <!-- ================= SCORECARD ================= -->
+  <section id="scr-score" class="screen">
+    <div class="score-scroll" id="score-scroll"></div>
+  </section>
+
+  <!-- ================= THE STILL (REFINERY — now a room with two stations) ================= -->
+  <div id="refinery-overlay" class="overlay hidden">
+    <div class="ref-card">
+      <div class="ref-tabs">
+        <button id="ref-tab-distil" type="button" class="ref-tab on">⚗ DISTIL · F-1X</button>
+        <button id="ref-tab-blend" type="button" class="ref-tab">🫙 BLEND · G-3</button>
+      </div>
+      <div class="ref-head" id="ref-head">THE STILL · FILLER 1A → F-1X</div>
+      <div class="ref-sub" id="ref-sub">Hold <b>HEAT</b> to warm the kettle. Keep the needle in the amber band until the batch is done.
+        Ride it too hot for too long and the batch scorches.</div>
+      <div class="ref-body" id="ref-distil-body">
+        <svg class="ref-kettle" viewBox="0 0 90 120" aria-hidden="true">
+          <path d="M20 46 h50 v46 a12 12 0 0 1 -12 12 h-26 a12 12 0 0 1 -12 -12 z" fill="#3a4c5d" stroke="#7ba3c4" stroke-width="1.5"/>
+          <rect x="38" y="30" width="14" height="18" fill="#2c3b49" stroke="#7ba3c4" stroke-width="1.5"/>
+          <path d="M45 8 q6 8 0 16 q-5 7 0 14" fill="none" stroke="#9cc8ea" stroke-width="2" stroke-linecap="round" class="ref-steam"/>
+          <circle cx="35" cy="80" r="4" fill="#e5a13d" class="ref-bub b1"/>
+          <circle cx="50" cy="88" r="3" fill="#e5a13d" class="ref-bub b2"/>
+          <circle cx="58" cy="76" r="2.6" fill="#e5a13d" class="ref-bub b3"/>
+        </svg>
+        <div class="ref-gauge">
+          <div class="ref-band"></div>
+          <div class="ref-scorchzone"></div>
+          <div class="ref-needle" id="ref-needle"></div>
+        </div>
+        <div class="ref-col">
+          <div class="ref-lbl">BATCH</div>
+          <div class="ref-progress"><div id="ref-prog-fill"></div></div>
+          <div class="ref-status" id="ref-status">The kettle is cold.</div>
+        </div>
+      </div>
+      <div class="ref-body hidden" id="ref-blend-body">
+        <div class="blend-carboy" id="blend-carboy">
+          <div class="bc-body">F-2S</div>
+          <div class="bc-neck"></div>
+        </div>
+        <div class="blend-beaker">
+          <div class="bb-band"></div>
+          <div class="bb-line hi"></div>
+          <div class="bb-line lo"></div>
+          <div class="bb-fill" id="blend-fill"></div>
+        </div>
+        <div class="ref-col">
+          <div class="ref-lbl">POUR TO THE LINE</div>
+          <div class="ref-status" id="blend-status">The carboy waits.</div>
+        </div>
+      </div>
+      <div class="ref-stock" id="ref-stock"></div>
+      <button id="ref-heat" type="button">HOLD TO HEAT</button>
+      <button id="blend-pour" type="button" class="hidden">HOLD TO POUR</button>
+      <div class="ref-btns">
+        <button id="ref-start" type="button">START BATCH — $300 · 2 CANISTERS</button>
+        <button id="blend-start" type="button" class="hidden">START POUR — $220</button>
+        <button id="blend-bottle" type="button" class="hidden" disabled>BOTTLE IT</button>
+        <button id="ref-close" type="button">BACK TO THE BAY</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= ORDNANCE WEEKLY FRONT PAGE (Act I trophy) ================= -->
+  <div id="frontpage-overlay" class="overlay hidden">
+    <div class="paper frontpage-doc" id="frontpage-doc"></div>
+    <button id="btn-frontpage-close" type="button">FRAME IT · BACK TO THE ADJUDICATION</button>
+  </div>
+
+  <!-- ================= INCIDENT REPORT ================= -->
+  <div id="incident-overlay" class="overlay hidden">
+    <div class="paper incident-doc" id="incident-doc"></div>
+    <button id="btn-incident-close" type="button">RETURN TO SCORECARD</button>
+  </div>
+
+  <div id="toast" class="hidden"></div>
+</div>
+
+<script src="vendor/three.min.js"></script>
+<script src="sim.js"></script>
+<script src="audio.js"></script>
+<script src="game.js"></script>
+</body>
+</html>

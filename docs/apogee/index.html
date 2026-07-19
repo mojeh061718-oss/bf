@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="APOGEE">
+<meta name="theme-color" content="#04050a">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="apple-touch-icon" href="./icons/icon-180.png">
+<title>APOGEE</title>
+<style>
+  :root {
+    --sat: env(safe-area-inset-top,0px); --sab: env(safe-area-inset-bottom,0px);
+    --sal: env(safe-area-inset-left,0px); --sar: env(safe-area-inset-right,0px);
+    --ink:#eef1f6; --dim:#8b93a3; --dim2:#5b6472; --line:#243040;
+    --cyan:#38e6f0; --cyan-dim:#1c7f88; --amber:#ffb24d;
+    --mono:"SF Mono",ui-monospace,"JetBrains Mono",Menlo,monospace;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; -webkit-touch-callout:none; -webkit-user-select:none; user-select:none; }
+  html,body { height:100%; background:#04050a; overflow:hidden; overscroll-behavior:none; touch-action:none; font-family:var(--mono); color:var(--ink); }
+  #gl { position:fixed; inset:0; width:100%; height:100%; display:block; touch-action:none; }
+  .fill { position:fixed; inset:0; }
+  .safe { padding:calc(var(--sat)) calc(var(--sar)) calc(var(--sab)) calc(var(--sal)); }
+  .hide { opacity:0 !important; pointer-events:none !important; }
+  .gone { display:none !important; }
+
+  /* letterbox bars for cinematics */
+  #bars .bar { position:fixed; left:0; right:0; height:0; background:#000; z-index:40; transition:height .5s cubic-bezier(.4,0,.2,1); }
+  #bars .top { top:0; } #bars .bot { bottom:0; }
+  body.cine #bars .bar { height:11vh; }
+
+  /* HUD chrome */
+  #hud { position:fixed; inset:0; pointer-events:none; z-index:10; transition:opacity .5s; }
+  .kick { position:absolute; top:calc(20px + var(--sat)); left:calc(22px + var(--sal)); font-size:11px; letter-spacing:.42em; font-weight:700; }
+  .sub  { position:absolute; top:calc(38px + var(--sat)); left:calc(22px + var(--sal)); font-size:8px; letter-spacing:.26em; color:var(--dim); }
+  .stat { position:absolute; top:calc(20px + var(--sat)); right:calc(22px + var(--sar)); display:flex; gap:16px; text-align:right; }
+  .stat .cell .l { font-size:7.5px; letter-spacing:.2em; color:var(--dim2); }
+  .stat .cell .v { font-size:14px; font-weight:700; letter-spacing:.01em; margin-top:3px; font-variant-numeric:tabular-nums; }
+  .stat .cell .v small { font-size:7.5px; color:var(--dim); letter-spacing:.1em; }
+  .corner { position:absolute; width:14px; height:14px; border:1px solid var(--line); opacity:.5; }
+  .corner.tl { top:calc(58px + var(--sat)); left:16px; border-right:0; border-bottom:0; }
+  .corner.tr { top:calc(58px + var(--sat)); right:16px; border-left:0; border-bottom:0; }
+  .corner.bl { bottom:calc(96px + var(--sab)); left:16px; border-right:0; border-top:0; }
+  .corner.br { bottom:calc(96px + var(--sab)); right:16px; border-left:0; border-top:0; }
+
+  /* boot */
+  #boot { z-index:60; background:radial-gradient(120% 90% at 50% 40%, #0a0e17 0%, #04050a 70%); display:flex; flex-direction:column; align-items:center; justify-content:center; transition:opacity .7s; }
+  #boot .word { font-size:34px; letter-spacing:.5em; font-weight:700; padding-left:.5em; opacity:0; animation:fadeup 1.1s .2s forwards; }
+  #boot .tag { font-size:8px; letter-spacing:.4em; color:var(--dim); margin-top:14px; opacity:0; animation:fadeup 1.1s .5s forwards; }
+  #boot .begin { margin-top:60px; font-size:10px; letter-spacing:.34em; color:var(--cyan); opacity:0; animation:fadeup 1s 1.1s forwards, pulse 2.4s 2s infinite; border:1px solid var(--cyan-dim); border-radius:8px; padding:14px 26px; }
+  @keyframes fadeup { from{opacity:0; transform:translateY(8px);} to{opacity:1; transform:none;} }
+  @keyframes pulse { 0%,100%{opacity:.55;} 50%{opacity:1;} }
+
+  /* bottom sheet / control rail */
+  .rail { position:fixed; left:0; right:0; bottom:0; z-index:20; padding:14px calc(16px + var(--sar)) 0 calc(16px + var(--sal)); pointer-events:none; }
+  #bench.rail { bottom:calc(84px + var(--sab)); }
+  #aim.rail { bottom:calc(150px + var(--sab)); }
+  .rail .inner { pointer-events:auto; }
+  .tabs { display:flex; gap:7px; justify-content:center; margin-bottom:10px; }
+  .tab { flex:0 0 auto; font-size:8.5px; letter-spacing:.18em; color:var(--dim); padding:8px 12px; border:1px solid var(--line); border-radius:999px; background:rgba(10,14,22,.55); backdrop-filter:blur(8px); transition:transform .12s, color .2s, border-color .2s; }
+  .tab.on { color:var(--ink); border-color:var(--cyan-dim); }
+  .tab:active { transform:scale(.94); }
+  .chips { display:flex; gap:8px; justify-content:center; flex-wrap:wrap; min-height:44px; align-items:center; }
+  .chip { position:relative; font-size:9px; letter-spacing:.12em; color:var(--dim); padding:11px 14px; border:1px solid var(--line); border-radius:10px; background:rgba(10,14,22,.6); backdrop-filter:blur(8px); transition:transform .1s, color .2s, border-color .2s, background .2s; overflow:hidden; }
+  .chip.on { color:#06121a; background:var(--cyan); border-color:var(--cyan); font-weight:700; }
+  .chip:active { transform:scale(.93); }
+  .chip .sw { position:absolute; inset:0; opacity:0; }
+  .fc-top { display:flex; gap:8px; justify-content:center; margin-bottom:10px; }
+  .fc-cell { background:rgba(10,14,22,.6); border:1px solid var(--line); border-radius:9px; padding:7px 12px; text-align:center; backdrop-filter:blur(8px); min-width:88px; }
+  .fc-cell .fl { display:block; font-size:7px; letter-spacing:.2em; color:var(--dim2); }
+  .fc-cell .fv { display:block; font-size:13px; font-weight:700; margin-top:3px; font-variant-numeric:tabular-nums; }
+  .fc-cell .fv.bad { color:var(--amber); }
+  .fc-cell .fv.good { color:var(--cyan); }
+  .stepper.wide { min-width:200px; }
+  .reshint { margin-top:14px; font-size:8px; letter-spacing:.24em; color:var(--dim); text-align:center; max-width:280px; opacity:0; }
+  .val-row { display:flex; gap:10px; align-items:center; justify-content:center; margin-top:8px; }
+  .stepper { display:flex; align-items:center; gap:14px; background:rgba(10,14,22,.6); border:1px solid var(--line); border-radius:12px; padding:8px 12px; backdrop-filter:blur(8px); }
+  .stepper .b { width:30px; height:30px; display:flex; align-items:center; justify-content:center; font-size:18px; color:var(--ink); border:1px solid var(--line); border-radius:8px; }
+  .stepper .b:active { transform:scale(.9); background:rgba(56,230,240,.1); }
+  .stepper .rd { min-width:96px; text-align:center; }
+  .stepper .rd .n { font-size:16px; font-weight:700; font-variant-numeric:tabular-nums; }
+  .stepper .rd .u { font-size:7px; letter-spacing:.2em; color:var(--dim); margin-top:2px; }
+
+  /* primary action button */
+  .cta { position:fixed; z-index:22; bottom:calc(16px + var(--sab)); pointer-events:auto; }
+  .go { position:relative; font-size:11px; letter-spacing:.3em; font-weight:700; padding:15px 30px; border-radius:12px; border:1px solid var(--cyan-dim); color:var(--cyan); background:rgba(8,20,26,.7); backdrop-filter:blur(10px); overflow:hidden; }
+  .go.armed { color:#06121a; background:var(--cyan); border-color:var(--cyan); }
+  .go[disabled] { color:var(--dim2); border-color:var(--line); }
+  .go:active { transform:scale(.96); }
+  .go .sw { position:absolute; inset:0; opacity:0; }
+
+  /* arm switch */
+  .armbox { position:fixed; left:50%; transform:translateX(-50%); bottom:calc(92px + var(--sab)); z-index:22; display:flex; align-items:center; gap:12px; pointer-events:auto; }
+  .armbox .lbl { font-size:8px; letter-spacing:.28em; color:var(--dim); }
+  .switch { position:relative; width:56px; height:30px; border-radius:999px; border:1px solid var(--line); background:rgba(10,14,22,.7); transition:background .25s, border-color .25s; }
+  .switch .knob { position:absolute; top:3px; left:3px; width:22px; height:22px; border-radius:50%; background:#5b6472; transition:transform .25s cubic-bezier(.34,1.56,.64,1), background .25s; }
+  .switch.on { background:rgba(56,230,240,.22); border-color:var(--cyan); }
+  .switch.on .knob { transform:translateX(26px); background:var(--cyan); }
+  .switch .sw { position:absolute; inset:0; opacity:0; }
+
+  /* results */
+  #results { z-index:24; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; padding-bottom:calc(120px + var(--sab)); pointer-events:none; }
+  #results .big { font-size:20px; letter-spacing:.32em; font-weight:700; opacity:0; }
+  #results .met { margin-top:14px; display:flex; gap:22px; opacity:0; }
+  #results .met .c { text-align:center; }
+  #results .met .c .l { font-size:7.5px; letter-spacing:.2em; color:var(--dim2); }
+  #results .met .c .v { font-size:16px; font-weight:700; margin-top:3px; font-variant-numeric:tabular-nums; color:var(--amber); }
+
+  .hint { position:fixed; left:0; right:0; text-align:center; font-size:7.5px; letter-spacing:.3em; color:var(--dim2); z-index:12; pointer-events:none; }
+
+  #err { position:fixed; left:12px; right:12px; bottom:12px; font:11px var(--mono); color:#ff8d7e; white-space:pre-wrap; z-index:99; }
+</style>
+</head>
+<body>
+  <canvas id="gl"></canvas>
+
+  <div id="bars"><div class="bar top"></div><div class="bar bot"></div></div>
+
+  <!-- persistent HUD -->
+  <div id="hud" class="hide">
+    <div class="kick">A P O G E E</div>
+    <div class="sub" id="hud-sub">BENCH · TITAN-IX ARTICLE</div>
+    <div class="stat">
+      <div class="cell"><div class="l">REACH</div><div class="v"><span id="s-reach">0</span> <small>MI</small></div></div>
+      <div class="cell"><div class="l">PRECISION</div><div class="v" id="s-prec">—</div></div>
+      <div class="cell"><div class="l">YIELD</div><div class="v"><span id="s-yield">0</span> <small id="s-yield-u">KT</small></div></div>
+    </div>
+    <div class="corner tl"></div><div class="corner tr"></div><div class="corner bl"></div><div class="corner br"></div>
+  </div>
+
+  <!-- BENCH controls -->
+  <div id="bench" class="rail gone">
+    <div class="inner">
+      <div class="tabs" id="bench-tabs"></div>
+      <div class="chips" id="bench-chips"></div>
+    </div>
+  </div>
+
+  <!-- FIRE CONTROL -->
+  <div id="aim" class="rail gone">
+    <div class="inner">
+      <div class="fc-top">
+        <div class="fc-cell"><span class="fl">TARGET</span><span class="fv" id="fc-target">—</span></div>
+        <div class="fc-cell"><span class="fl">WIND</span><span class="fv" id="fc-wind">—</span></div>
+        <div class="fc-cell"><span class="fl">SOLUTION</span><span class="fv" id="fc-sol">—</span></div>
+      </div>
+      <div class="val-row">
+        <div class="stepper"><div class="b" data-step="elev" data-d="-1">−</div><div class="rd"><div class="n" id="fc-elev">45</div><div class="u">ELEV · °</div></div><div class="b" data-step="elev" data-d="1">+</div></div>
+        <div class="stepper"><div class="b" data-step="power" data-d="-1">−</div><div class="rd"><div class="n" id="fc-power">70</div><div class="u">CHARGE · %</div></div><div class="b" data-step="power" data-d="1">+</div></div>
+      </div>
+      <div class="val-row">
+        <div class="stepper wide"><div class="b" data-step="wind" data-d="-1">◄</div><div class="rd"><div class="n" id="fc-windage">0</div><div class="u">WINDAGE</div></div><div class="b" data-step="wind" data-d="1">►</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="cta-bench" class="cta gone" style="left:50%; transform:translateX(-50%);"><button class="go" id="to-aim">FIRE CONTROL&nbsp;→</button></div>
+  <div id="cta-fire" class="cta gone" style="left:50%; transform:translateX(-50%);"><button class="go" id="fire">FIRE</button></div>
+  <div id="cta-back" class="cta gone" style="left:calc(16px + var(--sal));"><button class="go" id="back-bench" style="border-color:var(--line); color:var(--dim); letter-spacing:.2em; padding:15px 18px;">←&nbsp;BENCH</button></div>
+
+  <!-- RESULTS -->
+  <div id="results" class="fill gone">
+    <div class="big" id="res-title">HIT</div>
+    <div class="met">
+      <div class="c"><div class="l">MISS</div><div class="v"><span id="res-miss">0</span></div></div>
+      <div class="c"><div class="l">STREAK</div><div class="v"><span id="res-streak">0</span></div></div>
+      <div class="c"><div class="l">ACCURACY</div><div class="v"><span id="res-acc">0</span>%</div></div>
+    </div>
+    <div class="reshint" id="res-note"></div>
+  </div>
+  <div id="cta-replay" class="cta gone" style="left:50%; transform:translateX(-50%);"><button class="go" id="replay">NEXT TARGET</button></div>
+  <div id="cta-rebuild" class="cta gone" style="left:calc(16px + var(--sal));"><button class="go" id="rebuild" style="border-color:var(--line); color:var(--dim); letter-spacing:.2em; padding:15px 18px;">REBUILD</button></div>
+
+  <!-- BOOT -->
+  <div id="boot" class="fill">
+    <div class="word">APOGEE</div>
+    <div class="tag">TACTICAL ARTICLE PROGRAM</div>
+    <div class="begin" id="begin">TAP TO BEGIN</div>
+  </div>
+
+  <div class="hint gone" id="hint" style="bottom:calc(150px + var(--sab));">DRAG TO ROTATE</div>
+  <div id="err"></div>
+
+  <script src="./vendor/three.bundle.js"></script>
+  <script src="./game.js"></script>
+  <script>if ('serviceWorker' in navigator) { window.addEventListener('load', function () { navigator.serviceWorker.register('./sw.js').catch(function () {}); }); }</script>
+</body>
+</html>
