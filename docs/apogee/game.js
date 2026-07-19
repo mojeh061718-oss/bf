@@ -43,7 +43,8 @@
   scene.fog = new T.Fog(0x0a0e18, 40, 140);
 
   var W = window.innerWidth, H = window.innerHeight;
-  var camera = new T.PerspectiveCamera(33, W / H, 0.1, 400);
+  // near plane kept well off 0 — a 0.1:400 ratio wrecks depth precision and causes z-fighting on device
+  var camera = new T.PerspectiveCamera(33, W / H, 0.6, 260);
   var camPos = new T.Vector3(), camLook = new T.Vector3(0, 2.2, 0);   // spring targets
   camera.position.set(6, 4, 10);
 
@@ -54,7 +55,7 @@
   var sh = new T.DirectionalLight(0xffffff, 0.0); sh.position.set(-3, 12, 4); sh.castShadow = true;
   sh.shadow.mapSize.set(2048, 2048); sh.shadow.camera.near = 1; sh.shadow.camera.far = 40;
   sh.shadow.camera.left = -8; sh.shadow.camera.right = 8; sh.shadow.camera.top = 10; sh.shadow.camera.bottom = -4;
-  sh.shadow.bias = -0.0004; sh.shadow.radius = 6; scene.add(sh);
+  sh.shadow.bias = -0.0006; sh.shadow.normalBias = 0.04; sh.shadow.radius = 5; scene.add(sh);
 
   // ============================================================ ground / bench floor
   var floorTex = (function () {
@@ -77,7 +78,7 @@
   contact.rotation.x = -Math.PI / 2; contact.position.y = 0.005; scene.add(contact);
 
   // ============================================================ materials
-  function titanium() { return new T.MeshPhysicalMaterial({ color: 0x83898f, metalness: 1, roughness: 0.42, anisotropy: 0.6, anisotropyRotation: Math.PI / 2, clearcoat: 0.25, clearcoatRoughness: 0.5, envMapIntensity: 0.85, dithering: true }); }
+  function titanium() { return new T.MeshPhysicalMaterial({ color: 0x83898f, metalness: 1, roughness: 0.47, anisotropy: 0.5, anisotropyRotation: Math.PI / 2, clearcoat: 0.2, clearcoatRoughness: 0.55, envMapIntensity: 0.8, dithering: true }); }
   function carbon() { return new T.MeshPhysicalMaterial({ color: 0x121418, metalness: 0.25, roughness: 0.4, clearcoat: 0.8, clearcoatRoughness: 0.18, envMapIntensity: 1, dithering: true }); }
   function brass() { return new T.MeshStandardMaterial({ color: 0xbf9d63, metalness: 1, roughness: 0.28, envMapIntensity: 1.1, dithering: true }); }
   function ceramic() { return new T.MeshPhysicalMaterial({ color: 0x322e2b, metalness: 0, roughness: 0.74, clearcoat: 0.12, clearcoatRoughness: 0.6, envMapIntensity: 0.6, dithering: true }); }
@@ -108,56 +109,47 @@
     var R = 0.34, bodyTop = BODY[spec.body].len, noseK = NOSES[spec.nose], noseLen = noseK.len;
     var wh = WARHEADS[spec.warhead];
 
-    // airframe lathe: base chamfer -> body -> nose
-    var prof = [ new T.Vector2(0.001, 0), new T.Vector2(R * 0.72, 0), new T.Vector2(R, 0.22), new T.Vector2(R, bodyTop) ];
-    if (noseK.key === 'BLUNT') {
-      for (var i = 1; i <= 20; i++) { var t = i / 20; prof.push(new T.Vector2(R * (1 - t * t * 0.9) + 0.02, bodyTop + t * noseLen)); }
-    } else if (noseK.key === 'SPIKE') {
-      for (var i2 = 1; i2 <= 30; i2++) { var t2 = i2 / 30; prof.push(new T.Vector2(Math.max(R * (1 - t2) * (1 - t2 * 0.4), 0.001), bodyTop + t2 * noseLen)); }
-    } else {
-      for (var i3 = 1; i3 <= 40; i3++) { var xx = i3 / 40 * noseLen; prof.push(new T.Vector2(Math.max(ogiveR(xx, R, noseLen), 0.0009), bodyTop + xx)); }
+    // radius along the nose (frac 0..1); blunt tips avoid degenerate apex slivers that flicker
+    function noseRad(frac) {
+      if (noseK.key === 'BLUNT') return Math.max(R * (1 - frac * frac * 0.82), 0.055);
+      if (noseK.key === 'SPIKE') return Math.max(R * Math.pow(1 - frac, 1.4), 0.02);
+      return Math.max(ogiveR(frac * noseLen, R, noseLen), 0.02);
     }
-    var body = new T.Mesh(new T.LatheGeometry(prof, 128), titanium()); body.castShadow = true; body.receiveShadow = true; article.add(body);
+    // ONE-PIECE titanium airframe: base chamfer -> body -> ogive up to 80% of the nose. No overlapping caps.
+    var capFrac = 0.80;
+    var prof = [ new T.Vector2(0.02, 0), new T.Vector2(R * 0.72, 0), new T.Vector2(R, 0.22), new T.Vector2(R, bodyTop) ];
+    for (var i = 1; i <= 44; i++) { var fr = i / 44 * capFrac; prof.push(new T.Vector2(noseRad(fr), bodyTop + fr * noseLen)); }
+    var body = new T.Mesh(new T.LatheGeometry(prof, 160), titanium()); body.castShadow = true; body.receiveShadow = true; article.add(body);
 
-    // ceramic tip
-    var capS = noseLen * 0.8, capProf = [];
-    for (var j = 0; j <= 16; j++) { var xc = capS + j / 16 * (noseLen - capS); var rr = noseK.key === 'OGIVE' ? ogiveR(xc, R, noseLen) : R * (1 - xc / noseLen); capProf.push(new T.Vector2(Math.max(rr, 0.0009), bodyTop + xc)); }
-    var cap = new T.Mesh(new T.LatheGeometry(capProf, 128), ceramic()); cap.scale.set(1.02, 1, 1.02); cap.castShadow = true; article.add(cap);
+    // ceramic tip: continues the SAME curve 80%->100%, sharing the boundary ring (edge-shared, never overlapping)
+    var capProf = [];
+    for (var j = 0; j <= 20; j++) { var fr2 = capFrac + j / 20 * (1 - capFrac); capProf.push(new T.Vector2(noseRad(fr2), bodyTop + fr2 * noseLen)); }
+    var cap = new T.Mesh(new T.LatheGeometry(capProf, 160), ceramic()); cap.castShadow = true; article.add(cap);
 
-    // warhead signal band (color by tier)
-    var bandMat = signal(); bandMat.color.setHex(wh.band); bandMat.emissive.setHex(wh.band); bandMat.emissiveIntensity = 0.28;
-    var band = new T.Mesh(new T.CylinderGeometry(R * 1.02, R * 1.02, 0.12, 128), bandMat); band.position.y = bodyTop * 0.78; band.castShadow = true; article.add(band);
-    // brass service band
-    var br = new T.Mesh(new T.CylinderGeometry(R * 1.012, R * 1.012, 0.07, 128), brass()); br.position.y = bodyTop * 0.42; article.add(br);
+    // raised service bands — open-ended cylinders sitting clearly PROUD of the skin so they can't z-fight
+    var bandMat = signal(); bandMat.color.setHex(wh.band); bandMat.emissive.setHex(wh.band); bandMat.emissiveIntensity = 0.22;
+    var band = new T.Mesh(new T.CylinderGeometry(R * 1.06, R * 1.06, 0.1, 160, 1, true), bandMat); band.position.y = bodyTop * 0.76; band.castShadow = true; article.add(band);
+    var br = new T.Mesh(new T.CylinderGeometry(R * 1.05, R * 1.05, 0.055, 160, 1, true), brass()); br.position.y = bodyTop * 0.42; article.add(br);
 
-    // motor + bell
-    var motor = new T.Mesh(new T.CylinderGeometry(R * 0.98, R * 1.03, 0.26, 128), darkMetal()); motor.position.y = 0.13; motor.castShadow = true; article.add(motor);
-    var bellProf = []; for (var b = 0; b <= 18; b++) { var tb = b / 18; bellProf.push(new T.Vector2(0.12 + Math.pow(tb, 1.7) * 0.28, -tb * 0.42)); }
-    var bell = new T.Mesh(new T.LatheGeometry(bellProf, 128), darkMetal()); bell.position.y = 0.02; article.add(bell);
+    // nozzle bell hanging below the base, well clear of the airframe
+    var bellProf = []; for (var b = 0; b <= 20; b++) { var tb = b / 20; bellProf.push(new T.Vector2(0.13 + Math.pow(tb, 1.7) * 0.23, -0.05 - tb * 0.4)); }
+    var bell = new T.Mesh(new T.LatheGeometry(bellProf, 128), darkMetal()); article.add(bell);
 
-    // fins
+    // fins: authored (radial x, axial y), thin in z, rooted INTO the body (solid overlap -> no gap, no coplanar z-fight)
     var fk = FINSET[spec.fins], nf = fk.n;
     for (var f = 0; f < nf; f++) {
-      var fin;
-      if (fk.key === 'GRID') {
-        fin = new T.Group();
-        var frame = new T.Mesh(new T.BoxGeometry(0.34, 0.34, 0.03), carbon());
-        fin.add(frame);
-        for (var gx = -1; gx <= 1; gx++) { var v = new T.Mesh(new T.BoxGeometry(0.02, 0.34, 0.04), carbon()); v.position.x = gx * 0.11; fin.add(v); var hgrid = new T.Mesh(new T.BoxGeometry(0.34, 0.02, 0.04), carbon()); hgrid.position.y = gx * 0.11; fin.add(hgrid); }
-        fin.position.set(0, 0.5, 0); fin.rotation.y = f * (Math.PI * 2 / nf); fin.translateOnAxis(new T.Vector3(0, 0, 1), R + 0.2);
-      } else {
-        var shape = new T.Shape(); var span = fk.key === 'X3' ? 0.42 : 0.5;
-        shape.moveTo(0, 0); shape.lineTo(span, -0.06); shape.lineTo(span, 0.26); shape.lineTo(0, 0.6); shape.lineTo(0, 0);
-        fin = new T.Mesh(new T.ExtrudeGeometry(shape, { depth: 0.04, bevelEnabled: true, bevelThickness: 0.015, bevelSize: 0.018, bevelSegments: 2 }), carbon());
-        fin.position.set(0, 0.06, 0); fin.rotation.y = f * (Math.PI * 2 / nf);
-        fin.translateOnAxis(new T.Vector3(0, 0, 1), R * 0.9); fin.translateOnAxis(new T.Vector3(1, 0, 0), -0.02);
-      }
+      var shape = new T.Shape();
+      if (fk.key === 'GRID') { shape.moveTo(0, 0); shape.lineTo(0, 0.6); shape.lineTo(0.4, 0.6); shape.lineTo(0.4, 0); shape.lineTo(0, 0); }
+      else { var span = fk.key === 'X3' ? 0.46 : 0.52; shape.moveTo(0, 0); shape.lineTo(0, 0.66); shape.lineTo(span, 0.34); shape.lineTo(span, 0.06); shape.lineTo(0, 0); }
+      var fin = new T.Mesh(new T.ExtrudeGeometry(shape, { depth: 0.05, bevelEnabled: true, bevelThickness: 0.012, bevelSize: 0.016, bevelSegments: 2 }), carbon());
+      fin.geometry.translate(0, 0, -0.025);
+      fin.rotation.y = f * (Math.PI * 2 / nf); fin.translateX(R - 0.06); fin.position.y = 0.05;
       fin.castShadow = true; article.add(fin);
     }
 
     // status LED near the nose (breathes)
-    markerLED = new T.Mesh(new T.SphereGeometry(0.03, 12, 12), new T.MeshStandardMaterial({ color: 0x0a3540, emissive: wh.band, emissiveIntensity: 3 }));
-    markerLED.position.set(R * 0.9, bodyTop * 0.9, 0); article.add(markerLED);
+    markerLED = new T.Mesh(new T.SphereGeometry(0.028, 16, 16), new T.MeshStandardMaterial({ color: 0x0a3540, emissive: wh.band, emissiveIntensity: 2 }));
+    markerLED.position.set(R + 0.005, bodyTop * 0.62, 0); article.add(markerLED);
 
     article.traverse(function (o) { if (o.material && 'dithering' in o.material) o.material.dithering = true; });
     turntable.add(article);
@@ -255,7 +247,7 @@
   var target = new T.Group(); world.add(target);
   var conc = new T.MeshStandardMaterial({ color: 0x3a3d42, roughness: 0.85, metalness: 0, envMapIntensity: 0.4, dithering: true });
   var bunker = new T.Mesh(new T.BoxGeometry(2, 1.15, 2), conc); bunker.position.y = 0.575; bunker.castShadow = true; bunker.receiveShadow = true; target.add(bunker);
-  var roof = new T.Mesh(new T.BoxGeometry(2.2, 0.18, 2.2), new T.MeshStandardMaterial({ color: 0x2c2f34, roughness: 0.8, dithering: true })); roof.position.y = 1.24; target.add(roof);
+  var roof = new T.Mesh(new T.BoxGeometry(2.2, 0.2, 2.2), new T.MeshStandardMaterial({ color: 0x2c2f34, roughness: 0.8, dithering: true })); roof.position.y = 1.18; target.add(roof);
   var tmast = new T.Mesh(new T.CylinderGeometry(0.03, 0.03, 1.1, 12), new T.MeshStandardMaterial({ color: 0x54585f, metalness: 1, roughness: 0.5 })); tmast.position.set(0.7, 1.85, 0.7); target.add(tmast);
   var tled = new T.Mesh(new T.SphereGeometry(0.05, 12, 12), new T.MeshStandardMaterial({ color: 0xff5a3c, emissive: 0xff3a1e, emissiveIntensity: 3 })); tled.position.set(0.7, 2.42, 0.7); target.add(tled);
   // scorch decal (permanence)
@@ -307,10 +299,10 @@
   // ============================================================ POST
   var composer = new X.EffectComposer(renderer);
   composer.addPass(new X.RenderPass(scene, camera));
-  var bloom = new X.UnrealBloomPass(new T.Vector2(W, H), 0.5, 0.5, 1.0); composer.addPass(bloom);
+  var bloom = new X.UnrealBloomPass(new T.Vector2(W, H), 0.35, 0.5, 1.05); composer.addPass(bloom);
   var grade = new X.ShaderPass({ uniforms: { tDiffuse: { value: null }, uTime: { value: 0 }, uRes: { value: new T.Vector2(W, H) }, uVig: { value: 0.5 } },
     vertexShader: 'varying vec2 vUv;void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}',
-    fragmentShader: 'varying vec2 vUv;uniform sampler2D tDiffuse;uniform float uTime;uniform vec2 uRes;uniform float uVig;float rnd(vec2 p){return fract(sin(dot(p,vec2(12.9898,78.233)))*43758.5453);}void main(){vec3 c=texture2D(tDiffuse,vUv).rgb;vec2 q=vUv-0.5;float vig=smoothstep(1.1,0.3,length(q)*1.35);c*=mix(1.0-uVig,1.0,vig);c=(c-0.5)*1.05+0.5;float g=rnd(vUv*uRes+uTime)-0.5;c+=g*0.026;float d=(rnd(gl_FragCoord.xy)-0.5)/255.0;c+=d;gl_FragColor=vec4(c,1.0);}' });
+    fragmentShader: 'varying vec2 vUv;uniform sampler2D tDiffuse;uniform float uTime;uniform vec2 uRes;uniform float uVig;float rnd(vec2 p){return fract(sin(dot(p,vec2(12.9898,78.233)))*43758.5453);}void main(){vec3 c=texture2D(tDiffuse,vUv).rgb;vec2 q=vUv-0.5;float vig=smoothstep(1.1,0.3,length(q)*1.35);c*=mix(1.0-uVig,1.0,vig);c=(c-0.5)*1.05+0.5;float g=rnd(vUv*uRes+uTime)-0.5;c+=g*0.010;float d=(rnd(gl_FragCoord.xy)-0.5)/255.0;c+=d;gl_FragColor=vec4(c,1.0);}' });
   composer.addPass(grade);
   composer.addPass(new X.OutputPass());
   try { composer.addPass(new X.SMAAPass(W, H)); } catch (e) {}
@@ -324,7 +316,7 @@
   var camTarget = { pos: new T.Vector3(), look: new T.Vector3() };
   function setCamFromBench() { var rg = camRig.bench; camTarget.pos.set(Math.sin(benchTheta) * rg.r * Math.cos(benchPhi), rg.look[1] + Math.sin(benchPhi) * rg.r, Math.cos(benchTheta) * rg.r * Math.cos(benchPhi)); camTarget.look.set(rg.look[0], rg.look[1], rg.look[2]); }
   // aim: look down the firing line — pad in foreground, target ahead, arc between
-  function setAimCam() { var d = TARGET_DIST; camTarget.pos.set(target.position.x * 0.22 + 3, 10 + d * 0.14, 15); camTarget.look.set(target.position.x * 0.4, 3, target.position.z * 0.45); }
+  function setAimCam() { var d = TARGET_DIST; camTarget.pos.set(target.position.x * 0.2 + 5, 13 + d * 0.14, 20); camTarget.look.set(target.position.x * 0.42, 2.4, target.position.z * 0.5); }
 
   // ============================================================ STATE MACHINE
   var state = 'boot', tState = 0, camSnap = false;
@@ -357,7 +349,7 @@
       if (!drag && now - lastTouch > 2600) benchTheta += dt * 0.14; setCamFromBench();
       // idle micro-motion + breathing LED
       if (article) { article.position.y = Math.sin(now * 0.0011) * 0.01; }
-      if (markerLED) markerLED.material.emissiveIntensity = 2.4 + Math.sin(now * 0.006) * 1.1;
+      if (markerLED) markerLED.material.emissiveIntensity = 1.5 + Math.sin(now * 0.0032) * 0.4;
       if (snapT >= 0) { snapT += dt; var s = Math.min(snapT / 0.32, 1); var pop = 1 + Math.sin(s * Math.PI) * 0.06 * (1 - s); if (article) article.scale.setScalar(pop); if (s >= 1) { snapT = -1; if (article) article.scale.setScalar(1); } }
     }
   };
