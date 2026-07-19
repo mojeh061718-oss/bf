@@ -2,233 +2,178 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>APOGEE — bench</title>
+<meta name="apple-mobile-web-app-title" content="APOGEE">
+<meta name="theme-color" content="#04050a">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="apple-touch-icon" href="./icons/icon-180.png">
+<title>APOGEE</title>
 <style>
-  :root { --sat: env(safe-area-inset-top,0px); --sab: env(safe-area-inset-bottom,0px); }
-  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
-  html,body { height:100%; background:#05060a; overflow:hidden; }
+  :root {
+    --sat: env(safe-area-inset-top,0px); --sab: env(safe-area-inset-bottom,0px);
+    --sal: env(safe-area-inset-left,0px); --sar: env(safe-area-inset-right,0px);
+    --ink:#eef1f6; --dim:#8b93a3; --dim2:#5b6472; --line:#243040;
+    --cyan:#38e6f0; --cyan-dim:#1c7f88; --amber:#ffb24d;
+    --mono:"SF Mono",ui-monospace,"JetBrains Mono",Menlo,monospace;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; -webkit-touch-callout:none; -webkit-user-select:none; user-select:none; }
+  html,body { height:100%; background:#04050a; overflow:hidden; overscroll-behavior:none; touch-action:none; font-family:var(--mono); color:var(--ink); }
   #gl { position:fixed; inset:0; width:100%; height:100%; display:block; touch-action:none; }
-  .hud { position:fixed; inset:0; pointer-events:none; font-family:"SF Mono",ui-monospace,Menlo,monospace; color:#eceff4; }
-  .kick { position:absolute; top:calc(22px + var(--sat)); left:24px; font-size:11px; letter-spacing:.42em; font-weight:700; color:#e9ecf2; opacity:.9; }
-  .sub  { position:absolute; top:calc(40px + var(--sat)); left:24px; font-size:8.5px; letter-spacing:.28em; color:#8b93a3; }
-  .spec { position:absolute; left:24px; right:24px; bottom:calc(26px + var(--sab)); display:flex; gap:22px; justify-content:center; }
-  .spec .cell { text-align:center; }
-  .spec .lbl { font-size:8px; letter-spacing:.24em; color:#7f8798; }
-  .spec .lbl { font-size:8px; letter-spacing:.24em; color:#7f8798; }
-  .spec .val { font-size:15px; font-weight:700; letter-spacing:.02em; color:#dfe4ec; margin-top:5px; font-variant-numeric:tabular-nums; }
-  .spec .val small { font-size:8px; color:#7f8798; letter-spacing:.14em; }
-  .hint { position:absolute; left:0; right:0; bottom:calc(72px + var(--sab)); text-align:center; font-size:8px; letter-spacing:.3em; color:#4a5262; }
-  #err { position:fixed; left:12px; right:12px; bottom:12px; font:11px monospace; color:#ff8d7e; white-space:pre-wrap; z-index:9; }
+  .fill { position:fixed; inset:0; }
+  .safe { padding:calc(var(--sat)) calc(var(--sar)) calc(var(--sab)) calc(var(--sal)); }
+  .hide { opacity:0 !important; pointer-events:none !important; }
+  .gone { display:none !important; }
+
+  /* letterbox bars for cinematics */
+  #bars .bar { position:fixed; left:0; right:0; height:0; background:#000; z-index:40; transition:height .5s cubic-bezier(.4,0,.2,1); }
+  #bars .top { top:0; } #bars .bot { bottom:0; }
+  body.cine #bars .bar { height:11vh; }
+
+  /* HUD chrome */
+  #hud { position:fixed; inset:0; pointer-events:none; z-index:10; transition:opacity .5s; }
+  .kick { position:absolute; top:calc(20px + var(--sat)); left:calc(22px + var(--sal)); font-size:11px; letter-spacing:.42em; font-weight:700; }
+  .sub  { position:absolute; top:calc(38px + var(--sat)); left:calc(22px + var(--sal)); font-size:8px; letter-spacing:.26em; color:var(--dim); }
+  .stat { position:absolute; top:calc(20px + var(--sat)); right:calc(22px + var(--sar)); display:flex; gap:16px; text-align:right; }
+  .stat .cell .l { font-size:7.5px; letter-spacing:.2em; color:var(--dim2); }
+  .stat .cell .v { font-size:14px; font-weight:700; letter-spacing:.01em; margin-top:3px; font-variant-numeric:tabular-nums; }
+  .stat .cell .v small { font-size:7.5px; color:var(--dim); letter-spacing:.1em; }
+  .corner { position:absolute; width:14px; height:14px; border:1px solid var(--line); opacity:.5; }
+  .corner.tl { top:calc(58px + var(--sat)); left:16px; border-right:0; border-bottom:0; }
+  .corner.tr { top:calc(58px + var(--sat)); right:16px; border-left:0; border-bottom:0; }
+  .corner.bl { bottom:calc(96px + var(--sab)); left:16px; border-right:0; border-top:0; }
+  .corner.br { bottom:calc(96px + var(--sab)); right:16px; border-left:0; border-top:0; }
+
+  /* boot */
+  #boot { z-index:60; background:radial-gradient(120% 90% at 50% 40%, #0a0e17 0%, #04050a 70%); display:flex; flex-direction:column; align-items:center; justify-content:center; transition:opacity .7s; }
+  #boot .word { font-size:34px; letter-spacing:.5em; font-weight:700; padding-left:.5em; opacity:0; animation:fadeup 1.1s .2s forwards; }
+  #boot .tag { font-size:8px; letter-spacing:.4em; color:var(--dim); margin-top:14px; opacity:0; animation:fadeup 1.1s .5s forwards; }
+  #boot .begin { margin-top:60px; font-size:10px; letter-spacing:.34em; color:var(--cyan); opacity:0; animation:fadeup 1s 1.1s forwards, pulse 2.4s 2s infinite; border:1px solid var(--cyan-dim); border-radius:8px; padding:14px 26px; }
+  @keyframes fadeup { from{opacity:0; transform:translateY(8px);} to{opacity:1; transform:none;} }
+  @keyframes pulse { 0%,100%{opacity:.55;} 50%{opacity:1;} }
+
+  /* bottom sheet / control rail */
+  .rail { position:fixed; left:0; right:0; bottom:0; z-index:20; padding:14px calc(16px + var(--sar)) 0 calc(16px + var(--sal)); pointer-events:none; }
+  #bench.rail { bottom:calc(84px + var(--sab)); }
+  #aim.rail { bottom:calc(150px + var(--sab)); }
+  .rail .inner { pointer-events:auto; }
+  .tabs { display:flex; gap:7px; justify-content:center; margin-bottom:10px; }
+  .tab { flex:0 0 auto; font-size:8.5px; letter-spacing:.18em; color:var(--dim); padding:8px 12px; border:1px solid var(--line); border-radius:999px; background:rgba(10,14,22,.55); backdrop-filter:blur(8px); transition:transform .12s, color .2s, border-color .2s; }
+  .tab.on { color:var(--ink); border-color:var(--cyan-dim); }
+  .tab:active { transform:scale(.94); }
+  .chips { display:flex; gap:8px; justify-content:center; flex-wrap:wrap; min-height:44px; align-items:center; }
+  .chip { position:relative; font-size:9px; letter-spacing:.12em; color:var(--dim); padding:11px 14px; border:1px solid var(--line); border-radius:10px; background:rgba(10,14,22,.6); backdrop-filter:blur(8px); transition:transform .1s, color .2s, border-color .2s, background .2s; overflow:hidden; }
+  .chip.on { color:#06121a; background:var(--cyan); border-color:var(--cyan); font-weight:700; }
+  .chip:active { transform:scale(.93); }
+  .chip .sw { position:absolute; inset:0; opacity:0; }
+  .val-row { display:flex; gap:10px; align-items:center; justify-content:center; }
+  .stepper { display:flex; align-items:center; gap:14px; background:rgba(10,14,22,.6); border:1px solid var(--line); border-radius:12px; padding:8px 12px; backdrop-filter:blur(8px); }
+  .stepper .b { width:30px; height:30px; display:flex; align-items:center; justify-content:center; font-size:18px; color:var(--ink); border:1px solid var(--line); border-radius:8px; }
+  .stepper .b:active { transform:scale(.9); background:rgba(56,230,240,.1); }
+  .stepper .rd { min-width:96px; text-align:center; }
+  .stepper .rd .n { font-size:16px; font-weight:700; font-variant-numeric:tabular-nums; }
+  .stepper .rd .u { font-size:7px; letter-spacing:.2em; color:var(--dim); margin-top:2px; }
+
+  /* primary action button */
+  .cta { position:fixed; z-index:22; bottom:calc(16px + var(--sab)); pointer-events:auto; }
+  .go { position:relative; font-size:11px; letter-spacing:.3em; font-weight:700; padding:15px 30px; border-radius:12px; border:1px solid var(--cyan-dim); color:var(--cyan); background:rgba(8,20,26,.7); backdrop-filter:blur(10px); overflow:hidden; }
+  .go.armed { color:#06121a; background:var(--cyan); border-color:var(--cyan); }
+  .go[disabled] { color:var(--dim2); border-color:var(--line); }
+  .go:active { transform:scale(.96); }
+  .go .sw { position:absolute; inset:0; opacity:0; }
+
+  /* arm switch */
+  .armbox { position:fixed; left:50%; transform:translateX(-50%); bottom:calc(92px + var(--sab)); z-index:22; display:flex; align-items:center; gap:12px; pointer-events:auto; }
+  .armbox .lbl { font-size:8px; letter-spacing:.28em; color:var(--dim); }
+  .switch { position:relative; width:56px; height:30px; border-radius:999px; border:1px solid var(--line); background:rgba(10,14,22,.7); transition:background .25s, border-color .25s; }
+  .switch .knob { position:absolute; top:3px; left:3px; width:22px; height:22px; border-radius:50%; background:#5b6472; transition:transform .25s cubic-bezier(.34,1.56,.64,1), background .25s; }
+  .switch.on { background:rgba(56,230,240,.22); border-color:var(--cyan); }
+  .switch.on .knob { transform:translateX(26px); background:var(--cyan); }
+  .switch .sw { position:absolute; inset:0; opacity:0; }
+
+  /* results */
+  #results { z-index:24; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; padding-bottom:calc(120px + var(--sab)); pointer-events:none; }
+  #results .big { font-size:20px; letter-spacing:.32em; font-weight:700; opacity:0; }
+  #results .met { margin-top:14px; display:flex; gap:22px; opacity:0; }
+  #results .met .c { text-align:center; }
+  #results .met .c .l { font-size:7.5px; letter-spacing:.2em; color:var(--dim2); }
+  #results .met .c .v { font-size:16px; font-weight:700; margin-top:3px; font-variant-numeric:tabular-nums; color:var(--amber); }
+
+  .hint { position:fixed; left:0; right:0; text-align:center; font-size:7.5px; letter-spacing:.3em; color:var(--dim2); z-index:12; pointer-events:none; }
+
+  #err { position:fixed; left:12px; right:12px; bottom:12px; font:11px var(--mono); color:#ff8d7e; white-space:pre-wrap; z-index:99; }
 </style>
 </head>
 <body>
   <canvas id="gl"></canvas>
-  <div class="hud">
+
+  <div id="bars"><div class="bar top"></div><div class="bar bot"></div></div>
+
+  <!-- persistent HUD -->
+  <div id="hud" class="hide">
     <div class="kick">A P O G E E</div>
-    <div class="sub">BENCH · TITAN-IX ARTICLE</div>
-    <div class="spec">
-      <div class="cell"><div class="lbl">REACH</div><div class="val">2,480 <small>MI</small></div></div>
-      <div class="cell"><div class="lbl">PRECISION</div><div class="val">AA</div></div>
-      <div class="cell"><div class="lbl">YIELD</div><div class="val">1.4 <small>MT</small></div></div>
+    <div class="sub" id="hud-sub">BENCH · TITAN-IX ARTICLE</div>
+    <div class="stat">
+      <div class="cell"><div class="l">REACH</div><div class="v"><span id="s-reach">0</span> <small>MI</small></div></div>
+      <div class="cell"><div class="l">PRECISION</div><div class="v" id="s-prec">—</div></div>
+      <div class="cell"><div class="l">YIELD</div><div class="v"><span id="s-yield">0</span> <small id="s-yield-u">KT</small></div></div>
     </div>
-    <div class="hint">DRAG TO ROTATE</div>
-    <a href="./strike.html" style="position:absolute; top:calc(22px + var(--sat)); right:24px; pointer-events:auto; text-decoration:none; font-size:9px; letter-spacing:.28em; color:#8b93a3; border:1px solid #2a3140; padding:7px 11px; border-radius:6px;">STRIKE&nbsp;→</a>
+    <div class="corner tl"></div><div class="corner tr"></div><div class="corner bl"></div><div class="corner br"></div>
   </div>
+
+  <!-- BENCH controls -->
+  <div id="bench" class="rail gone">
+    <div class="inner">
+      <div class="tabs" id="bench-tabs"></div>
+      <div class="chips" id="bench-chips"></div>
+    </div>
+  </div>
+
+  <!-- AIM controls -->
+  <div id="aim" class="rail gone">
+    <div class="inner">
+      <div class="val-row">
+        <div class="stepper"><div class="b" data-step="range" data-d="-1">−</div><div class="rd"><div class="n" id="aim-range">37</div><div class="u">RANGE · MI</div></div><div class="b" data-step="range" data-d="1">+</div></div>
+        <div class="stepper"><div class="b" data-step="bearing" data-d="-1">−</div><div class="rd"><div class="n" id="aim-bearing">090</div><div class="u">BEARING · °</div></div><div class="b" data-step="bearing" data-d="1">+</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ARM + LAUNCH -->
+  <div id="armbox" class="armbox gone">
+    <span class="lbl">SAFE</span>
+    <label class="switch" id="arm-switch"><input type="checkbox" class="sw" id="arm-input"><span class="knob"></span></label>
+    <span class="lbl">ARM</span>
+  </div>
+  <div id="cta-bench" class="cta gone" style="left:50%; transform:translateX(-50%);"><button class="go" id="to-aim">ARM ARTICLE&nbsp;→</button></div>
+  <div id="cta-launch" class="cta gone" style="left:50%; transform:translateX(-50%);"><label class="go" id="launch" disabled><input type="checkbox" class="sw" id="launch-sw">LAUNCH</label></div>
+  <div id="cta-back" class="cta gone" style="left:calc(16px + var(--sal));"><button class="go" id="back-bench" style="border-color:var(--line); color:var(--dim); letter-spacing:.2em; padding:15px 18px;">←&nbsp;BENCH</button></div>
+
+  <!-- RESULTS -->
+  <div id="results" class="fill gone">
+    <div class="big" id="res-title">STRIKE LOGGED</div>
+    <div class="met">
+      <div class="c"><div class="l">YIELD</div><div class="v"><span id="res-yield">0</span></div></div>
+      <div class="c"><div class="l">CRATER</div><div class="v"><span id="res-crater">0</span>m</div></div>
+      <div class="c"><div class="l">MISS</div><div class="v"><span id="res-miss">0</span>m</div></div>
+    </div>
+  </div>
+  <div id="cta-replay" class="cta gone" style="left:50%; transform:translateX(-50%);"><button class="go" id="replay">NEW ARTICLE</button></div>
+
+  <!-- BOOT -->
+  <div id="boot" class="fill">
+    <div class="word">APOGEE</div>
+    <div class="tag">TACTICAL ARTICLE PROGRAM</div>
+    <div class="begin" id="begin">TAP TO BEGIN</div>
+  </div>
+
+  <div class="hint gone" id="hint" style="bottom:calc(150px + var(--sab));">DRAG TO ROTATE</div>
   <div id="err"></div>
+
   <script src="./vendor/three.bundle.js"></script>
-  <script>
-  (function () {
-    var showErr = function (m) { document.getElementById('err').textContent = String(m); };
-    window.addEventListener('error', function (e) { showErr(e.message + '\n' + (e.error && e.error.stack || '')); });
-    try {
-      var T = window.THREE, X = window.TX;
-      var canvas = document.getElementById('gl');
-      var renderer = new T.WebGLRenderer({ canvas: canvas, antialias: true, powerPreference: 'high-performance' });
-      // iPhone 16 Pro: at 460ppi, DPR 2 is already beyond retina-sharp; DPR 3 only burns
-      // fill-rate and blocks 120fps. Cap at 2 to buy the frame budget for the full post stack.
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-      // Khronos PBR-Neutral tone mapping — built for product/hardware; keeps the alloy's
-      // albedo saturation & hue where ACES would desaturate and warm-shift the highlights.
-      renderer.toneMapping = T.NeutralToneMapping || T.ACESFilmicToneMapping;
-      renderer.toneMappingExposure = 1.0;
-      // wide-gamut P3 output — the anodized cyan + warm highlights use colours sRGB can't show.
-      // Only on a real P3 display (the device); sRGB panels keep the accurate sRGB pipeline.
-      var isP3 = false; try { isP3 = !!(window.matchMedia && window.matchMedia('(color-gamut: p3)').matches); } catch (e) {}
-      try { if (isP3 && T.DisplayP3ColorSpace) renderer.outputColorSpace = T.DisplayP3ColorSpace; } catch (e) {}
-      renderer.shadowMap.enabled = true;
-      renderer.shadowMap.type = T.PCFSoftShadowMap;
-      if (X.RectAreaLightUniformsLib) X.RectAreaLightUniformsLib.init();
-
-      var scene = new T.Scene();
-      // studio image-based lighting — real reflections on the metal
-      var pmrem = new T.PMREMGenerator(renderer);
-      var envRT = pmrem.fromScene(new X.RoomEnvironment(), 0.04);
-      scene.environment = envRT.texture;
-
-      // a soft, dark studio backdrop — a vertical gradient instead of a flat void
-      (function () {
-        var c = document.createElement('canvas'); c.width = 8; c.height = 512;
-        var g = c.getContext('2d'); var grd = g.createLinearGradient(0, 0, 0, 512);
-        grd.addColorStop(0.0, '#04050a'); grd.addColorStop(0.55, '#080a12'); grd.addColorStop(1.0, '#10131c');
-        g.fillStyle = grd; g.fillRect(0, 0, 8, 512);
-        var tex = new T.CanvasTexture(c); tex.colorSpace = T.SRGBColorSpace; scene.background = tex;
-      })();
-
-      var W = window.innerWidth, H = window.innerHeight;
-      var camera = new T.PerspectiveCamera(32, W / H, 0.1, 100);
-
-      // ---- lighting: soft studio key (area light) + cool rim + a warm kicker ----
-      var key = new T.RectAreaLight(0xfff2e6, 5.0, 7, 11);
-      key.position.set(-5.5, 6.5, 6); key.lookAt(0, 2.0, 0); scene.add(key);
-      var rim = new T.DirectionalLight(0xbcd4ff, 1.6); rim.position.set(6, 4, -6); scene.add(rim);
-      var kick = new T.DirectionalLight(0xffcaa0, 0.5); kick.position.set(4, 1.2, 5); scene.add(kick);
-      scene.add(new T.HemisphereLight(0x2a3446, 0x05070c, 0.28));
-      // a soft shadow caster
-      var sh = new T.DirectionalLight(0xffffff, 0.0); sh.position.set(-3, 9, 4); sh.castShadow = true;
-      sh.shadow.mapSize.set(2048, 2048); sh.shadow.camera.near = 1; sh.shadow.camera.far = 24;
-      sh.shadow.camera.left = -4; sh.shadow.camera.right = 4; sh.shadow.camera.top = 6; sh.shadow.camera.bottom = -3;
-      sh.shadow.bias = -0.0004; sh.shadow.radius = 6; scene.add(sh);
-
-      // ---- the bench floor: a dark stage with a soft pool of light under the article,
-      //      fading to the backdrop colour at the rim so there is no hard horizon line ----
-      var floorTex = (function () {
-        var c = document.createElement('canvas'); c.width = c.height = 512;
-        var g = c.getContext('2d');
-        g.fillStyle = '#10131c'; g.fillRect(0, 0, 512, 512);
-        var rg = g.createRadialGradient(256, 256, 20, 256, 256, 250);
-        rg.addColorStop(0.0, '#252a36'); rg.addColorStop(0.45, '#161a24'); rg.addColorStop(1.0, '#0a0c12');
-        g.fillStyle = rg; g.fillRect(0, 0, 512, 512);
-        var tx = new T.CanvasTexture(c); tx.colorSpace = T.SRGBColorSpace; return tx;
-      })();
-      var floor = new T.Mesh(new T.CircleGeometry(40, 96),
-        new T.MeshStandardMaterial({ map: floorTex, color: 0xffffff, metalness: 0.55, roughness: 0.42, envMapIntensity: 0.35 }));
-      floor.rotation.x = -Math.PI / 2; floor.position.y = -0.02; floor.receiveShadow = true; scene.add(floor);
-      scene.fog = new T.Fog(0x0a0c12, 14, 34);
-
-      // ---- materials ----
-      function titanium() { return new T.MeshPhysicalMaterial({ color: 0x83898f, metalness: 1.0, roughness: 0.42, anisotropy: 0.6, anisotropyRotation: Math.PI / 2, clearcoat: 0.25, clearcoatRoughness: 0.5, envMapIntensity: 0.85 }); }
-      function carbon() { return new T.MeshPhysicalMaterial({ color: 0x121418, metalness: 0.25, roughness: 0.4, clearcoat: 0.8, clearcoatRoughness: 0.18, envMapIntensity: 1.0 }); }
-      function brass() { return new T.MeshStandardMaterial({ color: 0xbf9d63, metalness: 1.0, roughness: 0.28, envMapIntensity: 1.1 }); }
-      function ceramic() { return new T.MeshPhysicalMaterial({ color: 0x322e2b, metalness: 0.0, roughness: 0.74, clearcoat: 0.12, clearcoatRoughness: 0.6, envMapIntensity: 0.6 }); }
-      function darkMetal() { return new T.MeshStandardMaterial({ color: 0x2e3238, metalness: 1.0, roughness: 0.5, envMapIntensity: 0.9 }); }
-      function anodized() { return new T.MeshPhysicalMaterial({ color: 0x1f6f7e, metalness: 0.7, roughness: 0.28, clearcoat: 0.5, emissive: 0x0a3540, emissiveIntensity: 0.28, envMapIntensity: 1.0 }); }
-
-      var rocket = new T.Group(); scene.add(rocket);
-      function addMesh(geo, mat, y) { var m = new T.Mesh(geo, mat); if (y != null) m.position.y = y; m.castShadow = true; m.receiveShadow = true; rocket.add(m); return m; }
-
-      // airframe: one continuous lathe profile — chamfered base, slender body, tangent-ogive nose,
-      // and a small ceramic tip formed IN THE SAME PROFILE so there is no coincident surface / pinch seam.
-      var R = 0.34, bodyTop = 3.35, noseLen = 1.25;
-      var rho = (R * R + noseLen * noseLen) / (2 * R);
-      function ogiveR(x) { return Math.sqrt(rho * rho - (noseLen - x) * (noseLen - x)) - (rho - R); } // x in [0,noseLen]
-      var prof = [];
-      prof.push(new T.Vector2(0.001, 0.0));
-      prof.push(new T.Vector2(R * 0.72, 0.0));
-      prof.push(new T.Vector2(R, 0.22));
-      prof.push(new T.Vector2(R, bodyTop));
-      var capStart = noseLen * 0.80;           // ceramic tip covers the top 20% of the ogive
-      for (var i = 1; i <= 40; i++) { var xx = i / 40 * noseLen; prof.push(new T.Vector2(Math.max(ogiveR(xx), 0.0009), bodyTop + xx)); }
-      var body = addMesh(new T.LatheGeometry(prof, 128), titanium());
-
-      // ceramic tip — same ogive curve, drawn as its own short lathe that shares the exact silhouette
-      var capProf = [];
-      for (var j = 0; j <= 16; j++) { var xc = capStart + j / 16 * (noseLen - capStart); capProf.push(new T.Vector2(Math.max(ogiveR(xc), 0.0009), bodyTop + xc)); }
-      var cap = addMesh(new T.LatheGeometry(capProf, 128), ceramic());
-      cap.scale.set(1.02, 1.0, 1.02);          // sit the ceramic a hair proud so it reads as a bonded cap, not z-fight
-
-      // machined service bands (thin, flush)
-      addMesh(new T.CylinderGeometry(R * 1.012, R * 1.012, 0.07, 128), brass(), 2.30);
-      addMesh(new T.CylinderGeometry(R * 1.010, R * 1.010, 0.04, 128), darkMetal(), 1.35);
-      // one cyan anodized signal ring — the only accent colour on the article
-      addMesh(new T.CylinderGeometry(R * 1.02, R * 1.02, 0.11, 128), anodized(), 2.85);
-
-      // motor section + flared nozzle at the base
-      addMesh(new T.CylinderGeometry(R * 0.98, R * 1.03, 0.26, 128), darkMetal(), 0.13);
-      var bellProf = [];
-      for (var b = 0; b <= 18; b++) { var t = b / 18; bellProf.push(new T.Vector2(0.12 + Math.pow(t, 1.7) * 0.28, -t * 0.42)); }
-      addMesh(new T.LatheGeometry(bellProf, 128), darkMetal(), 0.02);
-
-      // four swept fins (beveled, tucked to the motor section)
-      for (var f = 0; f < 4; f++) {
-        var shape = new T.Shape();
-        shape.moveTo(0, 0); shape.lineTo(0.5, -0.06); shape.lineTo(0.5, 0.26); shape.lineTo(0, 0.6); shape.lineTo(0, 0);
-        var fin = new T.Mesh(new T.ExtrudeGeometry(shape, { depth: 0.04, bevelEnabled: true, bevelThickness: 0.015, bevelSize: 0.018, bevelSegments: 2 }), carbon());
-        fin.position.set(0, 0.06, 0); fin.rotation.y = f * Math.PI / 2;
-        fin.translateOnAxis(new T.Vector3(0, 0, 1), R * 0.9); fin.translateOnAxis(new T.Vector3(1, 0, 0), -0.02);
-        fin.castShadow = true; rocket.add(fin);
-      }
-
-      // frame the article — full rocket with headroom, centred in portrait
-      var lookY = 2.35, camR = 10.4, theta = -0.7, phi = 0.11, vel = 0, spin = true, lastTouch = 0;
-      function place() {
-        camera.position.set(Math.sin(theta) * camR * Math.cos(phi), lookY + Math.sin(phi) * camR, Math.cos(theta) * camR * Math.cos(phi));
-        camera.lookAt(0, lookY, 0);
-      }
-      place();
-
-      // ordered dithering in every material — smooths shaded gradients before tone-mapping
-      scene.traverse(function (o) { if (o.material) { var ms = Array.isArray(o.material) ? o.material : [o.material]; ms.forEach(function (m) { if ('dithering' in m) m.dithering = true; }); } });
-
-      // ---- post: GTAO + subtle bloom + filmic grade ----
-      var composer = new X.EffectComposer(renderer);
-      composer.addPass(new X.RenderPass(scene, camera));
-      try {
-        var gtao = new X.GTAOPass(scene, camera, W, H);
-        if (gtao.updateGtaoMaterial) { gtao.output = X.GTAOPass.OUTPUT ? X.GTAOPass.OUTPUT.Default : 0; }
-        composer.addPass(gtao);
-      } catch (e) {}
-      var bloom = new X.UnrealBloomPass(new T.Vector2(W, H), 0.13, 0.45, 1.0);
-      composer.addPass(bloom);
-      // filmic grade: vignette + fine grain + gentle contrast
-      var grade = new X.ShaderPass({
-        uniforms: { tDiffuse: { value: null }, uTime: { value: 0 }, uRes: { value: new T.Vector2(W, H) } },
-        vertexShader: 'varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }',
-        fragmentShader:
-          'varying vec2 vUv; uniform sampler2D tDiffuse; uniform float uTime; uniform vec2 uRes;' +
-          'float rnd(vec2 p){ return fract(sin(dot(p, vec2(12.9898,78.233)))*43758.5453); }' +
-          'void main(){ vec3 c = texture2D(tDiffuse, vUv).rgb;' +
-          ' vec2 q = vUv - 0.5; float vig = smoothstep(1.05, 0.35, length(q)*1.35); c *= mix(0.72, 1.0, vig);' +
-          ' c = (c - 0.5) * 1.06 + 0.5;' +           // gentle contrast
-          ' float g = rnd(vUv * uRes + uTime) - 0.5; c += g * 0.028;' +   // fine grain
-          // ordered dither on the final output — breaks gradient banding on the dark OLED backdrop
-          ' float d = (rnd(gl_FragCoord.xy) - 0.5) / 255.0; c += d;' +
-          ' gl_FragColor = vec4(c, 1.0); }'
-      });
-      composer.addPass(grade);
-      composer.addPass(new X.OutputPass());
-      try { composer.addPass(new X.SMAAPass(W, H)); } catch (e) {}
-
-      function size() {
-        W = window.innerWidth; H = window.innerHeight;
-        renderer.setSize(W, H); composer.setSize(W, H);
-        camera.aspect = W / H; camera.updateProjectionMatrix();
-        grade.uniforms.uRes.value.set(W, H);
-      }
-      window.addEventListener('resize', size); size();
-
-      // drag to rotate
-      var drag = false, lx = 0, ly = 0;
-      canvas.addEventListener('pointerdown', function (e) { drag = true; lx = e.clientX; ly = e.clientY; lastTouch = performance.now(); canvas.setPointerCapture(e.pointerId); });
-      canvas.addEventListener('pointermove', function (e) { if (!drag) return; var dx = e.clientX - lx, dy = e.clientY - ly; lx = e.clientX; ly = e.clientY; theta -= dx * 0.008; phi = Math.max(-0.05, Math.min(0.85, phi + dy * 0.005)); vel = -dx * 0.008 / 0.016; lastTouch = performance.now(); });
-      canvas.addEventListener('pointerup', function () { drag = false; });
-
-      var last = performance.now();
-      function loop(now) {
-        requestAnimationFrame(loop);
-        var dt = Math.min((now - last) / 1000, 0.05); last = now;
-        if (spin && now - lastTouch > 2600) theta += dt * 0.16;
-        else if (Math.abs(vel) > 0.001) { theta += vel * dt; vel *= Math.exp(-4 * dt); }
-        place();
-        grade.uniforms.uTime.value = now * 0.001;
-        composer.render();
-      }
-      requestAnimationFrame(loop);
-      window.__ready = true;
-    } catch (e) { showErr(e.message + '\n' + (e.stack || '')); }
-  })();
-  </script>
+  <script src="./game.js"></script>
+  <script>if ('serviceWorker' in navigator) { window.addEventListener('load', function () { navigator.serviceWorker.register('./sw.js').catch(function () {}); }); }</script>
 </body>
 </html>
